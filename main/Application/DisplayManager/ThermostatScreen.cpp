@@ -3,7 +3,6 @@
 #include "ClimateManager/ClimateManager.h"
 #include "BleManager/BleManager.h"
 #include "fonts.h"   // font_temp_96, font_modes_40
-#include "esp_log.h"
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -29,6 +28,7 @@ const ModeDef MODES[4] = {
     { "Off",  "\xEF\x80\x91", 0x6B7280, ClimateMode::Off },
 };
 const char *ICON_FIRE = "\xEF\x81\xAD";
+const char *ICON_SNOW = "\xEF\x8B\x9C";
 
 constexpr uint32_t COL_BG     = 0x0B0E12;
 constexpr uint32_t COL_CARD   = 0x1B212B;
@@ -53,7 +53,9 @@ struct Ui
 {
     lv_obj_t *roomLabel = nullptr;
     lv_obj_t *setLabel = nullptr;
-    lv_obj_t *flameIcon = nullptr;
+    lv_obj_t *statusIconA = nullptr;  // primary flame/ice
+    lv_obj_t *statusArrow = nullptr;  // shown only while transitioning
+    lv_obj_t *statusIconB = nullptr;  // transition target flame/ice
     lv_obj_t *linkIcon = nullptr;
     lv_obj_t *gatewayLabel = nullptr;
     lv_obj_t *modeBtns[4] = {};
@@ -63,11 +65,69 @@ struct Ui
     int shownRoomTenths = -10000;
     int shownSetTenths = -10000;
     int shownModeIdx = -1;
-    int shownHeating = -1;
+    int shownActivity = -1;
     int shownLinked = -1;
     char shownGateway[32] = "";
 };
 Ui g;
+
+// Configure the top-bar status indicator from the gateway's activity byte:
+// a grey/coloured flame or ice, and an "A → B" icon pair while transitioning.
+void ApplyStatus(int activity)
+{
+    auto setIcon = [](lv_obj_t *o, const char *glyph, uint32_t color, bool shown) {
+        if (shown)
+        {
+            lv_label_set_text(o, glyph);
+            lv_obj_set_style_text_color(o, lv_color_hex(color), 0);
+            lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+        }
+        else
+        {
+            lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+        }
+    };
+
+    switch (activity)
+    {
+    case KC_ACTIVITY_HEATING_IDLE:
+        setIcon(g.statusIconA, ICON_FIRE, COL_MUTED, true);
+        setIcon(g.statusArrow, "", 0, false);
+        setIcon(g.statusIconB, "", 0, false);
+        break;
+    case KC_ACTIVITY_HEATING_ACTIVE:
+        setIcon(g.statusIconA, ICON_FIRE, COL_FLAME, true);
+        setIcon(g.statusArrow, "", 0, false);
+        setIcon(g.statusIconB, "", 0, false);
+        break;
+    case KC_ACTIVITY_COOLING_IDLE:
+        setIcon(g.statusIconA, ICON_SNOW, COL_MUTED, true);
+        setIcon(g.statusArrow, "", 0, false);
+        setIcon(g.statusIconB, "", 0, false);
+        break;
+    case KC_ACTIVITY_COOLING_ACTIVE:
+        setIcon(g.statusIconA, ICON_SNOW, COL_BLUE, true);
+        setIcon(g.statusArrow, "", 0, false);
+        setIcon(g.statusIconB, "", 0, false);
+        break;
+    case KC_ACTIVITY_TRANS_TO_HEAT:  // ice → flame
+        setIcon(g.statusIconA, ICON_SNOW, COL_MUTED, true);
+        setIcon(g.statusArrow, LV_SYMBOL_RIGHT, COL_MUTED, true);
+        setIcon(g.statusIconB, ICON_FIRE, COL_FLAME, true);
+        break;
+    case KC_ACTIVITY_TRANS_TO_COOL:  // flame → ice
+        setIcon(g.statusIconA, ICON_FIRE, COL_MUTED, true);
+        setIcon(g.statusArrow, LV_SYMBOL_RIGHT, COL_MUTED, true);
+        setIcon(g.statusIconB, ICON_SNOW, COL_BLUE, true);
+        break;
+    case KC_ACTIVITY_OFF:
+    default:
+        setIcon(g.statusIconA, "", 0, false);
+        setIcon(g.statusArrow, "", 0, false);
+        setIcon(g.statusIconB, "", 0, false);
+        break;
+    }
+}
 
 void render()
 {
@@ -94,10 +154,10 @@ void render()
         lv_label_set_text_fmt(g.setLabel, "%d.%d\xC2\xB0""C", setTenths / 10, abs(setTenths) % 10);
     }
 
-    if ((int)s.heating != g.shownHeating)
+    if ((int)s.activity != g.shownActivity)
     {
-        g.shownHeating = s.heating;
-        lv_obj_set_style_text_color(g.flameIcon, lv_color_hex(s.heating ? COL_FLAME : COL_CARD), 0);
+        g.shownActivity = s.activity;
+        ApplyStatus(s.activity);
     }
 
     if ((int)s.linked != g.shownLinked)
@@ -139,20 +199,7 @@ void render()
     }
 }
 
-void pollTick(lv_timer_t *)
-{
-    render();
-
-    // TEMP: touch diagnostics — logs raw indev presses while we debug the
-    // unresponsive touchscreen. Remove once touch is confirmed working.
-    lv_indev_t *indev = lv_indev_get_next(nullptr);
-    if (indev && lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED)
-    {
-        lv_point_t p;
-        lv_indev_get_point(indev, &p);
-        ESP_LOGI("TouchDebug", "pressed at %d,%d", (int)p.x, (int)p.y);
-    }
-}
+void pollTick(lv_timer_t *) { render(); }
 
 void onPlus(lv_event_t *)  { s_ctx->getClimateManager().AdjustSetpoint(+SETPOINT_STEP); render(); }
 void onMinus(lv_event_t *) { s_ctx->getClimateManager().AdjustSetpoint(-SETPOINT_STEP); render(); }
@@ -235,7 +282,18 @@ void ShowThermostatScreen(ServiceProvider &ctx)
     lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    g.flameIcon = makeLabel(bar, ICON_FIRE, &font_modes_40, COL_CARD);
+    // Status indicator: grey/coloured flame or ice, with an "A → B" icon pair
+    // while the gateway is transitioning between heating and cooling.
+    lv_obj_t *statusBox = group(bar);
+    lv_obj_set_size(statusBox, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(statusBox, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(statusBox, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(statusBox, 6, 0);
+    g.statusIconA = makeLabel(statusBox, ICON_FIRE, &font_modes_40, COL_MUTED);
+    g.statusArrow = makeLabel(statusBox, LV_SYMBOL_RIGHT, &lv_font_montserrat_20, COL_MUTED);
+    g.statusIconB = makeLabel(statusBox, ICON_SNOW, &font_modes_40, COL_BLUE);
+    ApplyStatus(KC_ACTIVITY_OFF);  // start blank until the gateway reports
+
     g.gatewayLabel = makeLabel(bar, "", &lv_font_montserrat_20, COL_MUTED);
 
     lv_obj_t *right = group(bar);

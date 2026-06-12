@@ -41,6 +41,7 @@ void ClimateManager::Init()
         if (control.mode <= (uint8_t)ClimateMode::Auto)
             state_.mode = (ClimateMode)control.mode;
         state_.heating = control.heating != 0;
+        state_.activity = control.activity;
         gatewayConfirmed_ = true;
     });
 

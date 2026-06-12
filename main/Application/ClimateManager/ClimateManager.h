@@ -4,6 +4,7 @@
 #include "rtos.h"
 #include "TemperatureSensor.h"
 #include <cstring>
+#include <cstdint>
 
 // Mode values mirror the gateway's HvacMode; the on-wire byte (see
 // KCThermoBleProtocol.h) is this enum's underlying value.
@@ -32,8 +33,9 @@ struct ClimateState
     float roomTemp = 20.0f;
     float setpoint = 20.0f;
     ClimateMode mode = ClimateMode::Heating;
-    bool heating = false;  // gateway-reported heat output
-    bool linked = false;   // connected and gateway has confirmed state
+    bool heating = false;     // gateway-reported heat output (legacy)
+    uint8_t activity = 0;     // KC_ACTIVITY_* — live HVAC state for the status icon
+    bool linked = false;      // connected and gateway has confirmed state
 };
 
 // Holds the thermostat's view of the climate state. This device is a dumb

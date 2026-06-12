@@ -59,6 +59,19 @@ struct KCThermoControl
 {
     int16_t setpointTenths;
     uint8_t mode;
-    uint8_t heating;  // heat output, drives the flame icon
+    uint8_t heating;   // legacy heat-output bool (kept for compatibility)
+    uint8_t activity;  // KCThermoActivity — live HVAC state for the status icon
 };
 #pragma pack(pop)
+
+// Values of KCThermoControl::activity (mirrors the gateway's ClimateActivity).
+enum : uint8_t
+{
+    KC_ACTIVITY_OFF            = 0,  // off / idle           -> no icon
+    KC_ACTIVITY_HEATING_IDLE   = 1,  // heating, not firing  -> grey flame
+    KC_ACTIVITY_HEATING_ACTIVE = 2,  // actively heating     -> coloured flame
+    KC_ACTIVITY_COOLING_IDLE   = 3,  // cooling, not firing  -> grey ice
+    KC_ACTIVITY_COOLING_ACTIVE = 4,  // actively cooling     -> coloured ice
+    KC_ACTIVITY_TRANS_TO_HEAT  = 5,  // switching -> heat    -> ice → flame
+    KC_ACTIVITY_TRANS_TO_COOL  = 6,  // switching -> cool    -> flame → ice
+};
