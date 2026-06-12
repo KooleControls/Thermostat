@@ -1,4 +1,4 @@
-# Embedded Code Quality Review — Strux
+# Embedded Code Quality Review — Thermostat
 
 **Date:** 2026-04-24
 **Codebase:** ESP32 / ESP-IDF 5.0+, FreeRTOS, C++17

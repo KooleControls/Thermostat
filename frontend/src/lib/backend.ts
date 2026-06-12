@@ -1,6 +1,6 @@
 // Singleton backend service — all communication over a single WebSocket.
 
-const DEV_HOST = "strux.local"
+const DEV_HOST = "thermostat.local"
 
 // ── Types ────────────────────────────────────────────────────────
 

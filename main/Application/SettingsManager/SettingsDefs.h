@@ -12,7 +12,7 @@ inline constexpr SettingDef SETTINGS_DEFS[] = {
     { "wifi.password",  SettingType::String, "WiFi Password",  "" },
 
     // Device
-    { "device.name",    SettingType::String, "Device Name",    "Strux" },
+    { "device.name",    SettingType::String, "Device Name",    "Thermostat" },
     { "device.pin",     SettingType::String, "Device PIN",     "" },
 
     // MQTT
@@ -21,7 +21,15 @@ inline constexpr SettingDef SETTINGS_DEFS[] = {
     { "mqtt.port",      SettingType::Int,    "MQTT Port",      "1883" },
     { "mqtt.user",      SettingType::String, "MQTT User",      "" },
     { "mqtt.pass",      SettingType::String, "MQTT Password",  "" },
-    { "mqtt.prefix",    SettingType::String, "MQTT Prefix",    "strux" },
+    { "mqtt.prefix",    SettingType::String, "MQTT Prefix",    "thermostat" },
+
+    // Climate
+    { "climate.tempOff", SettingType::Int,   "Room Temp Offset (0.1°C)", "0" },
+
+    // BLE gateway link (set via the on-screen config; PIN-protected)
+    { "ble.gwAddr",     SettingType::String, "Gateway BLE Address", "" },
+    { "ble.gwAddrType", SettingType::Int,    "Gateway BLE Address Type", "0" },
+    { "ble.gwName",     SettingType::String, "Gateway Name", "" },
 
     // NTP
     { "ntp.server",     SettingType::String, "NTP Server",     "pool.ntp.org" },

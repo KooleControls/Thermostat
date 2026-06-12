@@ -17,7 +17,8 @@ public:
         if constexpr (BoardConfig::LED_PIN < 0) return;
 
         gpio_config_t cfg = {};
-        cfg.pin_bit_mask = 1ULL << BoardConfig::LED_PIN;
+        // Guard the shift so the (discarded) LED_PIN < 0 case still compiles.
+        cfg.pin_bit_mask = 1ULL << (BoardConfig::LED_PIN < 0 ? 0 : BoardConfig::LED_PIN);
         cfg.mode = GPIO_MODE_OUTPUT;
         gpio_config(&cfg);
 

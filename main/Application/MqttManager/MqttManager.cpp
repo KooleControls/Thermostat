@@ -46,7 +46,7 @@ void MqttManager::Init()
     char prefix[32] = {};
     serviceProvider_.getSettingsManager().getString("mqtt.prefix", prefix, sizeof(prefix));
     if (prefix[0] == '\0')
-        snprintf(prefix, sizeof(prefix), "strux");
+        snprintf(prefix, sizeof(prefix), "thermostat");
     snprintf(baseTopic_, sizeof(baseTopic_), "%s/%s", prefix, deviceId_);
 
     StartClient();
@@ -305,12 +305,12 @@ static void WriteDeviceBlock(JsonWriter &json, const char *deviceId,
 
     json.fieldArray("ids");
     char id[32];
-    snprintf(id, sizeof(id), "strux_%s", deviceId);
+    snprintf(id, sizeof(id), "thermostat_%s", deviceId);
     json.value(id);
     json.endArray();
 
     json.field("name", deviceName);
-    json.field("mf", "Strux");
+    json.field("mf", "Thermostat");
     json.field("mdl", CONFIG_IDF_TARGET);
     json.field("sw", version);
 
@@ -328,7 +328,7 @@ void MqttManager::PublishEntityDiscovery(const char *component, const char *obje
     char deviceName[32] = {};
     serviceProvider_.getSettingsManager().getString("device.name", deviceName, sizeof(deviceName));
     if (deviceName[0] == '\0')
-        snprintf(deviceName, sizeof(deviceName), "Strux");
+        snprintf(deviceName, sizeof(deviceName), "Thermostat");
 
     char availTopic[128];
     snprintf(availTopic, sizeof(availTopic), "%s/status", baseTopic_);
@@ -338,7 +338,7 @@ void MqttManager::PublishEntityDiscovery(const char *component, const char *obje
              "homeassistant/%s/%s/%s/config", component, deviceId_, objectId);
 
     char uid[64];
-    snprintf(uid, sizeof(uid), "strux_%s_%s", deviceId_, objectId);
+    snprintf(uid, sizeof(uid), "thermostat_%s_%s", deviceId_, objectId);
 
     char buf[512];
     BufferStream stream(buf, sizeof(buf));
@@ -361,7 +361,7 @@ void MqttManager::PublishDiscovery()
     char deviceName[32] = {};
     serviceProvider_.getSettingsManager().getString("device.name", deviceName, sizeof(deviceName));
     if (deviceName[0] == '\0')
-        snprintf(deviceName, sizeof(deviceName), "Strux");
+        snprintf(deviceName, sizeof(deviceName), "Thermostat");
 
     char stateTopic[128];
     snprintf(stateTopic, sizeof(stateTopic), "%s/state", baseTopic_);
@@ -403,7 +403,7 @@ void MqttManager::PublishDiscovery()
         json.field("name", s.name);
 
         char uid[64];
-        snprintf(uid, sizeof(uid), "strux_%s_%s", deviceId_, s.objectId);
+        snprintf(uid, sizeof(uid), "thermostat_%s_%s", deviceId_, s.objectId);
         json.field("uniq_id", uid);
 
         json.field("stat_t", stateTopic);
@@ -445,7 +445,7 @@ void MqttManager::PublishDiscovery()
         json.field("name", "Reboot");
 
         char uid[64];
-        snprintf(uid, sizeof(uid), "strux_%s_reboot", deviceId_);
+        snprintf(uid, sizeof(uid), "thermostat_%s_reboot", deviceId_);
         json.field("uniq_id", uid);
 
         json.field("cmd_t", cmdTopic);

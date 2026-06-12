@@ -1,8 +1,8 @@
-# Strux
+# Thermostat
 
 *Start structured. Make it your own.*
 
-Strux is a flexible foundation for building embedded applications on ESP32. It gives you a clean, modular starting point with WiFi, a web UI, OTA updates, MQTT with Home Assistant auto-discovery, and the infrastructure to grow your project without fighting your own codebase.
+Thermostat is a flexible foundation for building embedded applications on ESP32. It gives you a clean, modular starting point with WiFi, a web UI, OTA updates, MQTT with Home Assistant auto-discovery, and the infrastructure to grow your project without fighting your own codebase.
 
 It's not a framework that forces you into rigid patterns. It's a well-organized starting point that you copy, rename, and shape into whatever you're building.
 
@@ -12,7 +12,7 @@ It's not a framework that forces you into rigid patterns. It's a well-organized 
 
 ## What's Included
 
-- **WiFi** — Station mode with automatic AP fallback (`Strux-AP`) after failed connections
+- **WiFi** — Station mode with automatic AP fallback (`Thermostat-AP`) after failed connections
 - **Web UI** — React + TypeScript dashboard served from flash, accessible from any browser
 - **OTA Updates** — Dual-partition firmware updates and independent web UI updates, no USB after initial flash
 - **MQTT** — Connects to any MQTT broker with automatic Home Assistant device discovery
@@ -27,7 +27,7 @@ It's not a framework that forces you into rigid patterns. It's a well-organized 
 |-------|-------|
 | Firmware | C++, ESP-IDF v6.0, FreeRTOS |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS, shadcn/ui |
-| Target | ESP32 (4 MB flash) |
+| Target | ESP32-S3 (4 MB flash) |
 | CI/CD | GitHub Actions — builds firmware + frontend, publishes releases |
 
 ---
@@ -35,7 +35,7 @@ It's not a framework that forces you into rigid patterns. It's a well-organized 
 ## Project Structure
 
 ```
-Strux/
+Thermostat/
 ├── main/                              # ESP-IDF firmware
 │   ├── main.cpp                       # Boot sequence — just Init() calls
 │   ├── Application/                   # Application logic (managers)
@@ -89,7 +89,7 @@ Or use the included dev container (requires Docker + VS Code with the Dev Contai
 ### Build & Flash
 
 ```bash
-idf.py set-target esp32
+idf.py set-target esp32s3
 idf.py build
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
@@ -102,7 +102,7 @@ If pnpm is not available, the firmware still builds — you just won't have a we
 
 If you just want to flash a pre-built release without installing ESP-IDF, you can use the **ESP Web Flasher** directly from your browser:
 
-1. Download the latest `Strux-factory.bin` from [GitHub Releases](https://github.com/vanBassum/Strux/releases)
+1. Download the latest `Thermostat-factory.bin` from [GitHub Releases](https://github.com/vanBassum/Thermostat/releases)
 2. Open [ESP Web Flasher](https://espressif.github.io/esptool-js/)
 3. Connect your ESP32 via USB
 4. Select the serial port, set flash offset to `0x0`, and upload the factory binary
@@ -163,7 +163,7 @@ The `main.cpp` stays clean — just `Init()` calls. Hardware drivers live in the
 
 ## Home Assistant Integration
 
-When MQTT is enabled and a broker is configured, Strux automatically publishes [MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) messages. Your device appears in Home Assistant without manual configuration.
+When MQTT is enabled and a broker is configured, Thermostat automatically publishes [MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) messages. Your device appears in Home Assistant without manual configuration.
 
 **Built-in entities:**
 
@@ -208,7 +208,7 @@ mqtt.RegisterDiscovery([this]() {
 | `mqtt.port` | 1883 | Broker port |
 | `mqtt.user` | — | Username (optional) |
 | `mqtt.pass` | — | Password (optional) |
-| `mqtt.prefix` | strux | Topic prefix (`{prefix}/{device_id}/...`) |
+| `mqtt.prefix` | thermostat | Topic prefix (`{prefix}/{device_id}/...`) |
 
 **Topic structure:**
 
@@ -231,9 +231,9 @@ The CI pipeline produces three artifacts per release:
 
 | File | Purpose |
 |------|---------|
-| `Strux-factory.bin` | Full image (bootloader + partitions + app + www) for initial flash |
-| `Strux-app.bin` | Firmware only, for OTA update via web UI |
-| `Strux-www.bin` | Web UI only, for updating the frontend independently |
+| `Thermostat-factory.bin` | Full image (bootloader + partitions + app + www) for initial flash |
+| `Thermostat-app.bin` | Firmware only, for OTA update via web UI |
+| `Thermostat-www.bin` | Web UI only, for updating the frontend independently |
 
 ---
 
@@ -241,7 +241,7 @@ The CI pipeline produces three artifacts per release:
 
 1. On boot, attempts to connect to the configured WiFi network (stored in NVS)
 2. Retries up to 3 times on failure
-3. Falls back to an open access point (`Strux-AP`) if all retries fail
+3. Falls back to an open access point (`Thermostat-AP`) if all retries fail
 4. Connect to the AP and access the web UI to configure WiFi credentials
 
 ---
@@ -254,7 +254,7 @@ All settings are stored in NVS (non-volatile storage) and configurable through t
 inline const SettingDef SETTINGS_DEFS[] = {
     { "wifi.ssid",      SettingType::String, "WiFi SSID",      "" },
     { "wifi.password",  SettingType::String, "WiFi Password",  "" },
-    { "device.name",    SettingType::String, "Device Name",    "Strux" },
+    { "device.name",    SettingType::String, "Device Name",    "Thermostat" },
     { "mqtt.enabled",   SettingType::Bool,   "MQTT Enabled",   "0" },
     { "mqtt.broker",    SettingType::String, "MQTT Broker",    "" },
     // ... add your own settings here

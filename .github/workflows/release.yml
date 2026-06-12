@@ -11,8 +11,8 @@ permissions:
 
 env:
   IDF_VERSION: "v6.0"
-  IDF_TARGET: "esp32"
-  PROJECT_NAME: "Strux"
+  IDF_TARGET: "esp32s3"
+  PROJECT_NAME: "Thermostat"
 
 jobs:
   build-and-release:

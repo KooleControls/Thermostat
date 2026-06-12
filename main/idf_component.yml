@@ -4,3 +4,6 @@ dependencies:
   espressif/mdns: ^1
   espressif/mqtt:
     version: "^1"
+  lvgl/lvgl: "^9.2"
+  espressif/esp_lvgl_port: "^2"
+  espressif/esp_lcd_touch_gt911: "^1"

@@ -49,7 +49,7 @@ void NetworkManager::Init()
     char deviceName[33] = {};
     settings.getString("device.name", deviceName, sizeof(deviceName));
     if (deviceName[0] == '\0')
-        strncpy(deviceName, "Strux", sizeof(deviceName) - 1);
+        strncpy(deviceName, "Thermostat", sizeof(deviceName) - 1);
     wifi_interface_.SetHostname(deviceName);
 
     // mDNS — <deviceName>.local
