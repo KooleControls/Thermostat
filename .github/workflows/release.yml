@@ -26,6 +26,7 @@ jobs:
         board:
           - sunton_8048s043
           - elecrow_round_2_1
+          - viewe_round_2_1
 
     steps:
       - name: Checkout
