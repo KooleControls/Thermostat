@@ -189,7 +189,11 @@ private:
             ESP_LOGE(TAG, "esp_lcd_new_panel_st7701 failed: %s", esp_err_to_name(err));
             return false;
         }
-        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
+        // With enable_io_multiplex the ST7701 hardware-reset + init sequence
+        // already ran inside esp_lcd_new_panel_st7701() (the 3-wire SPI IO is
+        // then deleted). Calling esp_lcd_panel_reset() here would re-pulse the
+        // reset GPIO and wipe that init — and panel_init() does NOT re-send it
+        // in multiplex mode — leaving the panel black. So only init the RGB bus.
         ESP_ERROR_CHECK(esp_lcd_panel_init(panel_));
         return true;
     }
