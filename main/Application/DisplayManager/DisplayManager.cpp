@@ -25,6 +25,7 @@ void DisplayManager::Init()
     }
     if (!InitLvgl()) return;
     InitTouch();  // best-effort; display still works without touch
+    InitKnob();   // best-effort; no-op on boards without a rotary knob
 
     BuildUi();
     display_.Backlight(true);  // first frame is up — light the panel
@@ -87,7 +88,34 @@ void DisplayManager::InitTouch()
     if (lvgl_port_add_touch(&touch_cfg) == nullptr)
         ESP_LOGW(TAG, "lvgl_port_add_touch failed — touch disabled");
     else
-        ESP_LOGI(TAG, "GT911 touch ready");
+        ESP_LOGI(TAG, "Touch ready");
+}
+
+void DisplayManager::InitKnob()
+{
+#ifdef BOARD_HAS_KNOB
+    if (!knob_.Init())
+    {
+        ESP_LOGW(TAG, "Knob unavailable — continuing without it");
+        return;
+    }
+
+    // Register the encoder indev and a default group, before BuildUi() so that
+    // screens adding their widgets to lv_group_get_default() become navigable.
+    if (!lvgl_port_lock(0))
+    {
+        ESP_LOGW(TAG, "Could not lock LVGL to register knob");
+        return;
+    }
+    lv_indev_t *indev = knob_.CreateLvglIndev();
+    lv_indev_set_display(indev, lvDisplay_);
+    lv_group_t *group = lv_group_create();
+    lv_group_set_default(group);
+    lv_indev_set_group(indev, group);
+    lvgl_port_unlock();
+
+    ESP_LOGI(TAG, "Rotary knob ready");
+#endif
 }
 
 void DisplayManager::BuildUi()

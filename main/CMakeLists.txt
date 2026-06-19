@@ -75,8 +75,34 @@ set(COMPONENT_REQUIRES
     lvgl__lvgl
     espressif__esp_lvgl_port
     espressif__esp_lcd_touch
-    espressif__esp_lcd_touch_gt911
 )
+
+# ── Board selection ────────────────────────────────────────────
+# Pick the target board with -DBOARD=<name>; defaults to the Sunton panel so
+# existing builds are unchanged. Each board lives in hardware/boards/<name>/
+# with its own BoardConfig.h, Display.h, Touch.h, Knob.h and a board.cmake
+# fragment that may append to BOARD_REQUIRES / BOARD_SOURCES and set
+# BOARD_HAS_KNOB.
+set(BOARD "sunton_8048s043" CACHE STRING "Target board (folder under main/hardware/boards/)")
+
+set(BOARD_DIR "${CMAKE_CURRENT_LIST_DIR}/hardware/boards/${BOARD}")
+if(NOT EXISTS "${BOARD_DIR}/board.cmake")
+    file(GLOB _available_boards RELATIVE "${CMAKE_CURRENT_LIST_DIR}/hardware/boards"
+         "${CMAKE_CURRENT_LIST_DIR}/hardware/boards/*")
+    message(FATAL_ERROR "Unknown BOARD '${BOARD}'. Available boards: ${_available_boards}")
+endif()
+
+set(BOARD_REQUIRES "")
+set(BOARD_SOURCES "")
+set(BOARD_HAS_KNOB FALSE)
+include("${BOARD_DIR}/board.cmake")
+
+# The selected board folder is the ONLY one on the include path, so headers
+# included by name (BoardConfig.h / Display.h / Touch.h / Knob.h) resolve to it.
+list(APPEND INCLUDE_DIRS_LIST "hardware/boards/${BOARD}")
+list(APPEND SOURCE_FILES_LIST ${BOARD_SOURCES})
+list(APPEND COMPONENT_REQUIRES ${BOARD_REQUIRES})
+message(STATUS "Building for BOARD=${BOARD} (knob=${BOARD_HAS_KNOB})")
 
 # Register component with ESP-IDF
 idf_component_register(
@@ -88,3 +114,10 @@ idf_component_register(
 # The generated LVGL font (font_temp_96.c) includes "lvgl.h" only when
 # LV_LVGL_H_INCLUDE_SIMPLE is defined; otherwise it uses "lvgl/lvgl.h".
 target_compile_definitions(${COMPONENT_LIB} PRIVATE LV_LVGL_H_INCLUDE_SIMPLE)
+
+# Board identity defines for the (few) code-level conditionals.
+string(TOUPPER "${BOARD}" BOARD_UPPER)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE BOARD_${BOARD_UPPER})
+if(BOARD_HAS_KNOB)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE BOARD_HAS_KNOB)
+endif()

@@ -18,6 +18,15 @@ jobs:
   build-and-release:
     runs-on: ubuntu-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        # One firmware build per supported board. Each board folder lives under
+        # main/hardware/boards/<board>/ and is selected with -DBOARD=<board>.
+        board:
+          - sunton_8048s043
+          - elecrow_round_2_1
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,34 +55,35 @@ jobs:
           target: ${{ env.IDF_TARGET }}
           command: |
             set -euo pipefail
-            idf.py set-target ${{ env.IDF_TARGET }}
-            idf.py build
+            idf.py -DBOARD=${{ matrix.board }} set-target ${{ env.IDF_TARGET }}
+            idf.py -DBOARD=${{ matrix.board }} build
             cd build && esptool.py --chip ${{ env.IDF_TARGET }} merge_bin -o merged-factory.bin -f raw @flash_args
 
       - name: Prepare release artifacts
         run: |
           set -euo pipefail
           mkdir -p dist
+          PREFIX="${{ env.PROJECT_NAME }}-${{ matrix.board }}"
 
           # Full factory image (bootloader + partition table + all partitions)
-          cp build/merged-factory.bin dist/${{ env.PROJECT_NAME }}-factory.bin
+          cp build/merged-factory.bin "dist/${PREFIX}-factory.bin"
 
           # Application-only binary (for OTA update via /api/upload/app)
-          cp build/${{ env.PROJECT_NAME }}.bin dist/${{ env.PROJECT_NAME }}-app.bin
+          cp "build/${{ env.PROJECT_NAME }}.bin" "dist/${PREFIX}-app.bin"
 
-          # WWW FAT partition image (for update via /api/upload/www)
-          cp build/www.bin dist/${{ env.PROJECT_NAME }}-www.bin
+          # WWW FAT partition image (board-independent, for update via /api/upload/www)
+          cp build/www.bin "dist/${PREFIX}-www.bin"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           body: |
-            ### Firmware files
-            - **${{ env.PROJECT_NAME }}-factory.bin** — Full factory image (bootloader + partition table + app + www). Use for initial flashing or full recovery via `esptool.py`.
-            - **${{ env.PROJECT_NAME }}-app.bin** — Application firmware only. Upload via the web UI (Firmware > Application Firmware) for OTA update.
-            - **${{ env.PROJECT_NAME }}-www.bin** — Web interface FAT image. Upload via the web UI (Firmware > WWW Partition) to update the frontend independently.
+            ### Firmware files — board `${{ matrix.board }}`
+            - **${{ env.PROJECT_NAME }}-${{ matrix.board }}-factory.bin** — Full factory image (bootloader + partition table + app + www). Use for initial flashing or full recovery via `esptool.py`.
+            - **${{ env.PROJECT_NAME }}-${{ matrix.board }}-app.bin** — Application firmware only. Upload via the web UI (Firmware > Application Firmware) for OTA update.
+            - **${{ env.PROJECT_NAME }}-${{ matrix.board }}-www.bin** — Web interface FAT image. Upload via the web UI (Firmware > WWW Partition) to update the frontend independently.
           files: |
-            dist/${{ env.PROJECT_NAME }}-factory.bin
-            dist/${{ env.PROJECT_NAME }}-app.bin
-            dist/${{ env.PROJECT_NAME }}-www.bin
+            dist/${{ env.PROJECT_NAME }}-${{ matrix.board }}-factory.bin
+            dist/${{ env.PROJECT_NAME }}-${{ matrix.board }}-app.bin
+            dist/${{ env.PROJECT_NAME }}-${{ matrix.board }}-www.bin

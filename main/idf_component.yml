@@ -6,4 +6,13 @@ dependencies:
     version: "^1"
   lvgl/lvgl: "^9.2"
   espressif/esp_lvgl_port: "^2"
-  espressif/esp_lcd_touch_gt911: "^1"
+  # Touch controllers — superset across boards. The component manager reads one
+  # manifest, so every board's touch driver is fetched; only the selected
+  # board's Touch.h #includes one, so the rest are never compiled in.
+  espressif/esp_lcd_touch_gt911: "^1"      # Sunton ESP32-8048S043
+  espressif/esp_lcd_touch_cst816s: "^1"    # Elecrow CrowPanel 2.1" (CST826, CST816 family)
+  # Panel drivers — Elecrow CrowPanel 2.1" uses an ST7701S (3-wire SPI init + RGB).
+  # esp_lcd_panel_io_additions provides the 3-wire SPI panel-IO used for the init
+  # sequence. The Sunton board uses the built-in esp_lcd RGB driver (no dep).
+  espressif/esp_lcd_st7701: "^2"
+  espressif/esp_lcd_panel_io_additions: "^1"

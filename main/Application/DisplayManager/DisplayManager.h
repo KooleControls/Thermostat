@@ -4,6 +4,7 @@
 #include "InitState.h"
 #include "Display.h"
 #include "Touch.h"
+#include "Knob.h"
 #include "lvgl.h"
 
 // DisplayManager owns the display subsystem: it brings up the panel and touch
@@ -29,6 +30,7 @@ public:
 private:
     bool InitLvgl();
     void InitTouch();
+    void InitKnob();
     void BuildUi();
 
     ServiceProvider &serviceProvider_;
@@ -36,5 +38,8 @@ private:
 
     Display display_;
     Touch touch_;
+#ifdef BOARD_HAS_KNOB
+    Knob knob_;
+#endif
     lv_display_t *lvDisplay_ = nullptr;
 };
