@@ -53,6 +53,7 @@ struct Ui
 {
     lv_obj_t *roomLabel = nullptr;
     lv_obj_t *setLabel = nullptr;
+    lv_obj_t *setArc = nullptr;   // round/knob board: setpoint ring the knob turns
     lv_obj_t *statusIconA = nullptr;  // primary flame/ice
     lv_obj_t *statusArrow = nullptr;  // shown only while transitioning
     lv_obj_t *statusIconB = nullptr;  // transition target flame/ice
@@ -152,6 +153,11 @@ void render()
     {
         g.shownSetTenths = setTenths;
         lv_label_set_text_fmt(g.setLabel, "%d.%d\xC2\xB0""C", setTenths / 10, abs(setTenths) % 10);
+#ifdef BOARD_HAS_KNOB
+        // Keep the ring in sync when the setpoint changes from the gateway.
+        // Programmatic set does not emit LV_EVENT_VALUE_CHANGED, so no feedback loop.
+        if (g.setArc) lv_arc_set_value(g.setArc, setTenths / 5);  // arc unit = 0.5 °C
+#endif
     }
 
     if ((int)s.activity != g.shownActivity)
@@ -199,10 +205,17 @@ void render()
     }
 }
 
-void pollTick(lv_timer_t *) { render(); }
+void pollTick(lv_timer_t *)
+{
+    render();
+#ifdef BOARD_HAS_KNOB
+    // Keep the encoder permanently editing the setpoint ring (a knob press would
+    // otherwise toggle out of edit mode and stop rotation from adjusting it).
+    lv_group_t *grp = lv_group_get_default();
+    if (grp && g.setArc) lv_group_set_editing(grp, true);
+#endif
+}
 
-void onPlus(lv_event_t *)  { s_ctx->getClimateManager().AdjustSetpoint(+SETPOINT_STEP); render(); }
-void onMinus(lv_event_t *) { s_ctx->getClimateManager().AdjustSetpoint(-SETPOINT_STEP); render(); }
 void onMode(lv_event_t *e)
 {
     int i = (int)(intptr_t)lv_event_get_user_data(e);
@@ -210,6 +223,23 @@ void onMode(lv_event_t *e)
     render();
 }
 void onGear(lv_event_t *) { ShowPinScreen(*s_ctx); }
+
+#ifdef BOARD_HAS_KNOB
+// Knob board: the setpoint ring fires this on rotation. Apply the difference to
+// the real setpoint (AdjustSetpoint clamps to the allowed range).
+void onArc(lv_event_t *)
+{
+    if (!g.setArc) return;
+    float want = lv_arc_get_value(g.setArc) * SETPOINT_STEP;  // arc unit = 0.5 °C
+    float cur = s_ctx->getClimateManager().GetState().setpoint;
+    float delta = want - cur;
+    if (fabsf(delta) >= 0.01f) s_ctx->getClimateManager().AdjustSetpoint(delta);
+    render();
+}
+#else
+void onPlus(lv_event_t *)  { s_ctx->getClimateManager().AdjustSetpoint(+SETPOINT_STEP); render(); }
+void onMinus(lv_event_t *) { s_ctx->getClimateManager().AdjustSetpoint(-SETPOINT_STEP); render(); }
+#endif
 
 void onScreenDelete(lv_event_t *)
 {
@@ -245,6 +275,7 @@ lv_obj_t *makeLabel(lv_obj_t *parent, const char *txt, const lv_font_t *font, ui
     return l;
 }
 
+#ifndef BOARD_HAS_KNOB
 lv_obj_t *adjustButton(lv_obj_t *parent, const char *sym, lv_event_cb_t cb)
 {
     lv_obj_t *b = lv_button_create(parent);
@@ -259,17 +290,10 @@ lv_obj_t *adjustButton(lv_obj_t *parent, const char *sym, lv_event_cb_t cb)
     lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, nullptr);
     return b;
 }
-} // namespace
 
-void ShowThermostatScreen(ServiceProvider &ctx)
+// Landscape layout (Sunton 800x480): top bar, [-] big temp [+], mode row.
+void buildLayout(lv_obj_t *scr)
 {
-    s_ctx = &ctx;
-    g = Ui();
-
-    lv_obj_t *scr = lv_obj_create(nullptr);
-    lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(scr, lv_color_hex(COL_BG), 0);
-    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(scr, 22, 0);
     lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(scr, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -373,6 +397,135 @@ void ShowThermostatScreen(ServiceProvider &ctx)
         lv_obj_add_event_cb(b, onMode, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         g.modeBtns[i] = b;
     }
+
+}
+#endif // !BOARD_HAS_KNOB
+
+#ifdef BOARD_HAS_KNOB
+// Round layout (Elecrow 480x480): a setpoint ring the knob turns, big room temp
+// in the centre, and a compact touch row of mode buttons. No +/- buttons —
+// rotation is the setpoint, touch picks the mode.
+void buildLayout(lv_obj_t *scr)
+{
+    // Setpoint ring (the knob edits this via the encoder indev). Gap at the
+    // bottom leaves room for the mode buttons.
+    lv_obj_t *arc = lv_arc_create(scr);
+    lv_obj_set_size(arc, 462, 462);
+    lv_obj_center(arc);
+    lv_arc_set_range(arc, 10, 70);        // 5.0–35.0 °C, one step = 0.5 °C
+    lv_arc_set_bg_angles(arc, 135, 45);   // open at the bottom
+    lv_arc_set_value(arc, 40);            // 20.0 °C until render() syncs it
+    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);  // knob-only; no touch drag
+    lv_obj_set_style_arc_width(arc, 12, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(arc, lv_color_hex(COL_BORDER), LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, 12, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(arc, lv_color_hex(COL_BLUE), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(arc, 0, LV_PART_KNOB);
+    lv_obj_add_event_cb(arc, onArc, LV_EVENT_VALUE_CHANGED, nullptr);
+    g.setArc = arc;
+
+    // Route the rotary encoder to the ring and keep it in edit mode.
+    lv_group_t *grp = lv_group_get_default();
+    if (grp)
+    {
+        lv_group_remove_all_objs(grp);
+        lv_group_add_obj(grp, arc);
+        lv_group_set_editing(grp, true);
+    }
+
+    // ── Top: status icon(s) + gateway name + link, centred near the top ──
+    lv_obj_t *top = group(scr);
+    lv_obj_set_size(top, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_align(top, LV_ALIGN_TOP_MID, 0, 52);
+    lv_obj_set_flex_flow(top, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(top, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(top, 6, 0);
+    g.statusIconA = makeLabel(top, ICON_FIRE, &font_modes_40, COL_MUTED);
+    g.statusArrow = makeLabel(top, LV_SYMBOL_RIGHT, &lv_font_montserrat_20, COL_MUTED);
+    g.statusIconB = makeLabel(top, ICON_SNOW, &font_modes_40, COL_BLUE);
+    g.gatewayLabel = makeLabel(top, "", &lv_font_montserrat_20, COL_MUTED);
+    g.linkIcon = makeLabel(top, LV_SYMBOL_BLUETOOTH, &lv_font_montserrat_20, COL_BORDER);
+    ApplyStatus(KC_ACTIVITY_OFF);
+
+    // ── Centre: big room temp + "Set to NN.N°C", nudged above the middle ──
+    lv_obj_t *centre = group(scr);
+    lv_obj_set_size(centre, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_align(centre, LV_ALIGN_CENTER, 0, -30);
+    lv_obj_set_flex_flow(centre, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(centre, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(centre, 2, 0);
+
+    lv_obj_t *tempRow = group(centre);
+    lv_obj_set_size(tempRow, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(tempRow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(tempRow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_column(tempRow, 6, 0);
+    g.roomLabel = makeLabel(tempRow, "--.-", &font_temp_96, COL_WHITE);
+    lv_obj_t *unit = makeLabel(tempRow, "\xC2\xB0""C", &lv_font_montserrat_28, COL_WHITE);
+    lv_obj_set_style_pad_top(unit, 14, 0);
+
+    lv_obj_t *setRow = group(centre);
+    lv_obj_set_size(setRow, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(setRow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(setRow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(setRow, 8, 0);
+    makeLabel(setRow, "Set to", &lv_font_montserrat_20, COL_MUTED);
+    g.setLabel = makeLabel(setRow, "--.-\xC2\xB0""C", &lv_font_montserrat_20, COL_BLUE);
+
+    // ── Mode buttons: compact icon + label row, centred where the circle is
+    //    still wide (below the temperature). Touch-operated. ──
+    lv_obj_t *modes = group(scr);
+    lv_obj_set_size(modes, 372, 84);
+    lv_obj_align(modes, LV_ALIGN_CENTER, 0, 118);
+    lv_obj_set_flex_flow(modes, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(modes, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(modes, 8, 0);
+
+    for (int i = 0; i < 4; ++i)
+    {
+        lv_obj_t *b = lv_button_create(modes);
+        lv_obj_set_flex_grow(b, 1);
+        lv_obj_set_height(b, lv_pct(100));
+        lv_obj_set_style_radius(b, 14, 0);
+        lv_obj_set_style_shadow_width(b, 0, 0);
+        lv_obj_set_flex_flow(b, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(b, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_row(b, 2, 0);
+
+        makeLabel(b, MODES[i].icon, &font_modes_40, COL_MUTED);          // child 0: icon
+        makeLabel(b, MODES[i].name, &lv_font_montserrat_14, COL_MUTED);  // child 1: name
+
+        lv_obj_add_event_cb(b, onMode, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        g.modeBtns[i] = b;
+    }
+
+    // ── Settings (gear): small button at the bottom of the circle ──
+    lv_obj_t *gear = lv_button_create(scr);
+    lv_obj_set_size(gear, 44, 44);
+    lv_obj_set_style_radius(gear, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(gear, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_shadow_width(gear, 0, 0);
+    lv_obj_align(gear, LV_ALIGN_BOTTOM_MID, 0, -14);
+    lv_obj_t *gearIcon = makeLabel(gear, LV_SYMBOL_SETTINGS, &lv_font_montserrat_20, COL_MUTED);
+    lv_obj_center(gearIcon);
+    lv_obj_add_event_cb(gear, onGear, LV_EVENT_CLICKED, nullptr);
+}
+#endif // BOARD_HAS_KNOB
+} // namespace
+
+void ShowThermostatScreen(ServiceProvider &ctx)
+{
+    s_ctx = &ctx;
+    g = Ui();
+
+    lv_obj_t *scr = lv_obj_create(nullptr);
+    lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(COL_BG), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+
+    buildLayout(scr);
 
     render();
     g.timer = lv_timer_create(pollTick, 250, nullptr);
