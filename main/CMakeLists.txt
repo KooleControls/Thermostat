@@ -95,6 +95,11 @@ endif()
 
 set(BOARD_SOURCES "")
 set(BOARD_HAS_KNOB FALSE)
+# Panel kind: TRUE for RGB-direct-framebuffer panels (the default, used by the
+# three RGB boards), FALSE for command-driven panels (i80/SPI, e.g. WT-SC01
+# Plus). DisplayManager branches on the BOARD_PANEL_RGB define to register the
+# correct LVGL display path (lvgl_port_add_disp_rgb vs lvgl_port_add_disp).
+set(BOARD_PANEL_RGB TRUE)
 include("${BOARD_DIR}/board.cmake")
 
 # NOTE on component REQUIRES: ESP-IDF resolves a component's REQUIRES in a
@@ -111,7 +116,7 @@ include("${BOARD_DIR}/board.cmake")
 # included by name (BoardConfig.h / Display.h / Touch.h / Knob.h) resolve to it.
 list(APPEND INCLUDE_DIRS_LIST "hardware/boards/${BOARD}")
 list(APPEND SOURCE_FILES_LIST ${BOARD_SOURCES})
-message(STATUS "Building for BOARD=${BOARD} (knob=${BOARD_HAS_KNOB})")
+message(STATUS "Building for BOARD=${BOARD} (knob=${BOARD_HAS_KNOB}, rgb_panel=${BOARD_PANEL_RGB})")
 
 # Register component with ESP-IDF
 idf_component_register(
@@ -129,4 +134,7 @@ string(TOUPPER "${BOARD}" BOARD_UPPER)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE BOARD_${BOARD_UPPER})
 if(BOARD_HAS_KNOB)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE BOARD_HAS_KNOB)
+endif()
+if(BOARD_PANEL_RGB)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE BOARD_PANEL_RGB)
 endif()

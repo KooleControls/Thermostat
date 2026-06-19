@@ -1,0 +1,11 @@
+# ──────────────────────────────────────────────────────────────
+# Per-board sdkconfig overrides for the WT-SC01 Plus.
+# Appended after the shared sdkconfig.defaults (see root CMakeLists.txt), so
+# these win over the common values.
+#
+# The shared defaults select OCTAL PSRAM (Sunton N16R8). This board's ESP32-S3
+# module has QUAD PSRAM — booting with octal mode fails with
+# "octal_psram: PSRAM chip is not connected, or wrong PSRAM line mode" and
+# aborts in a reboot loop. Switch the PSRAM line mode to quad.
+# ──────────────────────────────────────────────────────────────
+CONFIG_SPIRAM_MODE_QUAD=y

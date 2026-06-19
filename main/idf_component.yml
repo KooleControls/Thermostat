@@ -18,6 +18,10 @@ dependencies:
     version: "^1"
     rules:
       - if: "target in [esp32s3, esp32p4]"
+  espressif/esp_lcd_touch_ft5x06:          # WT-SC01 Plus FT6336U (FT5x06 family)
+    version: "^1"
+    rules:
+      - if: "target in [esp32s3, esp32p4]"
   # ST7701S (3-wire SPI init + RGB). esp_lcd_panel_io_additions provides the
   # 3-wire SPI panel-IO used for the init sequence. The Sunton board uses the
   # built-in esp_lcd RGB driver (no dep).
@@ -26,6 +30,12 @@ dependencies:
     rules:
       - if: "target in [esp32s3, esp32p4]"
   espressif/esp_lcd_panel_io_additions:
+    version: "^1"
+    rules:
+      - if: "target in [esp32s3, esp32p4]"
+  # ST7796 (WT-SC01 Plus) over an 8-bit i80/8080 bus. The driver supports both
+  # SPI and i80; this board uses the i80 path (esp_lcd_new_i80_bus).
+  espressif/esp_lcd_st7796:
     version: "^1"
     rules:
       - if: "target in [esp32s3, esp32p4]"

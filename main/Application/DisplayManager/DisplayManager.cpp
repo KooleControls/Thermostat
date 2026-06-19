@@ -45,6 +45,8 @@ bool DisplayManager::InitLvgl()
         return false;
     }
 
+#ifdef BOARD_PANEL_RGB
+    // ── RGB-direct-framebuffer panels (Sunton, Elecrow, VIEWE) ──────
     lvgl_port_display_cfg_t disp_cfg = {};
     disp_cfg.panel_handle = display_.panel();
     // Partial draw buffer (20 lines) in internal DMA RAM: rendering into a
@@ -71,6 +73,44 @@ bool DisplayManager::InitLvgl()
         ESP_LOGE(TAG, "lvgl_port_add_disp_rgb failed");
         return false;
     }
+#else
+    // ── Command-driven panels (WT-SC01 Plus: ST7796 over i80) ───────
+    // Pixels are pushed via esp_lcd_panel_draw_bitmap, so lvgl_port needs both
+    // the panel handle and the panel-IO handle (where it hooks the flush-done
+    // callback). Double-buffered partial draw buffers in internal DMA RAM let
+    // LVGL render the next chunk while the i80 DMA flushes the previous one.
+    lvgl_port_display_cfg_t disp_cfg = {};
+    disp_cfg.io_handle = display_.io();
+    disp_cfg.panel_handle = display_.panel();
+    disp_cfg.buffer_size = Display::Width() * 40;
+    disp_cfg.double_buffer = true;
+    disp_cfg.hres = Display::Width();
+    disp_cfg.vres = Display::Height();
+    disp_cfg.monochrome = false;
+    disp_cfg.color_format = LV_COLOR_FORMAT_RGB565;
+    disp_cfg.flags.buff_dma = true;
+    disp_cfg.flags.buff_spiram = false;
+    // 8-bit i80 bus sends pixels high-byte first; LVGL RGB565 is little-endian.
+    disp_cfg.flags.swap_bytes = true;
+    disp_cfg.flags.full_refresh = false;
+    // Landscape: the WT-SC01 Plus panel is native portrait 320x480; swap X/Y so
+    // it presents as 480x320. esp_lvgl_port owns the panel's swap_xy/mirror
+    // state (it re-applies these on the panel itself), so the rotation MUST be
+    // set here — not via esp_lcd_panel_swap_xy() in Display.h, which the port
+    // would clobber. Matches the proven ST7796 config in the WT32-SC01 sibling
+    // project: swap_xy only, no mirror. If the image comes out mirrored or
+    // 180°-rotated, set mirror_x/mirror_y here (NOT in Display.h).
+    disp_cfg.rotation.swap_xy = true;
+    disp_cfg.rotation.mirror_x = false;
+    disp_cfg.rotation.mirror_y = false;
+
+    lvDisplay_ = lvgl_port_add_disp(&disp_cfg);
+    if (lvDisplay_ == nullptr)
+    {
+        ESP_LOGE(TAG, "lvgl_port_add_disp failed");
+        return false;
+    }
+#endif
     return true;
 }
 
