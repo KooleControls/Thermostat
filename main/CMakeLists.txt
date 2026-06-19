@@ -69,6 +69,7 @@ set(COMPONENT_REQUIRES
     esp_driver_gpio
     esp_driver_i2c
     esp_driver_tsens
+    esp_driver_pcnt          # Elecrow rotary-knob quadrature decode (unused on Sunton)
     esp_lcd
     mdns
     espressif__mqtt
@@ -92,16 +93,24 @@ if(NOT EXISTS "${BOARD_DIR}/board.cmake")
     message(FATAL_ERROR "Unknown BOARD '${BOARD}'. Available boards: ${_available_boards}")
 endif()
 
-set(BOARD_REQUIRES "")
 set(BOARD_SOURCES "")
 set(BOARD_HAS_KNOB FALSE)
 include("${BOARD_DIR}/board.cmake")
+
+# NOTE on component REQUIRES: ESP-IDF resolves a component's REQUIRES in a
+# separate "expansion" pass that runs this CMakeLists in script mode WITHOUT
+# the -DBOARD cache var, so board.cmake can't switch REQUIRES per board there
+# (it would always see the default board). So component deps are handled by the
+# two channels that DO work regardless of board:
+#   • managed deps (panel/touch drivers) -> main/idf_component.yml
+#   • IDF built-ins (e.g. esp_driver_pcnt) -> COMPONENT_REQUIRES above
+# board.cmake is therefore limited to BOARD_SOURCES and BOARD_HAS_KNOB, which
+# are evaluated in the normal configure pass where BOARD is visible.
 
 # The selected board folder is the ONLY one on the include path, so headers
 # included by name (BoardConfig.h / Display.h / Touch.h / Knob.h) resolve to it.
 list(APPEND INCLUDE_DIRS_LIST "hardware/boards/${BOARD}")
 list(APPEND SOURCE_FILES_LIST ${BOARD_SOURCES})
-list(APPEND COMPONENT_REQUIRES ${BOARD_REQUIRES})
 message(STATUS "Building for BOARD=${BOARD} (knob=${BOARD_HAS_KNOB})")
 
 # Register component with ESP-IDF

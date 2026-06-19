@@ -127,13 +127,13 @@ private:
         rgb_cfg.timings.flags.pclk_idle_high = BoardConfig::LCD_PCLK_IDLE_HIGH;
         rgb_cfg.flags.fb_in_psram = true;
 
-        esp_lcd_st7701_vendor_config_t vendor_cfg = {};
+        st7701_vendor_config_t vendor_cfg = {};
         vendor_cfg.rgb_config = &rgb_cfg;
         // init_cmds = NULL -> use the driver's built-in ST7701 init table.
         // If the panel renders wrong, port Elecrow's init array here.
 
         esp_lcd_panel_dev_config_t panel_cfg = {};
-        panel_cfg.reset_gpio_num = -1;  // reset done via PCF8574 above
+        panel_cfg.reset_gpio_num = GPIO_NUM_NC;  // reset done via PCF8574 above
         panel_cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
         panel_cfg.bits_per_pixel = 16;
         panel_cfg.vendor_config = &vendor_cfg;
