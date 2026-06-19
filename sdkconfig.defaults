@@ -1,3 +1,9 @@
+# Target — both supported boards are ESP32-S3. Setting this here makes a bare
+# CMake configure (e.g. the IDE build task) pick esp32s3 without a manual
+# `idf.py set-target`. The component manager also reads it for dependency
+# resolution (esp_lcd_st7701 / cst816s only publish esp32s3/p4 variants).
+CONFIG_IDF_TARGET="esp32s3"
+
 # Partition table
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
