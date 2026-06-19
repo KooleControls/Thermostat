@@ -4,10 +4,12 @@
 #include "driver/gpio.h"
 #include "esp_lcd_panel_rgb.h"
 #include "esp_lcd_panel_ops.h"
-#include "esp_lcd_st7701.h"
-#include "esp_lcd_panel_io_additions.h"
+#include "esp_lcd_st7701.h"   // only for the st7701_lcd_init_cmd_t struct type
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_rom_sys.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 // ST7701S init sequence for this exact panel, transcribed from VIEWE's ESP-IDF
 // BSP (bsp_lcd.c). The 0xFF writes are CMD2 bank-selects and must stay ordered.
@@ -19,7 +21,7 @@ static const st7701_lcd_init_cmd_t VIEWE_ST7701_INIT[] = {
     {0xC0, (uint8_t[]){0x3B, 0x00}, 2, 0},
     {0xC1, (uint8_t[]){0x0B, 0x02}, 2, 0},
     {0xC2, (uint8_t[]){0x07, 0x02}, 2, 0},
-    {0xC7, (uint8_t[]){0x04}, 1, 0},
+    {0xC7, (uint8_t[]){0x00}, 1, 0},    // SDIR: horizontal scan direction (0x00<->0x04 un-mirrors L/R)
     {0xCC, (uint8_t[]){0x10}, 1, 0},
     {0xCD, (uint8_t[]){0x08}, 1, 0},
     {0xB0, (uint8_t[]){0x00, 0x11, 0x16, 0x0E, 0x11, 0x06, 0x05, 0x09, 0x08, 0x21, 0x06, 0x13, 0x10, 0x29, 0x31, 0x18}, 16, 0},
@@ -57,23 +59,21 @@ static const st7701_lcd_init_cmd_t VIEWE_ST7701_INIT[] = {
     {0xE8, (uint8_t[]){0x00, 0x0C}, 2, 10},
     {0xE8, (uint8_t[]){0x00, 0x00}, 2, 0},
     {0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x00}, 5, 0},
-    {0x36, (uint8_t[]){0x00}, 1, 0},
-    {0x3A, (uint8_t[]){0x77}, 1, 0},
+    {0x36, (uint8_t[]){0x00}, 1, 0},    // MADCTL (ignored for scan/color in RGB mode; see 0xC7)
+    {0x3A, (uint8_t[]){0x77}, 1, 0},    // COLMOD (vendor value)
     {0x29, (uint8_t[]){0x00}, 0, 20},   // display on
 };
 
 // ──────────────────────────────────────────────────────────────
 // ST7701S 480x480 round RGB panel for the VIEWE UEDX48480021-MD80ET.
 //
-// The ST7701S is configured over a 3-wire SPI init sequence and then streams
-// pixels over a 16-bit RGB565 parallel bus. The SPI SCK/SDA pins are shared
-// with two RGB data lines, so enable_io_multiplex lets the driver release them
-// to the RGB bus after the init sequence (CS stays dedicated). Panel reset is a
-// direct GPIO; the backlight is active-low.
-//
-// ⚠ Bring-up notes (untested on hardware): if the panel renders wrong, the
-// usual suspects are the 3-wire SPI mode (MODE3 here), 0x3A pixel format
-// (0x77), and the 0xEB byte count (vendor source is ambiguous, 7 used here).
+// This mirrors the vendor's own ESP-IDF BSP exactly: the ST7701S init sequence
+// is pushed over a manually bit-banged 9-bit 3-wire SPI (CS/SCK/SDA), then SCK
+// and SDA are released back to the RGB bus (they double as two RGB data lines),
+// and a plain esp_lcd RGB panel streams pixels. We deliberately do NOT use the
+// esp_lcd_st7701 component here — it injects its own COLMOD/MADCTL before the
+// init, which corrupted the colours on this panel. Panel reset is a direct
+// GPIO (active low); backlight is active-low.
 // ──────────────────────────────────────────────────────────────
 
 class Display
@@ -99,6 +99,77 @@ public:
     static constexpr int Height() { return BoardConfig::LCD_V_RES; }
 
 private:
+    // ── Bit-banged 9-bit 3-wire SPI (D/C in bit 8), SPI MODE3 (idle high) ──
+    static void Sck(int v) { gpio_set_level((gpio_num_t)BoardConfig::LCD_SPI_SCK, v); }
+    static void Sda(int v) { gpio_set_level((gpio_num_t)BoardConfig::LCD_SPI_SDA, v); }
+    static void Cs(int v)  { gpio_set_level((gpio_num_t)BoardConfig::LCD_SPI_CS, v); }
+
+    static void SpiWrite9(uint16_t v)  // 9 bits, MSB first; bit 8 = D/C
+    {
+        for (int n = 0; n < 9; ++n)
+        {
+            Sda((v & 0x0100) ? 1 : 0);
+            v <<= 1;
+            Sck(0);
+            esp_rom_delay_us(10);
+            Sck(1);
+            esp_rom_delay_us(10);
+        }
+    }
+
+    // One CS-framed 9-bit word — matches the vendor, which pulses CS per byte
+    // (cmd and EACH data byte get their own CS low/high). The esp_lcd 3-wire
+    // component (and holding CS across a whole command) latches differently and
+    // corrupts this panel's init.
+    static void Xfer(uint16_t v9)
+    {
+        Cs(0);
+        esp_rom_delay_us(10);
+        SpiWrite9(v9);
+        esp_rom_delay_us(10);
+        Cs(1);
+        Sck(1);
+        Sda(1);
+        esp_rom_delay_us(10);
+    }
+
+    void SendInit()
+    {
+        // CS/SCK/SDA + RST as outputs.
+        gpio_config_t io = {};
+        io.mode = GPIO_MODE_OUTPUT;
+        io.pin_bit_mask = (1ULL << BoardConfig::LCD_SPI_CS) | (1ULL << BoardConfig::LCD_SPI_SCK) |
+                          (1ULL << BoardConfig::LCD_SPI_SDA) | (1ULL << BoardConfig::LCD_PIN_RST);
+        gpio_config(&io);
+
+        Cs(1); Sck(1); Sda(1);
+
+        // Hardware reset (active low).
+        gpio_set_level((gpio_num_t)BoardConfig::LCD_PIN_RST, 1);
+        vTaskDelay(pdMS_TO_TICKS(10));
+        gpio_set_level((gpio_num_t)BoardConfig::LCD_PIN_RST, 0);
+        vTaskDelay(pdMS_TO_TICKS(10));
+        gpio_set_level((gpio_num_t)BoardConfig::LCD_PIN_RST, 1);
+        vTaskDelay(pdMS_TO_TICKS(120));
+
+        // Push the init table: command (D/C=0), then its data bytes (D/C=1).
+        // Each byte is its own CS-framed word (vendor behaviour).
+        const size_t n = sizeof(VIEWE_ST7701_INIT) / sizeof(VIEWE_ST7701_INIT[0]);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const st7701_lcd_init_cmd_t &c = VIEWE_ST7701_INIT[i];
+            Xfer((uint16_t)c.cmd);  // bit 8 = 0 -> command
+            const uint8_t *d = (const uint8_t *)c.data;
+            for (size_t j = 0; j < c.data_bytes; ++j)
+                Xfer(0x0100 | d[j]);  // bit 8 = 1 -> data
+            if (c.delay_ms) vTaskDelay(pdMS_TO_TICKS(c.delay_ms));
+        }
+
+        // Release SCK/SDA — they double as RGB data lines (GPIO13/12). CS stays.
+        gpio_reset_pin((gpio_num_t)BoardConfig::LCD_SPI_SCK);
+        gpio_reset_pin((gpio_num_t)BoardConfig::LCD_SPI_SDA);
+    }
+
     bool InitBacklight()
     {
         gpio_config_t bk = {};
@@ -115,34 +186,11 @@ private:
 
     bool InitPanel()
     {
-        // 3-wire SPI panel IO for the ST7701S init sequence.
-        spi_line_config_t line_config = {};
-        line_config.cs_io_type = IO_TYPE_GPIO;
-        line_config.cs_gpio_num = (gpio_num_t)BoardConfig::LCD_SPI_CS;
-        line_config.scl_io_type = IO_TYPE_GPIO;
-        line_config.scl_gpio_num = (gpio_num_t)BoardConfig::LCD_SPI_SCK;
-        line_config.sda_io_type = IO_TYPE_GPIO;
-        line_config.sda_gpio_num = (gpio_num_t)BoardConfig::LCD_SPI_SDA;
-        line_config.io_expander = nullptr;
+        // 1) Bit-bang the ST7701 init over 3-wire SPI, then free SCK/SDA.
+        SendInit();
 
-        esp_lcd_panel_io_3wire_spi_config_t io_config = {};
-        io_config.line_config = line_config;
-        io_config.expect_clk_speed = PANEL_IO_3WIRE_SPI_CLK_MAX;
-        io_config.spi_mode = 3;   // ST7701 3-wire SPI (idle-high, rising edge)
-        io_config.lcd_cmd_bytes = 1;
-        io_config.lcd_param_bytes = 1;
-        io_config.flags.use_dc_bit = 1;
-        io_config.flags.del_keep_cs_inactive = 1;
-
-        esp_lcd_panel_io_handle_t io_handle = nullptr;
-        esp_err_t err = esp_lcd_new_panel_io_3wire_spi(&io_config, &io_handle);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "3-wire SPI IO init failed: %s", esp_err_to_name(err));
-            return false;
-        }
-
-        // RGB data bus config (consumed by the ST7701 driver via vendor_config).
+        // 2) Plain RGB panel over the 16-bit parallel bus (SCK/SDA now reused
+        //    as two of the RGB data lines). No esp_lcd_st7701 component.
         esp_lcd_rgb_panel_config_t rgb_cfg = {};
         rgb_cfg.clk_src = LCD_CLK_SRC_DEFAULT;
         rgb_cfg.data_width = 16;
@@ -169,31 +217,13 @@ private:
         rgb_cfg.timings.flags.pclk_idle_high = BoardConfig::LCD_PCLK_IDLE_HIGH;
         rgb_cfg.flags.fb_in_psram = true;
 
-        st7701_vendor_config_t vendor_cfg = {};
-        vendor_cfg.rgb_config = &rgb_cfg;
-        vendor_cfg.init_cmds = VIEWE_ST7701_INIT;
-        vendor_cfg.init_cmds_size = sizeof(VIEWE_ST7701_INIT) / sizeof(VIEWE_ST7701_INIT[0]);
-        // SCK/SDA are shared with RGB data lines — release the panel IO (and
-        // those pins, keeping CS) to the RGB bus once the init has run.
-        vendor_cfg.flags.enable_io_multiplex = 1;
-
-        esp_lcd_panel_dev_config_t panel_cfg = {};
-        panel_cfg.reset_gpio_num = (gpio_num_t)BoardConfig::LCD_PIN_RST;  // direct GPIO, active low
-        panel_cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
-        panel_cfg.bits_per_pixel = 16;
-        panel_cfg.vendor_config = &vendor_cfg;
-
-        err = esp_lcd_new_panel_st7701(io_handle, &panel_cfg, &panel_);
+        esp_err_t err = esp_lcd_new_rgb_panel(&rgb_cfg, &panel_);
         if (err != ESP_OK)
         {
-            ESP_LOGE(TAG, "esp_lcd_new_panel_st7701 failed: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "esp_lcd_new_rgb_panel failed: %s", esp_err_to_name(err));
             return false;
         }
-        // With enable_io_multiplex the ST7701 hardware-reset + init sequence
-        // already ran inside esp_lcd_new_panel_st7701() (the 3-wire SPI IO is
-        // then deleted). Calling esp_lcd_panel_reset() here would re-pulse the
-        // reset GPIO and wipe that init — and panel_init() does NOT re-send it
-        // in multiplex mode — leaving the panel black. So only init the RGB bus.
+        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
         ESP_ERROR_CHECK(esp_lcd_panel_init(panel_));
         return true;
     }

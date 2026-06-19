@@ -33,7 +33,7 @@ namespace BoardConfig
     static constexpr int LCD_V_RES = 480;
 
     // Timings from the vendor BSP "with-touch" profile.
-    static constexpr int LCD_PIXEL_CLOCK_HZ = 18000000;
+    static constexpr int LCD_PIXEL_CLOCK_HZ = 26000000;  // vendor value (fixes artifacts)
     static constexpr bool LCD_PCLK_ACTIVE_NEG = false;   // rising edge, not inverted
     static constexpr bool LCD_PCLK_IDLE_HIGH  = false;
 
@@ -65,10 +65,18 @@ namespace BoardConfig
     //   data[0..4]  = B0..B4
     //   data[5..10] = G0..G5
     //   data[11..15]= R0..R4
+    // Per-line probe on this (clone) board showed the bus is wired:
+    //   IO21,47,48,45,38,39 -> BLUE (6 lines)
+    //   IO40,41,42,2,1       -> GREEN (5 lines)
+    //   IO10,11,12,13,14     -> "dark" group (where RED should be)
+    // esp_lcd RGB565 slots are data[0..4]=B(5), data[5..10]=G(6), data[11..15]=R(5).
+    // Blue has 6 physical lines but the B slot is 5, and green has 5 lines but the
+    // G slot is 6 — so the spare blue line (IO39) rides in the green-LSB slot
+    // (minor tint). Intra-channel order is arbitrary (UI uses solid colors).
     static constexpr int LCD_DATA_PINS[16] = {
-        10, 11, 12, 13, 14,     // B0..B4
-        39, 38, 45, 48, 47, 21, // G0..G5
-        40, 41, 42, 2, 1,       // R0..R4
+        21, 47, 48, 45, 38,     // B0..B4  (blue)
+        39, 40, 41, 42, 2, 1,   // G0..G5  (IO39 spare-blue as green LSB + 5 green)
+        10, 11, 12, 13, 14,     // R0..R4  (the "dark" group — test if it's red)
     };
 
     // ── Rotary knob (all direct GPIO) ──────────────────────────────
