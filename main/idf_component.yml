@@ -39,3 +39,11 @@ dependencies:
     version: "^1"
     rules:
       - if: "target in [esp32s3, esp32p4]"
+  # Waveshare ESP32-S3-Touch-LCD-4: a CH32V003 MCU acts as the I2C IO expander
+  # (LCD/touch reset, system power-enable, backlight PWM). Waveshare's custom
+  # driver presents the standard esp_io_expander API over the new i2c_master
+  # bus, and pulls in espressif/esp_io_expander transitively. esp32s3-only.
+  waveshare/custom_io_expander_ch32v003:
+    version: "^2"
+    rules:
+      - if: "target in [esp32s3]"

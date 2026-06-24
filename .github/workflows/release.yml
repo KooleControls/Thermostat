@@ -28,6 +28,7 @@ jobs:
           - elecrow_round_2_1
           - viewe_round_2_1
           - wt_sc01_plus
+          - waveshare_s3_touch_lcd_4
 
     steps:
       - name: Checkout
