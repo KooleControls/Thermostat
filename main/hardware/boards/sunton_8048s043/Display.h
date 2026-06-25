@@ -1,11 +1,9 @@
 #pragma once
 
 #include "BoardConfig.h"
+#include "drivers/RgbPanel.h"
 #include "driver/gpio.h"
-#include "esp_lcd_panel_rgb.h"
-#include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
-#include "esp_err.h"
 
 // ──────────────────────────────────────────────────────────────
 // RGB LCD panel + backlight driver for the ESP32-8048S043.
@@ -27,7 +25,7 @@ public:
         return InitPanel();
     }
 
-    esp_lcd_panel_handle_t panel() const { return panel_; }
+    esp_lcd_panel_handle_t panel() const { return drv_.panel(); }
 
     void Backlight(bool on)
     {
@@ -55,44 +53,27 @@ private:
 
     bool InitPanel()
     {
-        esp_lcd_rgb_panel_config_t cfg = {};
+        RgbPanelConfig cfg{};
+        cfg.de = (gpio_num_t)BoardConfig::LCD_PIN_DE;
+        cfg.vsync = (gpio_num_t)BoardConfig::LCD_PIN_VSYNC;
+        cfg.hsync = (gpio_num_t)BoardConfig::LCD_PIN_HSYNC;
+        cfg.pclk = (gpio_num_t)BoardConfig::LCD_PIN_PCLK;
+        cfg.data_pins = BoardConfig::LCD_DATA_PINS;
+        cfg.h_res = BoardConfig::LCD_H_RES;
+        cfg.v_res = BoardConfig::LCD_V_RES;
+        cfg.pclk_hz = BoardConfig::LCD_PIXEL_CLOCK_HZ;
+        cfg.hsync_pulse_width = BoardConfig::LCD_HSYNC_PULSE_WIDTH;
+        cfg.hsync_back_porch = BoardConfig::LCD_HSYNC_BACK_PORCH;
+        cfg.hsync_front_porch = BoardConfig::LCD_HSYNC_FRONT_PORCH;
+        cfg.vsync_pulse_width = BoardConfig::LCD_VSYNC_PULSE_WIDTH;
+        cfg.vsync_back_porch = BoardConfig::LCD_VSYNC_BACK_PORCH;
+        cfg.vsync_front_porch = BoardConfig::LCD_VSYNC_FRONT_PORCH;
+        cfg.pclk_active_neg = BoardConfig::LCD_PCLK_ACTIVE_NEG;
+        cfg.pclk_idle_high = BoardConfig::LCD_PCLK_IDLE_HIGH;
         cfg.clk_src = LCD_CLK_SRC_DEFAULT;
-        cfg.data_width = 16;
-        cfg.num_fbs = 1;                                       // single framebuffer in PSRAM
-        cfg.bounce_buffer_size_px = BoardConfig::LCD_H_RES * 10;  // anti-glitch (10 lines)
         cfg.dma_burst_size = 64;
-        cfg.hsync_gpio_num = (gpio_num_t)BoardConfig::LCD_PIN_HSYNC;
-        cfg.vsync_gpio_num = (gpio_num_t)BoardConfig::LCD_PIN_VSYNC;
-        cfg.de_gpio_num = (gpio_num_t)BoardConfig::LCD_PIN_DE;
-        cfg.pclk_gpio_num = (gpio_num_t)BoardConfig::LCD_PIN_PCLK;
-        cfg.disp_gpio_num = GPIO_NUM_NC;
-        for (int i = 0; i < 16; ++i)
-            cfg.data_gpio_nums[i] = (gpio_num_t)BoardConfig::LCD_DATA_PINS[i];
-
-        cfg.timings.pclk_hz = BoardConfig::LCD_PIXEL_CLOCK_HZ;
-        cfg.timings.h_res = BoardConfig::LCD_H_RES;
-        cfg.timings.v_res = BoardConfig::LCD_V_RES;
-        cfg.timings.hsync_pulse_width = BoardConfig::LCD_HSYNC_PULSE_WIDTH;
-        cfg.timings.hsync_back_porch = BoardConfig::LCD_HSYNC_BACK_PORCH;
-        cfg.timings.hsync_front_porch = BoardConfig::LCD_HSYNC_FRONT_PORCH;
-        cfg.timings.vsync_pulse_width = BoardConfig::LCD_VSYNC_PULSE_WIDTH;
-        cfg.timings.vsync_back_porch = BoardConfig::LCD_VSYNC_BACK_PORCH;
-        cfg.timings.vsync_front_porch = BoardConfig::LCD_VSYNC_FRONT_PORCH;
-        cfg.timings.flags.pclk_active_neg = BoardConfig::LCD_PCLK_ACTIVE_NEG;
-        cfg.timings.flags.pclk_idle_high = BoardConfig::LCD_PCLK_IDLE_HIGH;
-
-        cfg.flags.fb_in_psram = true;
-
-        esp_err_t err = esp_lcd_new_rgb_panel(&cfg, &panel_);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "esp_lcd_new_rgb_panel failed: %s", esp_err_to_name(err));
-            return false;
-        }
-        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
-        ESP_ERROR_CHECK(esp_lcd_panel_init(panel_));
-        return true;
+        return drv_.Init(cfg);
     }
 
-    esp_lcd_panel_handle_t panel_ = nullptr;
+    RgbPanel drv_;
 };
