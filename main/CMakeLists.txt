@@ -15,7 +15,6 @@ set(SOURCE_FILES_LIST
     "Application/MqttManager/MqttManager.cpp"
     "Application/BleManager/BleManager.cpp"
     "Application/ClimateManager/ClimateManager.cpp"
-    "Application/ClimateManager/TemperatureSensor.cpp"
     "Application/DeviceManager/DeviceManager.cpp"
     "Application/DisplayManager/DisplayManager.cpp"
     "Application/DisplayManager/ThermostatScreen.cpp"

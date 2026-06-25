@@ -2,7 +2,7 @@
 
 #include "ServiceProvider.h"
 #include "rtos.h"
-#include "TemperatureSensor.h"
+#include "AmbientSensor.h"   // board-provided room temperature/humidity sensor HAL
 #include <cstring>
 #include <cstdint>
 
@@ -31,6 +31,7 @@ constexpr const char *ClimateModeToString(ClimateMode mode)
 struct ClimateState
 {
     float roomTemp = 20.0f;
+    float roomHumidity = -1.0f;  // %RH, or <0 when the board has no humidity sensor
     float setpoint = 20.0f;
     ClimateMode mode = ClimateMode::Heating;
     bool heating = false;     // gateway-reported heat output (legacy)
@@ -73,10 +74,8 @@ private:
     mutable RecursiveMutex mutex_;
     Timer pollTimer_;
 
-    InternalTemperatureSensor internalSensor_;
-    FixedTemperatureSensor fixedSensor_{20.0f};
-    ITemperatureSensor *sensor_ = &fixedSensor_;
-    float tempOffset_ = 0.0f;
+    AmbientSensor sensor_;     // board-provided HAL (internal die sensor, AHT20, …)
+    float tempOffset_ = 0.0f;  // DefaultOffsetC() + user NVS fine-offset
 
     ClimateState state_;
     bool gatewayConfirmed_ = false;  // a control write has been received

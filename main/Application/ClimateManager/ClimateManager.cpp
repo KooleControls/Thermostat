@@ -19,19 +19,15 @@ void ClimateManager::Init()
         return;
     }
 
-    // DEMO FUDGE: there's no real room sensor yet, so we read the ESP32-S3
-    // internal die sensor, which runs ~20-24 °C above room temperature. Apply
-    // a fixed base correction so the test scenario lands near room temp. The
-    // climate.tempOff NVS setting is added on top for fine adjustment.
-    // Remove this base offset once a real room-temperature sensor is wired in.
-    constexpr float DemoBaseOffsetC = -23.0f;
+    // The board's Sensor HAL supplies a nominal base offset (0 for a real
+    // ambient sensor like the AHT20; a coarse self-heating correction for the
+    // internal die-sensor fallback). The climate.tempOff NVS setting is added
+    // on top for per-unit fine adjustment.
     int offsetTenths = serviceProvider_.getSettingsManager().getInt("climate.tempOff", 0);
-    tempOffset_ = DemoBaseOffsetC + offsetTenths / 10.0f;
+    tempOffset_ = sensor_.DefaultOffsetC() + offsetTenths / 10.0f;
 
-    if (internalSensor_.Init())
-        sensor_ = &internalSensor_;
-    else
-        ESP_LOGW(TAG, "No temperature sensor available, using fixed 20.0°C");
+    if (!sensor_.Init())
+        ESP_LOGW(TAG, "No temperature sensor available, holding 20.0°C");
 
     // Authoritative state pushed by the gateway (runs on the NimBLE host task).
     serviceProvider_.getBleManager().SetControlHandler([this](const KCThermoControl &control)
@@ -53,8 +49,9 @@ void ClimateManager::Init()
 
     init.SetReady();
     int totalTenths = (int)lroundf(tempOffset_ * 10.0f);
-    ESP_LOGI(TAG, "Initialized (sensor: %s, total offset: %d.%d°C)",
-             sensor_ == &internalSensor_ ? "internal" : "fixed",
+    ESP_LOGI(TAG, "Initialized (sensor: %s%s, total offset: %d.%d°C)",
+             sensor_.ok() ? "present" : "none",
+             sensor_.HasHumidity() ? "+humidity" : "",
              totalTenths / 10, abs(totalTenths) % 10);
 }
 
@@ -94,14 +91,19 @@ void ClimateManager::SetMode(ClimateMode mode)
 void ClimateManager::PollSensor()
 {
     float celsius = 0.0f;
-    if (!sensor_->Read(celsius))
+    if (!sensor_.ReadTemperature(celsius))
         return;
     celsius += tempOffset_;
+
+    float humidity = -1.0f;
+    bool haveHumidity = sensor_.HasHumidity() && sensor_.ReadHumidity(humidity);
 
     bool publish;
     {
         LOCK(mutex_);
         state_.roomTemp = celsius;
+        if (haveHumidity)
+            state_.roomHumidity = humidity;
         pollsSincePublish_++;
         publish = pollsSincePublish_ >= PublishEveryNthPoll ||
                   fabsf(celsius - lastPublishedTemp_) >= PublishDelta;

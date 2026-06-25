@@ -19,6 +19,8 @@
 # Build artifacts and directories
 **/build/
 build/
+# Out-of-tree per-board build dirs (e.g. build_diyless)
+build_*/
 *.o
 *.a
 *.out
@@ -31,6 +33,8 @@ build/
 flasher_args.json # Generated in build directory
 sdkconfig.old
 sdkconfig
+# Generated per-board configs (sdkconfig.defaults.* stay tracked)
+sdkconfig_*
 
 # ESP-IDF dependencies
 # For older versions or manual component management

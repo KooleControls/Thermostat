@@ -1,0 +1,17 @@
+# ──────────────────────────────────────────────────────────────
+# Per-board sdkconfig overrides for the DIYLESS Thermostat 3 (hw v3.3).
+# Appended after the shared sdkconfig.defaults (see root CMakeLists.txt), so
+# these win over the common values.
+#
+# This board has 8 MB flash (the shared defaults assume the Sunton's 16 MB).
+# The shared 16 MB partition table ends at 0x820000 and would not fit, so use
+# an 8 MB layout. PSRAM stays OCTAL (matches this ESP32-S3's embedded 8 MB).
+# ──────────────────────────────────────────────────────────────
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_8mb.csv"
+
+# Console on the USB-Serial/JTAG, NOT UART0. On this board UART0's default pins
+# are repurposed: GPIO43 is the LCD reset and GPIO44 is the STM32 boot pin, so a
+# UART0 console bit-bangs log traffic onto the panel reset line and corrupts the
+# display. The stock firmware logs over USB-Serial/JTAG for the same reason.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
