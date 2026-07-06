@@ -19,10 +19,18 @@ wire, full boiler status/diagnostics read back, remote setpoint override
 ## Decisions
 
 - **`OtLink` role interface** (3 methods: `Ready`/`Transaction`/`Recover`,
-  see sketch). The ported `Stm32OpenThermLink` implements it; `MockOtLink`
-  (never ready) binds on boards without OT hardware. This dissolves the
-  demo's `#ifdef BOARD_DIYLESS_THERMOSTAT_3` coupling — OpenThermManager is
-  plain application code on every board.
+  see sketch). The ported `Stm32OpenThermLink` implements it. This dissolves
+  the demo's `#ifdef BOARD_DIYLESS_THERMOSTAT_3` coupling — OpenThermManager
+  is plain application code.
+- **The esp32_devkit board is dropped (amendment, Bas).** This product *is*
+  the DIYLESS T3; no other board means **no mocks at all** (`MockOtLink`
+  never gets written; the orphaned Led example — `interfaces/Led.h`,
+  `GpioLed.h`, `MockLed.h` — goes with the devkit folder).
+  `diyless_thermostat_3` becomes the default `BOARD`, so the single build
+  dir `build/` (esp32s3) replaces the `-B build_diyless` /
+  `-DSDKCONFIG=sdkconfig_diyless` dance; CLAUDE.md build docs shrink
+  accordingly. Future strux merges show devkit files as delete-conflicts —
+  resolve keep-deleted, same policy as the pruned template backlog.
 - **Driver is a port, not a rewrite.** `Stm32OpenThermLink` (334 lines,
   clean-room nibble protocol, proven in RA2-398) moves from the old branch
   into `hardware/drivers/`, gaining only `: public OtLink` + the interface
@@ -60,9 +68,8 @@ wire, full boiler status/diagnostics read back, remote setpoint override
 |---|---|
 | `main/hardware/interfaces/OtLink.h` | Role interface (per sketch). |
 | `main/hardware/drivers/Stm32OpenThermLink.h` | Ported from `feature/ot-thermostat-dropin`, implements `OtLink`. |
-| `main/hardware/drivers/MockOtLink.h` | Never-ready stub for boards without OT hardware. |
 | `main/hardware/boards/diyless_thermostat_3/Board.h/.cpp` | Own `Stm32OpenThermLink`; STM32 reset + handshake in `Init()`; `GetOtLink()`. |
-| `main/hardware/boards/esp32_devkit/Board.h` | `GetOtLink()` returning a `MockOtLink` member. |
+| **Deleted** | `main/hardware/boards/esp32_devkit/` (whole folder), `interfaces/Led.h`, `drivers/GpioLed.h`, `drivers/MockLed.h`; default `BOARD` → `diyless_thermostat_3` (root + main CMakeLists); CLAUDE.md dual-variant build section replaced by the single-target flow; `docs/sketches/opentherm/` removed once the real headers land. |
 | `main/Application/OpenThermManager/OpenThermManager.h/.cpp` | Manager per sketch: 500 ms master loop, demand/state structs, commands. |
 | `main/Application/OpenThermManager/OtFrame.h` | 32-bit frame build/parse: parity, msg-type, data-ID, f8.8 (~40 lines). |
 | Wiring | `ServiceProvider.h`, `ApplicationContext.h`, `main.cpp` (Init after Board), `main/CMakeLists.txt`. |
@@ -81,8 +88,8 @@ keepalive — plus one secondary message from:
 
 ## Verification
 
-1. Both variants build green (devkit runs with the mock: manager logs
-   "OT link not ready", stays idle, no crash).
+1. The (single) diyless build green: `idf.py set-target esp32s3 && idf.py build`
+   in the default `build/` dir.
 2. Hardware boot: STM32 `cpuVer/fwVer/boardRev` handshake line in the log.
 3. Against the gateway (THR=1, `ram` build, observed over KC1/TCP): gateway
    shows live room temp (ID 24) and setpoint (ID 16); `otSet ch=1
