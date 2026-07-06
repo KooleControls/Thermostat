@@ -94,7 +94,7 @@ Derived from the DIYLESS reference yaml + the demo experience:
 
 | # | Backlog item | Notes |
 |---|--------------|-------|
-| 1 | `diyless-board-target` | Board folder (Strux `Board` class style) + ST7701/GT911/AHT20 drivers + esp32s3/PSRAM sdkconfig. Mine the old branch; adapt to `hardware/interfaces`. CI builds `-DBOARD=diyless_thermostat_3`. |
+| 1 | ~~`diyless-board-target`~~ | **Done (2026-07-06, ff3b14b).** Minimal-boot scope: board folder + AHT20 (TemperatureSensor/HumiditySensor role interfaces) + 8 MB partitions + USB-JTAG console; verified on hardware. ST7701/GT911 drivers deferred to `thermostat-ui`; CI to `release-workflow`. |
 | 2 | `opentherm-link` | `Stm32OpenThermLink` driver: STM32L051 nibble protocol (TX12/RX11, boot 44 / reset 13, 900 ms warm-up). Proven on the old branch (RA2-398) — port, don't reinvent. |
 | 3 | `opentherm-master-manager` | Master poll loop + typed accessors for all IDs listed above, incl. remote setpoint override (ID 9/100); link supervision + safe state. (Old RA2-399 scope + DHW + cooling + diagnostics.) |
 | 4 | `room-temperature` | AHT20 sampling, offset setting, sensor-failure handling. Small but owns the "input" contract for the PID. |
