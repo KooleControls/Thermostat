@@ -186,6 +186,8 @@ void OpenThermManager::DoOverrideRead(OtLink &link)
 
     float ovr = OtFrame::FromF88(OtFrame::Value(reply));
     if (ovr <= 0.0f) return;   // 0 = no override pending
+    if (ovr < 5.0f) ovr = 5.0f;      // same sanity clamp as otSet
+    if (ovr > 30.0f) ovr = 30.0f;
 
     LOCK(mutex_);
     if (fabsf(ovr - demand_.roomSetpoint) > 0.05f)

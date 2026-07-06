@@ -80,7 +80,7 @@ Every 500 ms cycle: **Status (ID 0)** with master enable bits — the <1 s
 keepalive — plus one secondary message from:
 
 - **Writes** (on change, else periodic refresh ~10 s): t_set (1, clamped to
-  ID 57 bounds), room setpoint (16), room temp (24), DHW setpoint (56).
+  ID 49 bounds), room setpoint (16), room temp (24), DHW setpoint (56).
 - **Reads** (rotation, each every few seconds): modulation 17, boiler temp
   25, DHW temp 26, return 28, pressure 18, outside 27, OEM fault 5, OEM
   diag 115, **max-t_set bounds ID 49 (s8/s8 — NOT 57, which is f8.8 MaxTSet;
