@@ -1,0 +1,156 @@
+# KC Thermostat — Roadmap
+
+> Each backlog item below has a `docs/backlog/<item>.md` entry with the detail.
+> Jira carries only the big picture (RA2-395 points here); technical work
+> lives in this repo. Per item: brainstorm → spec → plan → implement.
+
+The repo was reset to pure Strux on 2026-07-06 (see
+`docs/superpowers/specs/2026-07-06-strux-reset-design.md`). Everything below is
+rebuilt deliberately on that baseline, one feature at a time, each through its
+own brainstorm → spec → plan cycle. The old demo (branch
+`feature/ot-thermostat-dropin`) is reference material, not a merge source.
+
+## The two steps
+
+1. **Step 1 — a normal OpenTherm thermostat.** Feature parity with the DIYLESS
+   ESPHome reference ([diyless-thermostat-3.yaml](https://github.com/diyless/esphome-opentherm-thermostat/blob/main/diyless-thermostat-3.yaml)):
+   heating with PID modulation, cooling demand, domestic hot water, boiler
+   status/diagnostics, touchscreen + web UI (no MQTT/HA — the gateway owns
+   smart-home integration). A drop-in replacement for the third-party
+   thermostat — no gateway changes.
+2. **Step 2 — KC extensions.** Everything that makes it *ours*: KC features
+   over OT, out-of-band updating, productization. Each item needs its own
+   brainstorming before it's committed to.
+
+---
+
+## What a basic OT thermostat must do (Step 1 definition of done)
+
+Derived from the DIYLESS reference yaml + the demo experience:
+
+**Heating (CH)**
+- Own the room setpoint locally (NVS-persisted, ~5–30 °C, 0.5 ° steps) and a
+  Heat/Cool/Off mode. Frost-safe: "off" still keeps a minimum setpoint floor.
+- Measure room temperature: built-in AHT20 with a calibration offset setting
+  (board self-heating ≈ +7 °C, see RA2-389); architecture leaves room for an
+  external/BLE sensor later (step 2).
+- PID control loop → control setpoint `t_set` (OT ID 1), clamped 30–80 °C,
+  zero-means-zero. Clean-room implementation (ESPHome is GPLv3 — reuse the
+  algorithm and constants, never the source). Seed constants from the yaml:
+  kp 0.77, ki 0.0005, kd 0, 10-sample output averaging; deadband ±0.5 °C with
+  ki×0.15 and 15-sample averaging inside the band.
+- CH enable bit driven by mode + demand (OT ID 0 master status).
+
+**Cooling**
+- Cool mode raises the **cooling-enable bit** in the master status (ID 0) —
+  this is exactly what the gateway consumes (`OpenthermThermostat::GetCoolingRequest()`
+  reads `cooling_active`; `HeatManager` has CoolingStandby/CoolingActive states).
+  Actuation stays the gateway's job; on/off demand suffices (modulating cooling
+  control, ID 8, only if ever needed later).
+- Offer Cool only when the slave config (ID 3) advertises cooling support (the
+  gateway sets that from its `smarthome.coolingSupportEnabled` setting).
+- Show cooling status from the slave status bits.
+
+**Remote setpoint override (drop-in requirement the demo missed)**
+- The gateway actively pushes setpoints to the wired thermostat (reservations /
+  smart-home): remote-override room setpoint (ID 9, function flags ID 100),
+  with echo-detection + timeout on the gateway side. The thermostat must adopt
+  the override, reflect it in ID 16, and let the user change it locally
+  afterwards — otherwise reservations silently stop working vs. the
+  third-party unit.
+
+**Hot water (DHW)**
+- DHW enable/disable (OT ID 0), persisted.
+- DHW setpoint (OT ID 56), 30–80 °C, default 60, persisted.
+- DHW temperature readout (OT ID 26).
+
+**Boiler status & diagnostics (read from slave)**
+- Flame on, CH active, DHW active, fault/diagnostic indication (ID 0).
+- Relative modulation (ID 17), boiler water temp (ID 25), return temp (ID 28),
+  CH water pressure (ID 18), outside temp (ID 27) when available.
+- OEM fault code (ID 5) + OEM diagnostic code (ID 115); the service-flag bits
+  (service required, lockout, low water pressure, flame fault, air pressure,
+  overtemp).
+- Max `t_set` bounds from the boiler (ID 57 / 49) respected as clamps.
+
+**OT master loop & link health**
+- Master polling loop: status (0) every ~1 s; `t_set` (1); room setpoint (16)
+  and room temp (24) so the gateway's own view stays populated; periodic reads
+  of the sensor/diagnostic IDs above.
+- STM32 co-processor link supervision: 900 ms warm-up, timeout → reconnect,
+  visible link-state, and a safe state (no heat demand) when the link is down.
+
+**UX**
+- LVGL touchscreen UI: room temp + setpoint control, mode (Heat/Cool/Off),
+  DHW on/off + setpoint, flame/heating/cooling/DHW activity, fault indication,
+  backlight/screen timeout.
+- Web UI page(s) with the same controls + the diagnostics.
+- No MQTT / Home Assistant: those Strux managers are removed from this product
+  (the gateway owns smart-home integration).
+
+---
+
+## Step 1 backlog (build order; each = one `docs/backlog/` item → spec → plan)
+
+| # | Backlog item | Notes |
+|---|--------------|-------|
+| 1 | `diyless-board-target` | Board folder (Strux `Board` class style) + ST7701/GT911/AHT20 drivers + esp32s3/PSRAM sdkconfig. Mine the old branch; adapt to `hardware/interfaces`. CI builds `-DBOARD=diyless_thermostat_3`. |
+| 2 | `opentherm-link` | `Stm32OpenThermLink` driver: STM32L051 nibble protocol (TX12/RX11, boot 44 / reset 13, 900 ms warm-up). Proven on the old branch (RA2-398) — port, don't reinvent. |
+| 3 | `opentherm-master-manager` | Master poll loop + typed accessors for all IDs listed above, incl. remote setpoint override (ID 9/100); link supervision + safe state. (Old RA2-399 scope + DHW + cooling + diagnostics.) |
+| 4 | `room-temperature` | AHT20 sampling, offset setting, sensor-failure handling. Small but owns the "input" contract for the PID. |
+| 5 | `climate-pid` | ClimateManager: setpoint/mode ownership (Heat/Cool/Off), clean-room PID + deadband + output averaging for heating, on/off cooling demand, t_set clamps. (Old RA2-400 scope.) |
+| 6 | `hot-water` | DHW enable + setpoint + readout, persistence, web exposure. |
+| 7 | `thermostat-ui` | LVGL home screen (setpoint arc, ±, mode, DHW, status icons, faults) replacing nothing — there is no screen on Strux today. (Old RA2-401 scope.) |
+| 8 | `web-integration` | Web UI page for climate/DHW/diagnostics on top of Strux's WebSocket command plumbing. |
+| 9 | `dropin-validation` | End-to-end against the gateway (THR=1): setpoint → PID → t_set/CH-enable → gateway heat call; cooling request path; remote override from a reservation; also sanity-check against a real OT boiler if available. (Old RA2-402 scope.) |
+
+**Baseline trim (do first, small):**
+
+| # | Backlog item | Notes |
+|---|--------------|-------|
+| 0 | ~~`remove-mqtt-ha`~~ | **Done (02dd8fa).** MQTT + Home Assistant managers removed — the gateway owns smart-home integration. |
+
+**Infra track (parallel, small):**
+
+| # | Backlog item | Notes |
+|---|--------------|-------|
+| I1 | `software-id` | Reserve **ID 28 (0x1C)** on the [Software ID's page](https://koolecontrolsdevelopment.atlassian.net/wiki/spaces/DEV/pages/430211074) (group "KC Thermostat", ESP32-S3, TCP/IP ✓, BLE ✓). Embed in firmware + report in version info. |
+| I2 | `release-workflow` | Rework `release.yml` gateway-style: `VX.Y.Z` tags, `-DSOFTWARE_VERSION_*` from tag, artifact naming `MM_mm_pp_<ID>_KC_<name>`, factory/app/www bins. Open question: does the thermostat also need `.hex`/`.kczip` (service-tool formats)? |
+| I3 | `branding` | Device name "KC Thermostat" (AP SSID, web title) over Strux defaults. |
+
+**Open question — gateway-side identity (decision deferred, doesn't block Step 1):**
+how does the gateway see our thermostat? Options: (a) it stays plain **THR=1
+(OTH thermostat)** — which it *is* — and the gateway later detects "ours" via an
+OT register (member-ID / product ID) to unlock expanded features; or (b) the
+gateway gets a dedicated thermostat-type option (working name `CSHWTHR`), which
+is more explicit configuration. Either way Step 1 works as a standard OTH
+drop-in; revisit when KC extensions (Step 2) become real.
+
+## Step 2 candidates (each needs its own brainstorm first — not committed)
+
+- **Out-of-band updating** — BLE OTA channel? (Strux already does WiFi OTA +
+  web-UI upload; define what problem BLE solves: no-WiFi commissioning,
+  in-field recovery, installer app?) ← *brainstorm first, per Bas.*
+- **KC custom extensions over OT** — custom data-IDs or KC-frame mailbox,
+  gated behind member-ID detection. Blocked by RA2-396 (can the gateway's OT
+  co-processor pass arbitrary data-IDs?).
+- **External/BLE room sensor** (the yaml's Xiaomi pattern) + multi-sensor.
+- **Schedules/programs** (week program, holiday) — decide if the product needs
+  it or the gateway/backend owns scheduling.
+- **User-selectable modes** (cool/auto) — analysis exists, deliberately
+  deferred.
+- **Productization**: enclosure/wall mount (RA2-389), sensor accuracy
+  strategy, production flashing.
+
+## Jira restructuring proposal (to execute after this doc is approved)
+
+- **RA2-395 (story):** rewrite description → the two-step idea in a few
+  paragraphs + link to this roadmap. Technical detail lives here, not in Jira.
+- **RA2-398, RA2-399 (Done):** leave as-is — completed history.
+- **RA2-400, RA2-401 (In Progress), RA2-402 (To Do):** close with a comment
+  "superseded by the Strux reset; re-scoped in the repo roadmap/backlog".
+- **RA2-403 (Phase 5):** close likewise — its content is the Step 2 section.
+- **RA2-396 (investigation):** keep open — it gates the Step 2 OT extensions.
+- **RA2-389 (Ihor questions):** keep open (hardware track, unchanged).
+- New Jira issues only for genuinely big future features (e.g. "KC extensions
+  over OT"), created when we actually start them.
