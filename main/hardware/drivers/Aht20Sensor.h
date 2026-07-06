@@ -13,9 +13,9 @@
 //
 // Bus-agnostic: Init(bus) takes a shared i2c_master bus handle, so the same
 // driver works on any board (the board supplies its own bus). Implements the
-// board AmbientSensor HAL contract (ReadTemperature / ReadHumidity /
-// HasHumidity / DefaultOffsetC / ok) — except Init takes the bus, so a board
-// wraps it in a no-arg AmbientSensor (see diyless_thermostat_3/AmbientSensor.h).
+// board ambient-sensor contract (ReadTemperature / ReadHumidity /
+// HasHumidity / DefaultOffsetC / ok); the board's Board class owns an
+// instance and passes in its shared I2C bus (see diyless_thermostat_3/Board.h).
 //
 // A measurement is trigger-then-read (~80 ms conversion). To avoid blocking
 // the caller's poll task, reads are non-blocking: a poll latches the previous

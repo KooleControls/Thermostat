@@ -37,6 +37,8 @@ void Board::Init()
         float celsius = 0;
         if (ambientSensor_.ReadTemperature(celsius))
             ESP_LOGI(TAG, "AHT20 ambient: %.1f degC", celsius);
+        else
+            ESP_LOGE(TAG, "AHT20 read failed (sensor absent or unresponsive)");
     }
     else
     {
