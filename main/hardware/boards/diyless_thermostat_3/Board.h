@@ -4,7 +4,8 @@
 #include "InitState.h"
 #include "BoardConfig.h"
 #include "drivers/Aht20Sensor.h"
-#include "interfaces/AmbientSensor.h"
+#include "interfaces/TemperatureSensor.h"
+#include "interfaces/HumiditySensor.h"
 #include "driver/i2c_master.h"
 
 // ──────────────────────────────────────────────────────────────
@@ -33,7 +34,8 @@ public:
 
     void Init();
 
-    AmbientSensor &GetAmbientSensor() { return ambientSensor_; }
+    TemperatureSensor &GetTemperatureSensor() { return ambientSensor_; }
+    HumiditySensor &GetHumiditySensor() { return ambientSensor_; }
 
 private:
     ServiceProvider &serviceProvider_;
