@@ -53,15 +53,14 @@ Strux/
 │   │   └── WebServerManager/         # HTTP + WebSocket server
 │   ├── hardware/                      # Hardware abstraction
 │   │   ├── boards/                    # One folder per target board (-DBOARD=<name>)
-│   │   │   └── esp32_devkit/          # Generic ESP32 DevKit (default)
+│   │   │   └── diyless_thermostat_3/  # DIYLESS Thermostat 3 (default)
 │   │   │       ├── BoardConfig.h      # Pin definitions for this board
 │   │   │       ├── Board.h/.cpp       # The board's Board class — owns all drivers
 │   │   │       └── board.cmake        # Board build fragment (adds Board.cpp)
 │   │   ├── interfaces/                # Role interfaces (application vocabulary)
-│   │   │   └── Led.h                  # Led role: Set/IsOn + On/Off/Toggle helpers
+│   │   │   └── OtLink.h               # OpenTherm link role: Ready/Transaction/Recover
 │   │   └── drivers/                   # Shared drivers, usable by any board
-│   │       ├── GpioLed.h              # GPIO implementation of the Led role
-│   │       └── MockLed.h              # Led role without hardware (state only)
+│   │       └── Stm32OpenThermLink.h   # STM32 OpenTherm co-processor driver
 │   └── lib/                           # Reusable utilities
 │       ├── common/                    # Stream, MemoryStream, BufferStream, Fatal
 │       ├── json/                      # JsonWriter, JsonReader, JsonScope
@@ -88,9 +87,9 @@ Strux/
 
 ### Multiple boards
 
-The target board is selected at configure time with `-DBOARD=<name>` (default: `esp32_devkit`). Only the selected board folder is put on the include path, so application code just includes `BoardConfig.h` or `Board.h` and gets the right one. The application never changes between boards: it compiles against the `Board` class's surface, and each board makes itself compatible — with real hardware or a mock. There is no `IBoard` base class; a board missing something the application uses simply fails to compile. To support a new board:
+The target board is selected at configure time with `-DBOARD=<name>` (default: `diyless_thermostat_3`). Only the selected board folder is put on the include path, so application code just includes `BoardConfig.h` or `Board.h` and gets the right one. The application never changes between boards: it compiles against the `Board` class's surface, and each board makes itself compatible — with real hardware or a mock. There is no `IBoard` base class; a board missing something the application uses simply fails to compile. To support a new board:
 
-1. Copy `main/hardware/boards/esp32_devkit/` to `main/hardware/boards/<your_board>/` and edit `BoardConfig.h` and `Board.h`/`Board.cpp` (bind each role to a real driver or a `Mock*` one)
+1. Copy `main/hardware/boards/diyless_thermostat_3/` to `main/hardware/boards/<your_board>/` and edit `BoardConfig.h` and `Board.h`/`Board.cpp` (bind each role to a real driver or a `Mock*` one)
 2. Add extra board-only source files to `BOARD_SOURCES` in its `board.cmake` (optional)
 3. Add `sdkconfig.defaults` in the board folder if the board needs different flash size, PSRAM, or partitions (optional)
 4. Build with `idf.py -DBOARD=<your_board> build`
@@ -111,8 +110,8 @@ Or use the included dev container (requires Docker + VS Code with the Dev Contai
 ### Build & Flash
 
 ```bash
-idf.py set-target esp32
-idf.py build                          # default board: esp32_devkit
+idf.py set-target esp32s3
+idf.py build                          # default board: diyless_thermostat_3
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
@@ -304,13 +303,13 @@ The `hardware/` directory contains everything that changes when you swap the boa
 
 ### BoardConfig.h
 
-Each board has its own [`BoardConfig.h`](main/hardware/boards/esp32_devkit/BoardConfig.h) with its pin assignments:
+Each board has its own [`BoardConfig.h`](main/hardware/boards/diyless_thermostat_3/BoardConfig.h) with its pin assignments:
 
 ```cpp
 namespace BoardConfig
 {
-    static constexpr int LED_PIN = 2;             // GPIO2 on most ESP32 DevKits
-    static constexpr bool LED_ACTIVE_HIGH = true;
+    static constexpr int OT_LINK_TX_PIN = 12;     // STM32 OpenTherm co-processor TX
+    static constexpr int OT_LINK_RX_PIN = 11;     // STM32 OpenTherm co-processor RX
 
     // Add your pins:
     // static constexpr int MODBUS_TX_PIN = 17;
@@ -320,22 +319,22 @@ namespace BoardConfig
 
 ### Board
 
-Each board folder provides a [`Board`](main/hardware/boards/esp32_devkit/Board.h) class that owns every hardware driver instance (and bus host) and exposes the capability surface the application compiles against. Devices the application addresses by *meaning* go through small role interfaces in `hardware/interfaces/` — the included [`Led`](main/hardware/interfaces/Led.h) role is implemented by [`GpioLed`](main/hardware/drivers/GpioLed.h) and wired to a Home Assistant `light` entity. A board without the hardware binds a mock ([`MockLed`](main/hardware/drivers/MockLed.h)); a driver whose full API the application needs can be exposed directly as an escape hatch.
+Each board folder provides a [`Board`](main/hardware/boards/diyless_thermostat_3/Board.h) class that owns every hardware driver instance (and bus host) and exposes the capability surface the application compiles against. Devices the application addresses by *meaning* go through small role interfaces in `hardware/interfaces/` — the included [`OtLink`](main/hardware/interfaces/OtLink.h) role is implemented by [`Stm32OpenThermLink`](main/hardware/drivers/Stm32OpenThermLink.h) for OpenTherm communication with the gateway. A driver whose full API the application needs can be exposed directly as an escape hatch.
 
 This is where you add your project-specific hardware:
 
 ```cpp
 class Board {
 public:
-    Led& GetLed() { return led_; }
+    OtLink& GetOtLink() { return ot_link_; }
     // Add role accessors, or concrete ones when the app needs the full API:
     // TemperatureSensor& GetTemperatureSensor() { return sensor_; }
-    // Dps5020& GetDps5020() { return dps5020_; }
+    // DisplayManager& GetDisplay() { return display_; }
 
 private:
-    GpioLed led_{ BoardConfig::LED_PIN, BoardConfig::LED_ACTIVE_HIGH };
-    // Ds18b20 sensor_{ oneWire_ };
-    // Dps5020 dps5020_{ uart_ };
+    Stm32OpenThermLink ot_link_{ BoardConfig::OT_LINK_TX_PIN, BoardConfig::OT_LINK_RX_PIN };
+    // Aht20Sensor sensor_{ i2c_bus_ };
+    // DisplayManager display_;
 };
 ```
 
@@ -387,7 +386,7 @@ Handlers read the request payload from `in` and write their complete reply to `o
 3. Instantiate it in the board's `Board` class, expose it (role interface or concrete accessor), and wire up MQTT entities if needed
 4. Add component dependencies in `main/CMakeLists.txt` (IDF built-ins) or `main/idf_component.yml` (managed components); board-only source files go in the board's `board.cmake` via `BOARD_SOURCES`
 
-See [`Led.h`](main/hardware/interfaces/Led.h), [`GpioLed.h`](main/hardware/drivers/GpioLed.h), and [`Board.h`](main/hardware/boards/esp32_devkit/Board.h) for a complete example.
+See [`OtLink.h`](main/hardware/interfaces/OtLink.h), [`Stm32OpenThermLink.h`](main/hardware/drivers/Stm32OpenThermLink.h), and [`Board.h`](main/hardware/boards/diyless_thermostat_3/Board.h) for a complete example.
 
 ---
 

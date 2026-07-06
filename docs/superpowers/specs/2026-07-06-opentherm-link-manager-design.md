@@ -60,7 +60,7 @@ wire, full boiler status/diagnostics read back, remote setpoint override
 - **Link supervision:** 6 consecutive `Transaction` failures (~3 s at the
   500 ms cycle) → `linked=false` (demand stops flowing — the safe state falls
   out naturally), then `Recover()` retried with backoff (5 s doubling to a
-  30 s cap); transitions logged once, visible in `otStatus`.
+  30 s cap); transitions logged once, visible in `otStatus`. Recover() (STM32 reset + handshake) applies when the co-processor itself stops answering; bus-level failures with a healthy co-processor only mark the link down — resetting the STM32 cannot fix an unwired bus.
 
 ## Files
 

@@ -60,8 +60,8 @@ set(COMPONENT_REQUIRES
 )
 
 # ── Board selection ────────────────────────────────────────────
-# Pick the target board with -DBOARD=<name>; defaults to the generic ESP32
-# DevKit. Each board lives in main/hardware/boards/<name>/ with its own
+# Pick the target board with -DBOARD=<name>; defaults to the DIYLESS Thermostat 3.
+# Each board lives in main/hardware/boards/<name>/ with its own
 # BoardConfig.h and a board.cmake fragment that may append extra files to
 # BOARD_SOURCES. Shared, board-independent drivers live in hardware/drivers/.
 set(BOARD "diyless_thermostat_3" CACHE STRING "Target board (folder under main/hardware/boards/)")
