@@ -1,5 +1,6 @@
 #include "Board.h"
 #include "esp_log.h"
+#include "driver/uart.h"
 
 Board::Board(ServiceProvider &ctx)
     : serviceProvider_(ctx)
@@ -43,6 +44,19 @@ void Board::Init()
     else
     {
         ESP_LOGE(TAG, "AHT20 init failed (sensor unavailable)");
+    }
+
+    // STM32L051 OpenTherm co-processor (owns the OT PHY). Init resets it
+    // into its app (~900 ms warm-up) and Handshake says hello.
+    if (otLink_.Init(UART_NUM_1, BoardConfig::OT_UART_TX, BoardConfig::OT_UART_RX,
+                     BoardConfig::OT_STM32_BOOT0, BoardConfig::OT_STM32_NRST))
+    {
+        if (!otLink_.Handshake())
+            ESP_LOGW(TAG, "STM32 OT co-processor not responding (manager will retry)");
+    }
+    else
+    {
+        ESP_LOGE(TAG, "OT link UART init failed");
     }
 
     init.SetReady();

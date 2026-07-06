@@ -7,6 +7,8 @@
 #include "interfaces/TemperatureSensor.h"
 #include "interfaces/HumiditySensor.h"
 #include "driver/i2c_master.h"
+#include "drivers/Stm32OpenThermLink.h"
+#include "interfaces/OtLink.h"
 
 // ──────────────────────────────────────────────────────────────
 // Board for the DIYLESS OpenTherm Thermostat 3 (hw rev v3.3).
@@ -36,6 +38,7 @@ public:
 
     TemperatureSensor &GetTemperatureSensor() { return ambientSensor_; }
     HumiditySensor &GetHumiditySensor() { return ambientSensor_; }
+    OtLink &GetOtLink() { return otLink_; }
 
 private:
     ServiceProvider &serviceProvider_;
@@ -44,4 +47,5 @@ private:
     // Hardware instances — buses first, then the drivers that use them.
     i2c_master_bus_handle_t i2cBus_ = nullptr;
     Aht20Sensor ambientSensor_;
+    Stm32OpenThermLink otLink_;
 };

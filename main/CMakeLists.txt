@@ -53,6 +53,7 @@ set(COMPONENT_REQUIRES
     wear_levelling
     esp_driver_gpio
     esp_driver_i2c
+    esp_driver_uart
     mdns
 )
 
