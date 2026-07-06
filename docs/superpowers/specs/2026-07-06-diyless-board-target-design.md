@@ -41,7 +41,7 @@ Create in `main/hardware/boards/diyless_thermostat_3/`:
 | File | Content |
 |---|---|
 | `BoardConfig.h` | Pin map ported verbatim from the old branch (I2C SDA17/SCL18, GT911 INT 10, full ST7701 pin/timing set, backlight 46, STM32 link TX12/RX11 + BOOT0 44 / NRST 13 notes). Drop the old `LED_PIN = -1` entries. |
-| `Board.h` / `Board.cpp` | New-pattern `Board`: owns the `i2c_master` bus handle (buses first — replaces the old lazy `BoardI2cBus()` singleton) and an `Aht20Sensor` instance. Surface: `GetAmbientSensor()` → `Aht20Sensor&` (concrete escape-hatch accessor; a role interface waits for the `room-temperature` item). `Init()` creates the bus, probes the AHT20, logs one temperature reading. |
+| `Board.h` / `Board.cpp` | New-pattern `Board`: owns the `i2c_master` bus handle (buses first — replaces the old lazy `BoardI2cBus()` singleton) and an `Aht20Sensor` instance. Surface: `GetTemperatureSensor()` / `GetHumiditySensor()` returning role-interface references (see amendment). `Init()` creates the bus, probes the AHT20, logs one temperature reading. |
 | `board.cmake` | Appends `Board.cpp` to `BOARD_SOURCES`; header comment describes the hardware. |
 | `sdkconfig.defaults` | Per-board overlay (root CMake already composes it): 8 MB flash, `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_8mb.csv"`, octal PSRAM, 240 MHz, **`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`** (UART0's default pins are the LCD-reset / STM32-boot lines — a UART0 console corrupts them). |
 
@@ -74,6 +74,17 @@ Modify:
    shows all managers Init; one AHT20 temperature line logged; AP fallback or
    configured WiFi comes up; web UI reachable and login works. Requires the
    physical board on a COM port.
+
+## Amendment (2026-07-06, during implementation — Bas)
+
+Role interfaces are defined **up front** (project preference: they're cheap;
+deviates from Strux's wait-for-first-consumer rule): minimal
+`interfaces/TemperatureSensor.h` and `interfaces/HumiditySensor.h` (one Read
+method each; the bool return is the failure signal — no `ok()`), implemented
+by `Aht20Sensor`. Split roles instead of one AmbientSensor so capability is
+the Board's compile-time surface (no `HasHumidity()` probe). `DefaultOffsetC()`
+dropped: calibration offset is application configuration (`room-temperature`
+item), not a driver property.
 
 ## Out of scope
 
