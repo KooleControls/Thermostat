@@ -1,5 +1,6 @@
 #include "MqttManager.h"
 #include "SettingsManager/SettingsManager.h"
+#include "SystemManager/SystemManager.h"
 #include "JsonWriter.h"
 #include "BufferStream.h"
 #include "esp_log.h"
@@ -32,7 +33,12 @@ void MqttManager::Init()
         return;
     }
 
-    enabled_ = serviceProvider_.getSettingsManager().getBool("mqtt.enabled", false);
+    // Registered before the enabled check: the settings must exist in the
+    // UI even when MQTT is off, or it could never be enabled again.
+    serviceProvider_.getSettingsManager().Register({
+        &mqttEnabled_, &mqttBroker_, &mqttPort_, &mqttUser_, &mqttPass_, &mqttPrefix_ });
+
+    enabled_ = mqttEnabled_.Get();
 
     if (!enabled_)
     {
@@ -44,9 +50,9 @@ void MqttManager::Init()
     BuildDeviceId();
 
     char prefix[32] = {};
-    serviceProvider_.getSettingsManager().getString("mqtt.prefix", prefix, sizeof(prefix));
+    mqttPrefix_.Get(prefix, sizeof(prefix));
     if (prefix[0] == '\0')
-        snprintf(prefix, sizeof(prefix), "thermostat");
+        snprintf(prefix, sizeof(prefix), "strux");
     snprintf(baseTopic_, sizeof(baseTopic_), "%s/%s", prefix, deviceId_);
 
     StartClient();
@@ -107,15 +113,13 @@ void MqttManager::RegisterDiscovery(std::function<void()> callback)
 
 void MqttManager::StartClient()
 {
-    auto &settings = serviceProvider_.getSettingsManager();
-
     char broker[64] = {};
     char user[32] = {};
     char pass[64] = {};
-    settings.getString("mqtt.broker", broker, sizeof(broker));
-    settings.getString("mqtt.user", user, sizeof(user));
-    settings.getString("mqtt.pass", pass, sizeof(pass));
-    int port = settings.getInt("mqtt.port", 1883);
+    mqttBroker_.Get(broker, sizeof(broker));
+    mqttUser_.Get(user, sizeof(user));
+    mqttPass_.Get(pass, sizeof(pass));
+    int32_t port = mqttPort_.Get();
 
     if (broker[0] == '\0')
     {
@@ -124,7 +128,7 @@ void MqttManager::StartClient()
     }
 
     char uri[128];
-    snprintf(uri, sizeof(uri), "mqtt://%s:%d", broker, port);
+    snprintf(uri, sizeof(uri), "mqtt://%s:%ld", broker, static_cast<long>(port));
 
     char lwtTopic[128];
     snprintf(lwtTopic, sizeof(lwtTopic), "%s/status", baseTopic_);
@@ -305,12 +309,12 @@ static void WriteDeviceBlock(JsonWriter &json, const char *deviceId,
 
     json.fieldArray("ids");
     char id[32];
-    snprintf(id, sizeof(id), "thermostat_%s", deviceId);
+    snprintf(id, sizeof(id), "strux_%s", deviceId);
     json.value(id);
     json.endArray();
 
     json.field("name", deviceName);
-    json.field("mf", "Thermostat");
+    json.field("mf", "Strux");
     json.field("mdl", CONFIG_IDF_TARGET);
     json.field("sw", version);
 
@@ -326,9 +330,7 @@ void MqttManager::PublishEntityDiscovery(const char *component, const char *obje
     const esp_app_desc_t *app = esp_app_get_description();
 
     char deviceName[32] = {};
-    serviceProvider_.getSettingsManager().getString("device.name", deviceName, sizeof(deviceName));
-    if (deviceName[0] == '\0')
-        snprintf(deviceName, sizeof(deviceName), "Thermostat");
+    serviceProvider_.getSystemManager().GetDeviceName(deviceName, sizeof(deviceName));
 
     char availTopic[128];
     snprintf(availTopic, sizeof(availTopic), "%s/status", baseTopic_);
@@ -338,7 +340,7 @@ void MqttManager::PublishEntityDiscovery(const char *component, const char *obje
              "homeassistant/%s/%s/%s/config", component, deviceId_, objectId);
 
     char uid[64];
-    snprintf(uid, sizeof(uid), "thermostat_%s_%s", deviceId_, objectId);
+    snprintf(uid, sizeof(uid), "strux_%s_%s", deviceId_, objectId);
 
     char buf[512];
     BufferStream stream(buf, sizeof(buf));
@@ -359,9 +361,7 @@ void MqttManager::PublishDiscovery()
     const esp_app_desc_t *app = esp_app_get_description();
 
     char deviceName[32] = {};
-    serviceProvider_.getSettingsManager().getString("device.name", deviceName, sizeof(deviceName));
-    if (deviceName[0] == '\0')
-        snprintf(deviceName, sizeof(deviceName), "Thermostat");
+    serviceProvider_.getSystemManager().GetDeviceName(deviceName, sizeof(deviceName));
 
     char stateTopic[128];
     snprintf(stateTopic, sizeof(stateTopic), "%s/state", baseTopic_);
@@ -403,7 +403,7 @@ void MqttManager::PublishDiscovery()
         json.field("name", s.name);
 
         char uid[64];
-        snprintf(uid, sizeof(uid), "thermostat_%s_%s", deviceId_, s.objectId);
+        snprintf(uid, sizeof(uid), "strux_%s_%s", deviceId_, s.objectId);
         json.field("uniq_id", uid);
 
         json.field("stat_t", stateTopic);
@@ -445,7 +445,7 @@ void MqttManager::PublishDiscovery()
         json.field("name", "Reboot");
 
         char uid[64];
-        snprintf(uid, sizeof(uid), "thermostat_%s_reboot", deviceId_);
+        snprintf(uid, sizeof(uid), "strux_%s_reboot", deviceId_);
         json.field("uniq_id", uid);
 
         json.field("cmd_t", cmdTopic);

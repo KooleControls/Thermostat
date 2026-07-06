@@ -1,15 +1,31 @@
 import { useEffect, useRef, useState } from "react"
-import { backend, type SettingEntry, type WifiNetwork } from "@/lib/backend"
+import { backend, NUMERIC_SETTING_TYPES, type SettingEntry, type WifiNetwork } from "@/lib/backend"
 import { useConnectionStatus } from "@/hooks/use-connection-status"
 import { SaveIcon, Undo2Icon, PowerIcon, SearchIcon, LockIcon, BracesIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Switch } from "@/components/ui/switch"
+import { toast } from "sonner"
 import Editor from "react-simple-code-editor"
 import Prism from "prismjs"
 import "prismjs/components/prism-json"
 import "prismjs/themes/prism-tomorrow.css"
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : "Unknown error"
+}
 
 // Group settings by prefix (e.g. "wifi.ssid" → "wifi", "mqtt.broker" → "mqtt")
 function groupSettings(settings: SettingEntry[]): { label: string; prefix: string; items: SettingEntry[] }[] {
@@ -87,7 +103,7 @@ export default function SettingsPage() {
     backend.getSettings().then((r) => {
       setSettings(r.settings)
       setDirty(false)
-    }).catch(() => {})
+    }).catch((e) => toast.error("Failed to load settings", { description: errorMessage(e) }))
   }, [connection])
 
   useEffect(() => {
@@ -111,16 +127,18 @@ export default function SettingsPage() {
   async function handleChange(key: string, value: string) {
     try {
       await backend.setSetting(key, value)
+      // Only mirror the value locally once the device accepted it — a
+      // failed write must not leave the UI claiming a change it never made.
       setSettings((prev) =>
         prev.map((s) =>
           s.key === key
-            ? { ...s, value: s.type === "int" ? Number(value) : s.type === "bool" ? value === "true" : value }
+            ? { ...s, value: NUMERIC_SETTING_TYPES.includes(s.type) ? Number(value) : s.type === "bool" ? value === "true" : value }
             : s,
         ),
       )
       setDirty(true)
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(`Failed to update ${key}`, { description: errorMessage(e) })
     }
   }
 
@@ -129,10 +147,17 @@ export default function SettingsPage() {
     try {
       await backend.saveSettings()
       setDirty(false)
-    } catch {
-      // ignore
+      toast.success("Settings saved")
+    } catch (e) {
+      toast.error("Failed to save settings", { description: errorMessage(e) })
     }
     setSaving(false)
+  }
+
+  function handleReboot() {
+    backend.reboot()
+      .then(() => toast.info("Rebooting device…", { description: "The connection will drop for a few seconds." }))
+      .catch((e) => toast.error("Reboot command failed", { description: errorMessage(e) }))
   }
 
   async function handleReload() {
@@ -140,8 +165,8 @@ export default function SettingsPage() {
       const r = await backend.getSettings()
       setSettings(r.settings)
       setDirty(false)
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error("Failed to reload settings", { description: errorMessage(e) })
     }
   }
 
@@ -189,15 +214,31 @@ export default function SettingsPage() {
             <p className="flex-1 text-sm text-amber-500">Unsaved changes — press Save to write to flash.</p>
           )}
           <div className="ml-auto flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-destructive hover:text-destructive"
-              onClick={() => { if (confirm("Reboot the device?")) backend.send("reboot").catch(() => {}) }}
-            >
-              <PowerIcon className="mr-1.5 size-3.5" />
-              Reboot
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                >
+                  <PowerIcon className="mr-1.5 size-3.5" />
+                  Reboot
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Reboot the device?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    The device restarts and drops this connection for a few seconds.
+                    {dirty && " Unsaved settings changes will be lost."}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleReboot}>Reboot</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
             <Button variant="outline" size="sm" onClick={openJsonEditor}>
               <BracesIcon className="mr-1.5 size-3.5" />
               JSON
@@ -301,6 +342,7 @@ export default function SettingsPage() {
   )
 }
 
+
 // ── Setting row ──────────────────────────────────────────────
 
 const sensitiveKeys = ["password", "pass"]
@@ -337,7 +379,7 @@ function SettingRow({
       ) : (
         <Input
           className="w-48"
-          type={isPassword ? "password" : setting.type === "int" ? "number" : "text"}
+          type={isPassword ? "password" : NUMERIC_SETTING_TYPES.includes(setting.type) ? "number" : "text"}
           defaultValue={String(setting.value)}
           onBlur={(e) => {
             if (e.target.value !== String(setting.value)) {
@@ -393,9 +435,14 @@ function WifiSsidInput({
           }
         }
         setNetworks([...best.values()].sort((a, b) => b.rssi - a.rssi))
+      } else {
+        // A failed scan must not masquerade as "No networks found".
+        setShowScan(false)
+        toast.error("WiFi scan failed", { description: "The device reported a scan error." })
       }
-    } catch {
-      // ignore
+    } catch (e) {
+      setShowScan(false)
+      toast.error("WiFi scan failed", { description: errorMessage(e) })
     }
     setScanning(false)
   }

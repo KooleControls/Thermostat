@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from "react"
 import { backend, type Partition } from "@/lib/backend"
 import { useConnectionStatus } from "@/hooks/use-connection-status"
-import { UploadIcon, DownloadIcon } from "lucide-react"
+import { UploadIcon, DownloadIcon, RefreshCwIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { toast } from "sonner"
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : "Unknown error"
+}
 
 function fmtSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
@@ -10,24 +16,21 @@ function fmtSize(bytes: number): string {
   return `${bytes} B`
 }
 
-function chooseUploadFn(p: Partition) {
-  if (!p.uploadable) return null
-  if (p.type === "app") return (file: File, onProgress: (n: number) => void) => backend.uploadFirmware(file, onProgress)
-  if (p.label === "www") return (file: File, onProgress: (n: number) => void) => backend.uploadWww(file, onProgress)
-  return null
-}
 
 export default function FirmwarePage() {
   const connection = useConnectionStatus()
   const [partitions, setPartitions] = useState<Partition[] | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [restartPending, setRestartPending] = useState(false)
 
   function refresh() {
     backend
       .getPartitions()
-      .then((r) => { setPartitions(r.partitions); setLoadError(null) })
-      .catch((e) => setLoadError(e instanceof Error ? e.message : "Unknown error"))
+      .then((r) => { setPartitions(r.partitions); setLoadFailed(false) })
+      .catch((e) => {
+        setLoadFailed(true)
+        toast.error("Failed to load partitions", { description: errorMessage(e) })
+      })
   }
 
   useEffect(() => {
@@ -66,8 +69,14 @@ export default function FirmwarePage() {
               />
             ))}
           </ul>
-        ) : loadError ? (
-          <p className="p-6 text-sm text-red-500">Failed to load partitions: {loadError}</p>
+        ) : loadFailed ? (
+          <div className="flex items-center justify-between p-6">
+            <p className="text-sm text-muted-foreground">Couldn't load partitions.</p>
+            <Button variant="outline" size="sm" onClick={refresh}>
+              <RefreshCwIcon className="mr-1.5 size-3.5" />
+              Retry
+            </Button>
+          </div>
         ) : (
           <p className="p-6 text-sm text-muted-foreground">Loading...</p>
         )}
@@ -76,19 +85,17 @@ export default function FirmwarePage() {
   )
 }
 
-// ── Badge ─────────────────────────────────────────────────────
+// ── Status badge ──────────────────────────────────────────────
 
-function Badge({ children, tone }: { children: React.ReactNode; tone: "emerald" | "sky" }) {
+function StatusBadge({ children, tone }: { children: React.ReactNode; tone: "emerald" | "sky" }) {
   const cls =
     tone === "emerald"
       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
       : "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400"
   return (
-    <span
-      className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${cls}`}
-    >
+    <Badge variant="outline" className={`text-[10px] uppercase tracking-wide ${cls}`}>
       {children}
-    </span>
+    </Badge>
   )
 }
 
@@ -104,24 +111,22 @@ function PartitionRow({
   const p = partition
   const fileRef = useRef<HTMLInputElement>(null)
   const [progress, setProgress] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [downProgress, setDownProgress] = useState<number | null>(null)
 
-  const uploadFn = chooseUploadFn(p)
-  const canUpload = !!uploadFn && !p.running
+  const canUpload = p.uploadable && !p.running
   const uploading = progress !== null
 
   async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     e.target.value = ""
-    if (!file || !uploadFn) return
+    if (!file || !canUpload) return
 
-    setError(null)
     setProgress(0)
     try {
-      await uploadFn(file, setProgress)
+      await backend.uploadPartition(p.label, file, setProgress)
       onAfterUpload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed")
+      toast.error(`Upload to ${p.label} failed`, { description: errorMessage(err) })
     } finally {
       setProgress(null)
     }
@@ -133,8 +138,8 @@ function PartitionRow({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="font-mono font-medium">{p.label}</span>
-            {p.running && <Badge tone="emerald">running</Badge>}
-            {p.nextOta && <Badge tone="sky">next OTA</Badge>}
+            {p.running && <StatusBadge tone="emerald">running</StatusBadge>}
+            {p.nextOta && <StatusBadge tone="sky">next OTA</StatusBadge>}
             {p.version && (
               <span className="font-mono text-xs text-muted-foreground">v{p.version}</span>
             )}
@@ -158,8 +163,8 @@ function PartitionRow({
             disabled={!canUpload || uploading}
             onClick={() => fileRef.current?.click()}
             title={
-              !uploadFn
-                ? "This partition can't be updated over HTTP"
+              !p.uploadable
+                ? "This partition can't be uploaded to"
                 : p.running
                   ? "Cannot overwrite the running slot"
                   : "Upload a .bin file"
@@ -168,11 +173,20 @@ function PartitionRow({
             <UploadIcon className="mr-1.5 size-3.5" />
             Upload
           </Button>
-          <Button variant="outline" size="sm" asChild>
-            <a href={backend.partitionDownloadUrl(p.label)} download={`${p.label}.bin`}>
-              <DownloadIcon className="mr-1.5 size-3.5" />
-              Download
-            </a>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={downProgress !== null}
+            onClick={() => {
+              setDownProgress(0)
+              backend
+                .downloadPartitionFile(p.label, p.size, setDownProgress)
+                .catch((e) => toast.error(`Download of ${p.label} failed`, { description: errorMessage(e) }))
+                .finally(() => setDownProgress(null))
+            }}
+          >
+            <DownloadIcon className="mr-1.5 size-3.5" />
+            Download
           </Button>
         </div>
       </div>
@@ -192,7 +206,20 @@ function PartitionRow({
         </div>
       )}
 
-      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
+      {downProgress !== null && (
+        <div className="mt-3">
+          <div className="mb-1 flex justify-between text-xs text-muted-foreground">
+            <span>Downloading…</span>
+            <span>{downProgress}%</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-primary transition-all"
+              style={{ width: `${downProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
     </li>
   )
 }

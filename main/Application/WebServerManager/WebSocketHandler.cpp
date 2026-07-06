@@ -1,10 +1,13 @@
 #include "WebSocketHandler.h"
 #include "CommandManager.h"
+#include "WebServerManager.h"
 #include "JsonHelpers.h"
 #include "BufferStream.h"
+#include "MemoryStream.h"
 #include "JsonWriter.h"
 #include "esp_log.h"
 
+#include <cinttypes>
 #include <cstring>
 
 static constexpr const char* TAG = "WebSocketHandler";
@@ -12,6 +15,11 @@ static constexpr const char* TAG = "WebSocketHandler";
 void WebSocketHandler::SetCommandManager(CommandManager& commandManager)
 {
     commandManager_ = &commandManager;
+}
+
+void WebSocketHandler::SetAuth(WebServerManager& auth)
+{
+    auth_ = &auth;
 }
 
 void WebSocketHandler::RegisterRoute(httpd_handle_t server)
@@ -32,13 +40,13 @@ void WebSocketHandler::RegisterRoute(httpd_handle_t server)
 // Client tracking
 // ──────────────────────────────────────────────────────────────
 
-void WebSocketHandler::AddWsClient(int fd)
+bool WebSocketHandler::AddWsClient(int fd, const char* token)
 {
     LOCK(wsMutex_);
 
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
     {
-        if (wsClients_[i] == fd) return;
+        if (wsClients_[i] == fd) return true;
     }
 
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
@@ -46,11 +54,13 @@ void WebSocketHandler::AddWsClient(int fd)
         if (wsClients_[i] == 0)
         {
             wsClients_[i] = fd;
+            strlcpy(clientTokens_[i], token, sizeof(clientTokens_[i]));
             ESP_LOGI(TAG, "WS client added: fd=%d slot=%d", fd, i);
-            return;
+            return true;
         }
     }
     ESP_LOGW(TAG, "WS client rejected (max reached): fd=%d", fd);
+    return false;
 }
 
 void WebSocketHandler::RemoveWsClient(int fd)
@@ -62,10 +72,29 @@ void WebSocketHandler::RemoveWsClient(int fd)
         {
             wsClients_[i] = 0;
             consecBinFails_[i] = 0;
+            clientTokens_[i][0] = 0;
             ESP_LOGI(TAG, "WS client removed: fd=%d slot=%d", fd, i);
             return;
         }
     }
+}
+
+void WebSocketHandler::TouchClient(int fd)
+{
+    char token[SessionTable::TOKEN_LEN] = {};
+    {
+        LOCK(wsMutex_);
+        for (int i = 0; i < MAX_WS_CLIENTS; i++)
+        {
+            if (wsClients_[i] == fd)
+            {
+                strlcpy(token, clientTokens_[i], sizeof(token));
+                break;
+            }
+        }
+    }
+    if (token[0] != 0 && auth_)
+        auth_->TouchSession(token);   // outside wsMutex_ — TouchSession locks its own table
 }
 
 void WebSocketHandler::OnClientDisconnected(int fd)
@@ -90,6 +119,7 @@ void WebSocketHandler::Broadcast(httpd_handle_t server, const char* json, int le
     frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(json));
     frame.len = len;
 
+    LOCK(sendMutex_);
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
     {
         if (clients[i] != 0)
@@ -118,6 +148,7 @@ void WebSocketHandler::BroadcastBinary(httpd_handle_t server, const uint8_t* dat
     frame.payload = const_cast<uint8_t*>(data);
     frame.len = len;
 
+    LOCK(sendMutex_);
     for (int i = 0; i < MAX_WS_CLIENTS; i++)
     {
         if (clients[i] == 0) continue;
@@ -154,7 +185,26 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
 
     if (req->method == HTTP_GET)
     {
-        self->AddWsClient(httpd_req_to_sockfd(req));
+        // Auth happens HERE, once. esp_http_server has already sent the
+        // 101 handshake before invoking us; returning ESP_FAIL makes
+        // httpd close the socket immediately, which is how an upgrade
+        // is "refused". The frontend can't read a close reason — it
+        // discriminates bad-token from network failure via an HTTP
+        // ping before connecting (see backend.ts).
+        char query[96] = {};
+        char token[SessionTable::TOKEN_LEN] = {};
+        if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+            httpd_query_key_value(query, "token", token, sizeof(token)) != ESP_OK ||
+            !self->auth_ || !self->auth_->ValidateToken(token))
+        {
+            ESP_LOGW(TAG, "WS upgrade refused: missing/invalid token");
+            return ESP_FAIL;
+        }
+        // A client beyond the table would stay open but untracked: no
+        // broadcasts, no session refresh — a half-alive tab that GCs
+        // after 30 min. Refuse instead so it hits the reconnect loop.
+        if (!self->AddWsClient(httpd_req_to_sockfd(req), token))
+            return ESP_FAIL;
         return ESP_OK;
     }
 
@@ -168,6 +218,10 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
         self->RemoveWsClient(httpd_req_to_sockfd(req));
         return ret;
     }
+
+    // Any inbound frame (heartbeat included) keeps the session alive —
+    // an open tab never logs out; see spec.
+    self->TouchClient(httpd_req_to_sockfd(req));
 
     if (frame.type == HTTPD_WS_TYPE_CLOSE)
     {
@@ -194,26 +248,35 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
 
 void WebSocketHandler::DispatchMessage(httpd_req_t* req, int32_t id, const char* type, const char* json)
 {
-    BufferStream stream(wsBuf_, sizeof(wsBuf_));
-    JsonWriter resp(stream);
+    BufferStream out(wsBuf_, sizeof(wsBuf_));
 
-    resp.beginObject();
-    resp.field("id", id);
+    // Envelope by concatenation: the handler writes one complete JSON
+    // object into `out`; we wrap it as {"id":N,"payload":<object>}.
+    char head[48];
+    int n = snprintf(head, sizeof(head), "{\"id\":%" PRId32 ",\"payload\":", id);
+    out.write(head, n);
 
-    if (commandManager_ && commandManager_->Execute(type, json, resp))
+    MemoryStream in(json, strlen(json));
+
+    if (commandManager_ && commandManager_->Execute(type, in, out))
     {
-        // Command wrote its fields
+        out.write("}", 1);
     }
     else
     {
-        resp.field("error", type);
+        out.reset();
+        JsonWriter err(out);   // reuse JsonWriter's escaping for the type echo
+        err.beginObject();
+        err.field("id", id);
+        err.field("error", type);
+        err.endObject();
     }
-
-    resp.endObject();
 
     httpd_ws_frame_t frame = {};
     frame.type = HTTPD_WS_TYPE_TEXT;
-    frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(stream.data()));
-    frame.len = stream.length();
+    frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(out.data()));
+    frame.len = out.length();
+
+    LOCK(sendMutex_);
     httpd_ws_send_frame(req, &frame);
 }

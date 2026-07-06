@@ -2,12 +2,14 @@
 
 #include "ServiceProvider.h"
 #include "InitState.h"
+#include "CommandEntry.h"
 #include "Mutex.h"
 #include "Task.h"
 #include "freertos/queue.h"
 #include <cstdint>
 
-class JsonWriter;
+class Stream;
+class JsonObject;
 
 class ConsoleManager {
     static constexpr const char* TAG = "ConsoleManager";
@@ -28,7 +30,7 @@ public:
     using BroadcastFunc = void (*)(const char* json, int32_t len, void* ctx);
     void SetBroadcastCallback(BroadcastFunc func, void* ctx);
 
-    void WriteHistory(JsonWriter& writer) const;
+    void WriteHistory(JsonObject& resp) const;
 
 private:
     ServiceProvider& serviceProvider_;
@@ -56,4 +58,11 @@ private:
 
     static int LogOutput(const char* fmt, va_list args);
     static ConsoleManager* s_instance_;
+
+    // ── WebSocket commands (registered with CommandManager in Init) ──
+    void Cmd_GetLogs(Stream& in, Stream& out);
+
+    inline static CommandEntry commands_[] = {
+        { "getLogs", &InvokeCommand<&ConsoleManager::Cmd_GetLogs> },
+    };
 };

@@ -18,22 +18,24 @@ else()
 endif()
 
 # ── Per-board sdkconfig ───────────────────────────────────────
-# Common defaults plus an optional board-specific override file
-# (sdkconfig.defaults.<board>), letting a future board change flash size /
-# PSRAM / partitions without touching the shared defaults. BOARD is the same
-# cache var consumed by main/CMakeLists.txt for board selection.
+# Common defaults plus an optional per-board overlay living in the board
+# folder (main/hardware/boards/<board>/sdkconfig.defaults), letting a board
+# change flash size / PSRAM / partitions without touching the shared
+# defaults. sdkconfig fragments cannot include one another, so this list is
+# the composition point: the board file overlays the common one and wins on
+# conflicts. BOARD is the same cache var consumed by main/CMakeLists.txt.
 if(NOT DEFINED BOARD)
-    set(BOARD "sunton_8048s043")
+    set(BOARD "esp32_devkit")
 endif()
 set(SDKCONFIG_DEFAULTS "sdkconfig.defaults")
-if(EXISTS "${CMAKE_SOURCE_DIR}/sdkconfig.defaults.${BOARD}")
-    list(APPEND SDKCONFIG_DEFAULTS "sdkconfig.defaults.${BOARD}")
+if(EXISTS "${CMAKE_SOURCE_DIR}/main/hardware/boards/${BOARD}/sdkconfig.defaults")
+    list(APPEND SDKCONFIG_DEFAULTS "main/hardware/boards/${BOARD}/sdkconfig.defaults")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 idf_build_set_property(MINIMAL_BUILD ON)
-project(Thermostat)
+project(Strux)
 
 # ── Frontend build ────────────────────────────────────────────
 # Automatically build the React frontend before generating the FAT image.

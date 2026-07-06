@@ -1,5 +1,7 @@
 #include "ConsoleManager.h"
+#include "CommandManager.h"
 #include "JsonWriter.h"
+#include "JsonScope.h"
 #include "BufferStream.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -42,6 +44,10 @@ void ConsoleManager::Init()
     broadcastTask_.Run();
 
     esp_log_set_vprintf(&LogOutput);
+
+    // ConsoleManager initializes before CommandManager::Init() — fine by
+    // design: the registry is usable from construction.
+    serviceProvider_.getCommandManager().Register(this, commands_);
 
     initAttempt.SetReady();
     ESP_LOGI(TAG, "Initialized (capturing stdout)");
@@ -141,18 +147,26 @@ void ConsoleManager::BroadcastTaskLoop()
     }
 }
 
-void ConsoleManager::WriteHistory(JsonWriter& writer) const
+void ConsoleManager::WriteHistory(JsonObject& resp) const
 {
     LOCK(mutex_);
 
-    writer.fieldArray("lines");
+    JsonArray lines = resp.array("lines");
 
     int32_t start = (count_ < MAX_LINES) ? 0 : head_;
     for (int32_t i = 0; i < count_; i++)
     {
         int32_t idx = (start + i) % MAX_LINES;
-        writer.value(lines_[idx]);
+        lines.value(lines_[idx]);
     }
+}   // `lines` closes here; caller's `resp` stays usable (auto-detached)
 
-    writer.endArray();
+// ──────────────────────────────────────────────────────────────
+// WebSocket commands
+// ──────────────────────────────────────────────────────────────
+
+void ConsoleManager::Cmd_GetLogs(Stream& in, Stream& out)
+{
+    JsonObject resp(out);
+    WriteHistory(resp);
 }

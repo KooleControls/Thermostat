@@ -6,14 +6,18 @@
 #include "WiFiInterface.h"
 #include "ServiceProvider.h"
 #include "InitState.h"
+#include "CommandEntry.h"
+#include "TypedSettings.h"
 #include "Timer.h"
+
+class Stream;
 
 class NetworkManager {
     static constexpr const char* TAG = "NetworkManager";
     static constexpr int StaConnectTimeoutMs = 10000;
     static constexpr int MaxStaRetries = 3;
 
-    static constexpr const char* DefaultApSsid = "Thermostat-AP";
+    static constexpr const char* DefaultApSsid = "Strux-AP";
     static constexpr const char* DefaultApPassword = ""; // Open network
 
 public:
@@ -48,4 +52,15 @@ private:
     void HandleNetworkEvent(const NetworkEvent& event);
     void AttemptStaConnect();
     void FallbackToAP();
+
+    // ── WebSocket commands (registered with CommandManager in Init) ──
+    void Cmd_WifiScan(Stream& in, Stream& out);
+
+    inline static CommandEntry commands_[] = {
+        { "wifiScan", &InvokeCommand<&NetworkManager::Cmd_WifiScan> },
+    };
+
+    // ── Settings (registered with SettingsManager in Init) ──
+    inline static StringSetting wifiSsid_    { "wifi.ssid",     "WiFi SSID",     "" };
+    inline static StringSetting wifiPassword_{ "wifi.password", "WiFi Password", "" };
 };

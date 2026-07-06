@@ -6,7 +6,7 @@ export interface ReleaseInfo {
   url: string
 }
 
-const REPO = "vanBassum/Thermostat"
+const REPO = "vanBassum/Strux"
 
 export function useLatestRelease() {
   const [release, setRelease] = useState<ReleaseInfo | null>(null)

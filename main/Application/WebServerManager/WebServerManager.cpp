@@ -1,12 +1,17 @@
 #include "WebServerManager.h"
 #include "CommandManager.h"
 #include "ConsoleManager.h"
-#include "UpdateManager.h"
+#include "Stream.h"
+#include "SystemManager.h"
+#include "SettingsManager.h"
+#include "JsonReader.h"
+#include "JsonWriter.h"
+#include "BufferStream.h"
+#include "ContextLock.h"
 
 #include <unistd.h>
 #include <esp_log.h>
 #include <esp_vfs_fat.h>
-#include <esp_partition.h>
 
 static constexpr const char* TAG = "WebServerManager";
 static constexpr const char* BASE_PATH = "/www";
@@ -29,6 +34,10 @@ void WebServerManager::Init()
     s_instance_ = this;
 
     wsHandler_.SetCommandManager(serviceProvider_.getCommandManager());
+
+    serviceProvider_.getSettingsManager().Register({ &webPassword_ });
+    webPassword_.Get(passwordSnapshot_, sizeof(passwordSnapshot_));
+    wsHandler_.SetAuth(*this);
 
     MountFatPartition();
     StartServer();
@@ -93,33 +102,23 @@ void WebServerManager::RegisterRoutes()
 {
     if (!server_) return;
 
-    // Upload endpoints (must be before wildcard)
-    const httpd_uri_t upload_app = {
-        .uri = "/api/upload/app",
+    // The one API route: every command, streamed both ways.
+    // (Must be before the wildcard static-file route.)
+    const httpd_uri_t api_command = {
+        .uri = "/api/command",
         .method = HTTP_POST,
-        .handler = HandleUploadApp,
+        .handler = HandleApiCommand,
         .user_ctx = this,
         .is_websocket = false,
         .handle_ws_control_frames = false,
         .supported_subprotocol = nullptr,
     };
-    httpd_register_uri_handler(server_, &upload_app);
+    httpd_register_uri_handler(server_, &api_command);
 
-    const httpd_uri_t upload_www = {
-        .uri = "/api/upload/www",
-        .method = HTTP_POST,
-        .handler = HandleUploadWww,
-        .user_ctx = this,
-        .is_websocket = false,
-        .handle_ws_control_frames = false,
-        .supported_subprotocol = nullptr,
-    };
-    httpd_register_uri_handler(server_, &upload_www);
-
-    // CORS preflight handlers — browsers send OPTIONS before cross-origin
-    // POST with a binary body (e.g. from the dev vite server on a different origin).
-    const httpd_uri_t upload_app_opts = {
-        .uri = "/api/upload/app",
+    // CORS preflight — browsers send OPTIONS before cross-origin POST
+    // with a binary body (e.g. from the dev vite server).
+    const httpd_uri_t api_command_opts = {
+        .uri = "/api/command",
         .method = HTTP_OPTIONS,
         .handler = HandleCorsPreflight,
         .user_ctx = this,
@@ -127,29 +126,42 @@ void WebServerManager::RegisterRoutes()
         .handle_ws_control_frames = false,
         .supported_subprotocol = nullptr,
     };
-    httpd_register_uri_handler(server_, &upload_app_opts);
+    httpd_register_uri_handler(server_, &api_command_opts);
 
-    const httpd_uri_t upload_www_opts = {
-        .uri = "/api/upload/www",
-        .method = HTTP_OPTIONS,
-        .handler = HandleCorsPreflight,
-        .user_ctx = this,
-        .is_websocket = false,
-        .handle_ws_control_frames = false,
-        .supported_subprotocol = nullptr,
-    };
-    httpd_register_uri_handler(server_, &upload_www_opts);
-
-    const httpd_uri_t download = {
-        .uri = "/api/download",
+    // Login — the only open API surface (see spec: everything else that
+    // knows anything sits behind auth).
+    const httpd_uri_t login_get = {
+        .uri = "/api/login",
         .method = HTTP_GET,
-        .handler = HandleDownloadPartition,
+        .handler = HandleLoginGet,
         .user_ctx = this,
         .is_websocket = false,
         .handle_ws_control_frames = false,
         .supported_subprotocol = nullptr,
     };
-    httpd_register_uri_handler(server_, &download);
+    httpd_register_uri_handler(server_, &login_get);
+
+    const httpd_uri_t login_post = {
+        .uri = "/api/login",
+        .method = HTTP_POST,
+        .handler = HandleLoginPost,
+        .user_ctx = this,
+        .is_websocket = false,
+        .handle_ws_control_frames = false,
+        .supported_subprotocol = nullptr,
+    };
+    httpd_register_uri_handler(server_, &login_post);
+
+    const httpd_uri_t login_opts = {
+        .uri = "/api/login",
+        .method = HTTP_OPTIONS,
+        .handler = HandleCorsPreflight,
+        .user_ctx = this,
+        .is_websocket = false,
+        .handle_ws_control_frames = false,
+        .supported_subprotocol = nullptr,
+    };
+    httpd_register_uri_handler(server_, &login_opts);
 
     wsHandler_.RegisterRoute(server_);
     staticFileHandler_.RegisterRoute(server_, BASE_PATH);
@@ -168,124 +180,108 @@ void WebServerManager::BroadcastBinary(const uint8_t* data, size_t len)
 }
 
 // ──────────────────────────────────────────────────────────────
-// Upload handlers
+// /api/command — the generic command entrance. Request body in,
+// handler reply out, streamed both directions. The HTTP layer knows
+// no commands; HTTP status is only the transport envelope.
 // ──────────────────────────────────────────────────────────────
 
-esp_err_t WebServerManager::HandleUploadApp(httpd_req_t* req)
+namespace {
+
+class HttpRequestStream : public Stream
+{
+    httpd_req_t* req_;
+    int remaining_;
+
+public:
+    explicit HttpRequestStream(httpd_req_t* req)
+        : req_(req), remaining_(req->content_len) {}
+
+    size_t read(void* dst, size_t size, TickType_t timeout = portMAX_DELAY) override
+    {
+        (void)timeout;   // httpd's socket recv timeout applies
+        if (remaining_ <= 0) return 0;
+        int want = (size < static_cast<size_t>(remaining_)) ? static_cast<int>(size) : remaining_;
+        int n = httpd_req_recv(req_, static_cast<char*>(dst), want);
+        if (n <= 0) { remaining_ = 0; return 0; }
+        remaining_ -= n;
+        return static_cast<size_t>(n);
+    }
+
+    size_t write(const void*, size_t, TickType_t) override { return 0; }
+    size_t available() const override { return remaining_ > 0 ? static_cast<size_t>(remaining_) : 0; }
+};
+
+class HttpResponseStream : public Stream
+{
+    httpd_req_t* req_;
+    bool failed_ = false;
+
+public:
+    explicit HttpResponseStream(httpd_req_t* req) : req_(req) {}
+
+    size_t write(const void* data, size_t size, TickType_t timeout = portMAX_DELAY) override
+    {
+        (void)timeout;
+        if (failed_) return 0;
+        if (httpd_resp_send_chunk(req_, static_cast<const char*>(data), size) != ESP_OK)
+        {
+            failed_ = true;
+            return 0;
+        }
+        return size;
+    }
+
+    size_t read(void*, size_t, TickType_t) override { return 0; }
+    bool failed() const { return failed_; }
+};
+
+} // namespace
+
+esp_err_t WebServerManager::HandleApiCommand(httpd_req_t* req)
 {
     auto* self = static_cast<WebServerManager*>(req->user_ctx);
-    auto& update = self->serviceProvider_.getUpdateManager();
 
-    ESP_LOGI(TAG, "App upload started (content-length: %d)", req->content_len);
-
-    if (!update.BeginAppUpdate())
+    if (!self->CheckBearer(req))
     {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to begin OTA");
+        SendUnauthorized(req);
         return ESP_FAIL;
     }
 
-    char buf[1024];
-    int received = 0;
-    int total = 0;
-
-    while (total < req->content_len)
+    char query[96] = {};
+    char type[32] = {};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "type", type, sizeof(type)) != ESP_OK ||
+        type[0] == '\0')
     {
-        received = httpd_req_recv(req, buf, sizeof(buf));
-        if (received <= 0)
-        {
-            ESP_LOGE(TAG, "App upload recv error");
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Receive failed");
-            return ESP_FAIL;
-        }
-
-        if (!update.WriteAppChunk(buf, received))
-        {
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Write failed");
-            return ESP_FAIL;
-        }
-
-        total += received;
-    }
-
-    const char* err = update.FinalizeAppUpdate();
-    if (err)
-    {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, err);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing ?type=");
         return ESP_FAIL;
     }
 
-    char resp[64];
-    int len = snprintf(resp, sizeof(resp), "{\"ok\":true,\"size\":%d}", total);
     SetCorsHeaders(req);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, resp, len);
+    httpd_resp_set_type(req, "application/octet-stream");
 
-    ESP_LOGI(TAG, "App upload complete (%d bytes) — restart required to apply", total);
-    return ESP_OK;
-}
+    HttpRequestStream in(req);
+    HttpResponseStream out(req);
 
-esp_err_t WebServerManager::HandleUploadWww(httpd_req_t* req)
-{
-    auto* self = static_cast<WebServerManager*>(req->user_ctx);
-    auto& update = self->serviceProvider_.getUpdateManager();
-
-    ESP_LOGI(TAG, "WWW upload started (content-length: %d)", req->content_len);
-
-    if (!update.BeginWwwUpdate())
+    if (!self->serviceProvider_.getCommandManager().Execute(type, in, out))
     {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to begin WWW update");
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Unknown command");
         return ESP_FAIL;
     }
 
-    char buf[1024];
-    int received = 0;
-    int total = 0;
-
-    while (total < req->content_len)
-    {
-        received = httpd_req_recv(req, buf, sizeof(buf));
-        if (received <= 0)
-        {
-            ESP_LOGE(TAG, "WWW upload recv error");
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Receive failed");
-            return ESP_FAIL;
-        }
-
-        if (!update.WriteWwwChunk(buf, received))
-        {
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Write failed");
-            return ESP_FAIL;
-        }
-
-        total += received;
-    }
-
-    const char* err = update.FinalizeWwwUpdate();
-    if (err)
-    {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, err);
-        return ESP_FAIL;
-    }
-
-    char resp[64];
-    int len = snprintf(resp, sizeof(resp), "{\"ok\":true,\"size\":%d}", total);
-    SetCorsHeaders(req);
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, resp, len);
-
-    ESP_LOGI(TAG, "WWW upload complete (%d bytes) — restart required to apply", total);
-    return ESP_OK;
+    httpd_resp_send_chunk(req, nullptr, 0);   // finish chunked response
+    return out.failed() ? ESP_FAIL : ESP_OK;
 }
 
 // ──────────────────────────────────────────────────────────────
-// CORS + partition download
+// CORS
 // ──────────────────────────────────────────────────────────────
 
 void WebServerManager::SetCorsHeaders(httpd_req_t* req)
 {
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin",  "*");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "POST, OPTIONS");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
 esp_err_t WebServerManager::HandleCorsPreflight(httpd_req_t* req)
@@ -296,58 +292,105 @@ esp_err_t WebServerManager::HandleCorsPreflight(httpd_req_t* req)
     return ESP_OK;
 }
 
-esp_err_t WebServerManager::HandleDownloadPartition(httpd_req_t* req)
+// ──────────────────────────────────────────────────────────────
+// Auth — sessions at the transport edge. Nothing below this layer
+// (commands, streams) ever sees a token or password.
+// ──────────────────────────────────────────────────────────────
+
+void WebServerManager::CheckPasswordEpoch()
 {
+    LOCK(authMutex_);
+    char current[64] = {};
+    webPassword_.Get(current, sizeof(current));
+    if (strcmp(current, passwordSnapshot_) != 0)
+    {
+        ESP_LOGI(TAG, "web.password changed — clearing all sessions");
+        sessions_.Clear();
+        strlcpy(passwordSnapshot_, current, sizeof(passwordSnapshot_));
+    }
+}
+
+bool WebServerManager::ValidateToken(const char* token)
+{
+    CheckPasswordEpoch();
+    return sessions_.Touch(token);
+}
+
+void WebServerManager::TouchSession(const char* token)
+{
+    sessions_.Touch(token);
+}
+
+bool WebServerManager::CheckBearer(httpd_req_t* req)
+{
+    char hdr[48] = {};
+    if (httpd_req_get_hdr_value_str(req, "Authorization", hdr, sizeof(hdr)) != ESP_OK)
+        return false;
+    if (strncmp(hdr, "Bearer ", 7) != 0)
+        return false;
+    return ValidateToken(hdr + 7);
+}
+
+void WebServerManager::SendUnauthorized(httpd_req_t* req)
+{
+    // Manual 401 (esp_http_server's httpd_err_code_t has no 401) with
+    // CORS headers so cross-origin JS can read the status.
     SetCorsHeaders(req);
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"unauthorized\"}");
+}
 
-    char query[96] = {};
-    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK)
-    {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing ?partition=");
-        return ESP_FAIL;
-    }
+esp_err_t WebServerManager::HandleLoginGet(httpd_req_t* req)
+{
+    auto* self = static_cast<WebServerManager*>(req->user_ctx);
 
-    char label[17] = {};
-    if (httpd_query_key_value(query, "partition", label, sizeof(label)) != ESP_OK)
-    {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing 'partition' param");
-        return ESP_FAIL;
-    }
+    char name[33] = {};
+    self->serviceProvider_.getSystemManager().GetDeviceName(name, sizeof(name));
 
-    const esp_partition_t* p = esp_partition_find_first(
-        ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, label);
-    if (!p)
-    {
-        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Unknown partition");
-        return ESP_FAIL;
-    }
+    char body[128];   // 32-char name, worst-case JSON escaping
+    BufferStream out(body, sizeof(body));
+    JsonWriter json(out);
+    json.beginObject();
+    json.field("name", name);
+    json.endObject();
 
-    ESP_LOGI(TAG, "Download partition '%s' (%lu bytes)", label, (unsigned long)p->size);
-
-    httpd_resp_set_type(req, "application/octet-stream");
-
-    char disp[80];
-    snprintf(disp, sizeof(disp), "attachment; filename=\"%s.bin\"", label);
-    httpd_resp_set_hdr(req, "Content-Disposition", disp);
-
-    constexpr size_t CHUNK = 4096;
-    uint8_t buf[CHUNK];
-    size_t offset = 0;
-    while (offset < p->size)
-    {
-        size_t n = (p->size - offset < CHUNK) ? (p->size - offset) : CHUNK;
-        if (esp_partition_read(p, offset, buf, n) != ESP_OK)
-        {
-            ESP_LOGE(TAG, "esp_partition_read failed at offset %lu", (unsigned long)offset);
-            return ESP_FAIL;
-        }
-        if (httpd_resp_send_chunk(req, reinterpret_cast<const char*>(buf), n) != ESP_OK)
-        {
-            ESP_LOGW(TAG, "Client disconnected during download");
-            return ESP_FAIL;
-        }
-        offset += n;
-    }
-    httpd_resp_send_chunk(req, nullptr, 0);
+    SetCorsHeaders(req);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, out.data(), out.length());
     return ESP_OK;
 }
+
+esp_err_t WebServerManager::HandleLoginPost(httpd_req_t* req)
+{
+    auto* self = static_cast<WebServerManager*>(req->user_ctx);
+    self->CheckPasswordEpoch();
+
+    HttpRequestStream in(req);
+    JsonReader<256> json(in);
+    char password[64] = {};
+    json.GetString("password", password, sizeof(password));
+
+    char expected[64] = {};
+    webPassword_.Get(expected, sizeof(expected));
+
+    if (strcmp(password, expected) != 0)
+    {
+        // No delay, no lockout — deliberately (spec): this layer keeps
+        // out the pleps, it is not a security boundary.
+        SendUnauthorized(req);
+        return ESP_OK;
+    }
+
+    char token[SessionTable::TOKEN_LEN] = {};
+    self->sessions_.Create(token);
+
+    char body[64];
+    int n = snprintf(body, sizeof(body), "{\"token\":\"%s\"}", token);
+
+    SetCorsHeaders(req);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, body, n);
+    return ESP_OK;
+}
+
