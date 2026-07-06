@@ -19,6 +19,15 @@ idf.py -p <PORT> flash monitor
 idf.py -DBOARD=<name> build           # select a board from main/hardware/boards/ (default: esp32_devkit)
 ```
 
+The DIYLESS Thermostat 3 target is ESP32-S3 and must use its own build dir
+(the default `build/` stays esp32/devkit):
+
+```bash
+idf.py -B build_diyless -DBOARD=diyless_thermostat_3 set-target esp32s3   # once
+idf.py -B build_diyless -DBOARD=diyless_thermostat_3 build
+idf.py -B build_diyless -p <PORT> flash monitor    # console is on USB-Serial/JTAG
+```
+
 Frontend (React 19 + TypeScript + Vite + Tailwind + shadcn/ui, package manager is pnpm):
 
 ```bash
