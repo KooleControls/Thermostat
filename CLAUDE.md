@@ -23,10 +23,12 @@ The DIYLESS Thermostat 3 target is ESP32-S3 and must use its own build dir
 (the default `build/` stays esp32/devkit):
 
 ```bash
-idf.py -B build_diyless -DBOARD=diyless_thermostat_3 set-target esp32s3   # once
-idf.py -B build_diyless -DBOARD=diyless_thermostat_3 build
+idf.py -B build_diyless -DSDKCONFIG=sdkconfig_diyless -DBOARD=diyless_thermostat_3 set-target esp32s3   # once
+idf.py -B build_diyless -DSDKCONFIG=sdkconfig_diyless -DBOARD=diyless_thermostat_3 build
 idf.py -B build_diyless -p <PORT> flash monitor    # console is on USB-Serial/JTAG
 ```
+
+The `-DSDKCONFIG=sdkconfig_diyless` keeps this variant's config out of the root `sdkconfig`, which belongs to the default devkit build — without it, `set-target` for one variant clobbers the other.
 
 Frontend (React 19 + TypeScript + Vite + Tailwind + shadcn/ui, package manager is pnpm):
 
