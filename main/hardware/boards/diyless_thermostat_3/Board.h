@@ -4,6 +4,7 @@
 #include "InitState.h"
 #include "BoardConfig.h"
 #include "drivers/Aht20Sensor.h"
+#include "interfaces/AmbientSensor.h"
 #include "driver/i2c_master.h"
 
 // ──────────────────────────────────────────────────────────────
@@ -32,9 +33,7 @@ public:
 
     void Init();
 
-    // Concrete escape-hatch accessor; the ambient-sensor role interface
-    // is defined by the room-temperature feature item.
-    Aht20Sensor &GetAmbientSensor() { return ambientSensor_; }
+    AmbientSensor &GetAmbientSensor() { return ambientSensor_; }
 
 private:
     ServiceProvider &serviceProvider_;

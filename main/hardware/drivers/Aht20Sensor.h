@@ -7,13 +7,14 @@
 #include "esp_log.h"
 #include "esp_err.h"
 #include <cstdint>
+#include "interfaces/AmbientSensor.h"
 
 // ──────────────────────────────────────────────────────────────
 // Reusable driver — AHT20 temperature/humidity sensor over I2C (addr 0x38).
 //
 // Bus-agnostic: Init(bus) takes a shared i2c_master bus handle, so the same
 // driver works on any board (the board supplies its own bus). Implements the
-// board ambient-sensor contract (ReadTemperature / ReadHumidity /
+// AmbientSensor role interface (ReadTemperature / ReadHumidity /
 // HasHumidity / DefaultOffsetC / ok); the board's Board class owns an
 // instance and passes in its shared I2C bus (see diyless_thermostat_3/Board.h).
 //
@@ -24,7 +25,7 @@
 // This is a real ambient sensor, so DefaultOffsetC() is 0.
 // ──────────────────────────────────────────────────────────────
 
-class Aht20Sensor
+class Aht20Sensor : public AmbientSensor
 {
     static constexpr const char *TAG = "AHT20";
     static constexpr uint8_t ADDR = 0x38;
@@ -66,7 +67,7 @@ public:
         return true;
     }
 
-    bool ReadTemperature(float &celsius)
+    bool ReadTemperature(float &celsius) override
     {
         Service();
         if (!have_) return false;
@@ -74,7 +75,7 @@ public:
         return true;
     }
 
-    bool ReadHumidity(float &percent)
+    bool ReadHumidity(float &percent) override
     {
         Service();
         if (!have_) return false;
@@ -82,9 +83,9 @@ public:
         return true;
     }
 
-    bool HasHumidity() const { return true; }
-    float DefaultOffsetC() const { return 0.0f; }  // real ambient sensor — no fudge
-    bool ok() const { return dev_ != nullptr; }
+    bool HasHumidity() const override { return true; }
+    float DefaultOffsetC() const override { return 0.0f; }  // real ambient sensor — no fudge
+    bool ok() const override { return dev_ != nullptr; }
 
 private:
     void Trigger()
