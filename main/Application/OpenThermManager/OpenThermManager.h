@@ -48,7 +48,7 @@ struct OtBoilerState
     uint16_t oemFaultCode = 0;           // ID 5
     uint16_t oemDiagCode  = 0;           // ID 115
 
-    // t_set clamp from the boiler (ID 57, s8/s8 upper/lower)
+    // t_set clamp from the boiler (ID 49, s8/s8 upper/lower)
     float maxTSetUpper = 80;
     float maxTSetLower = 30;
 };
@@ -76,7 +76,9 @@ public:
 
     OtBoilerState GetState() const;
     OtDemand      GetDemand() const;
-    void          SetDemand(const OtDemand &d);   // ClimateManager's future entry
+    // ClimateManager's future entry. change-detected: calling it periodically
+    // with an unchanged demand is free.
+    void          SetDemand(const OtDemand &d);
 
 private:
     void Loop();
@@ -105,4 +107,9 @@ private:
     int      failStreak_ = 0;
     int      recoverBackoffS_ = 5;
     int64_t  nextRecoverUs_ = 0;
+
+    // Unsupported-ID bookkeeping for the rotation (UNKNOWN-DATAID reply → rare
+    // retry). kSlots (see OpenThermManager.cpp) is currently 14.
+    bool     unsupported_[/*kSlots*/ 14] = {};
+    uint32_t pass_ = 0;
 };

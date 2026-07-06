@@ -99,7 +99,9 @@ public:
             lastHeartbeatUs_ = esp_timer_get_time();
         }
         uint8_t status = 0;
-        return Transact(request, response, status);
+        if (!Transact(request, response, status)) return false;
+        // nonzero status = OT-bus level failure reported by the STM32.
+        return status == 0;
     }
 
     bool Recover() override

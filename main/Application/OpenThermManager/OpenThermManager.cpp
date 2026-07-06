@@ -27,7 +27,7 @@ namespace
     constexpr uint8_t ID_TOUTSIDE = 27;
     constexpr uint8_t ID_TRET     = 28;
     constexpr uint8_t ID_TDHWSET  = 56;
-    constexpr uint8_t ID_MAXTSET_BOUNDS = 57;
+    constexpr uint8_t ID_MAXTSET_BOUNDS = 49;  // s8/s8 max-CH-setpoint bounds (OT 2.2)
     constexpr uint8_t ID_OEMDIAG  = 115;
 
     // Fixed rotation: writes interleaved with reads. One slot per cycle.
@@ -42,10 +42,8 @@ namespace
         { ID_MAXTSET_BOUNDS, false }, { ID_SCONFIG, false },
     };
     constexpr size_t kSlots = sizeof(kRotation) / sizeof(kRotation[0]);
-
-    // Unsupported-ID bookkeeping (UNKNOWN-DATAID reply → rare retry).
-    bool     unsupported[kSlots] = {};
-    uint32_t pass = 0;
+    // Keeps OpenThermManager.h's fixed-size unsupported_[14] member honest.
+    static_assert(kSlots == 14, "OpenThermManager::unsupported_ is sized for kSlots == 14");
 }
 
 OpenThermManager::OpenThermManager(ServiceProvider &serviceProvider)
@@ -79,8 +77,17 @@ OtDemand      OpenThermManager::GetDemand() const { LOCK(mutex_); return demand_
 void OpenThermManager::SetDemand(const OtDemand &d)
 {
     LOCK(mutex_);
-    demand_ = d;
-    demandDirty_ = true;
+    bool changed = demand_.chEnable != d.chEnable ||
+                   demand_.dhwEnable != d.dhwEnable ||
+                   demand_.coolEnable != d.coolEnable ||
+                   fabsf(demand_.roomSetpoint - d.roomSetpoint) > 0.01f ||
+                   fabsf(demand_.dhwSetpoint - d.dhwSetpoint) > 0.01f ||
+                   fabsf(demand_.tSet - d.tSet) > 0.01f;
+    if (changed)
+    {
+        demand_ = d;
+        demandDirty_ = true;
+    }
 }
 
 // ── the master loop ───────────────────────────────────────────
@@ -119,7 +126,7 @@ void OpenThermManager::Loop()
                 if (!link.Recover())
                 {
                     nextRecoverUs_ = now + (int64_t)recoverBackoffS_ * 1000000;
-                    recoverBackoffS_ = recoverBackoffS_ >= 30 ? 30 : recoverBackoffS_ * 2;
+                    recoverBackoffS_ = (recoverBackoffS_ * 2 > 30) ? 30 : recoverBackoffS_ * 2;
                 }
                 else
                 {
@@ -154,7 +161,8 @@ bool OpenThermManager::DoStatus(OtLink &link)
     }
     uint32_t reply = 0;
     if (!link.Transaction(OtFrame::Build(F::ReadData, ID_STATUS, master), reply) ||
-        OtFrame::Type(reply) != F::ReadAck)
+        OtFrame::Type(reply) != F::ReadAck ||
+        OtFrame::Id(reply) != ID_STATUS)
         return false;
 
     uint8_t slave = OtFrame::Value(reply) & 0xFF;
@@ -172,7 +180,8 @@ void OpenThermManager::DoOverrideRead(OtLink &link)
 {
     uint32_t reply = 0;
     if (!link.Transaction(OtFrame::Build(F::ReadData, ID_TROVRD, 0), reply) ||
-        OtFrame::Type(reply) != F::ReadAck)
+        OtFrame::Type(reply) != F::ReadAck ||
+        OtFrame::Id(reply) != ID_TROVRD)
         return;
 
     float ovr = OtFrame::FromF88(OtFrame::Value(reply));
@@ -198,12 +207,12 @@ void OpenThermManager::DoRotationSlot(OtLink &link)
 
     // Skip unsupported IDs except on the rare retry pass.
     size_t tries = 0;
-    while (unsupported[slot_] && (pass % RetryUnsupportedEvery) != 0 && tries++ < kSlots)
-        if (++slot_ >= kSlots) { slot_ = 0; pass++; }
+    while (unsupported_[slot_] && (pass_ % RetryUnsupportedEvery) != 0 && tries++ < kSlots)
+        if (++slot_ >= kSlots) { slot_ = 0; pass_++; }
 
     const Slot s = kRotation[slot_];
     size_t idx = slot_;
-    if (++slot_ >= kSlots) { slot_ = 0; pass++; }
+    if (++slot_ >= kSlots) { slot_ = 0; pass_++; }
 
     uint32_t req;
     if (s.write)
@@ -232,6 +241,7 @@ void OpenThermManager::DoRotationSlot(OtLink &link)
                 return;   // no valid sample -> skip this slot
             v = t;
         }
+        if (std::isnan(v)) return;   // no valid value to send this slot
         req = OtFrame::Build(F::WriteData, s.id, OtFrame::F88(v));
     }
     else
@@ -241,16 +251,29 @@ void OpenThermManager::DoRotationSlot(OtLink &link)
 
     uint32_t reply = 0;
     if (!link.Transaction(req, reply)) return;
+    // Discard stale/late replies from a previously timed-out request before
+    // touching anything below — a mismatched data-ID must never be attributed
+    // to this slot's request.
+    if (OtFrame::Id(reply) != s.id) return;
 
     if (OtFrame::Type(reply) == F::UnknownDataId)
     {
-        if (!unsupported[idx])
+        if (!unsupported_[idx])
             ESP_LOGI(TAG, "Data-ID %u not supported by slave", s.id);
-        unsupported[idx] = true;
+        unsupported_[idx] = true;
         return;
     }
-    unsupported[idx] = false;
-    if (s.write) return;                        // WriteAck carries nothing to store
+
+    if (s.write)
+    {
+        // A WriteAck confirms the slave accepted it; anything else (e.g.
+        // DataInvalid) must not clear the unsupported flag — just bail.
+        if (OtFrame::Type(reply) != F::WriteAck) return;
+        unsupported_[idx] = false;
+        return;
+    }
+
+    unsupported_[idx] = false;
     if (OtFrame::Type(reply) != F::ReadAck) return;
 
     uint16_t val = OtFrame::Value(reply);
@@ -320,17 +343,45 @@ void OpenThermManager::Cmd_Status(Stream &, Stream &out)
 void OpenThermManager::Cmd_Set(Stream &in, Stream &out)
 {
     JsonReader<256> json(in);
+    bool changed = false;
     {
         LOCK(mutex_);
         float f;
         int   i;
-        if (!std::isnan(f = json.GetFloat("setpoint", NAN)))    demand_.roomSetpoint = f;
-        if (!std::isnan(f = json.GetFloat("dhwSetpoint", NAN))) demand_.dhwSetpoint = f;
-        if (!std::isnan(f = json.GetFloat("tset", NAN)))        demand_.tSet = f;
-        if ((i = json.GetInt("ch", -1))   >= 0) demand_.chEnable   = i != 0;
-        if ((i = json.GetInt("dhw", -1))  >= 0) demand_.dhwEnable  = i != 0;
-        if ((i = json.GetInt("cool", -1)) >= 0) demand_.coolEnable = i != 0;
-        demandDirty_ = true;
+        if (!std::isnan(f = json.GetFloat("setpoint", NAN)))
+        {
+            if (f < 5.0f) f = 5.0f;
+            if (f > 30.0f) f = 30.0f;
+            if (fabsf(demand_.roomSetpoint - f) > 0.01f) { demand_.roomSetpoint = f; changed = true; }
+        }
+        if (!std::isnan(f = json.GetFloat("dhwSetpoint", NAN)))
+        {
+            if (f < 30.0f) f = 30.0f;
+            if (f > 80.0f) f = 80.0f;
+            if (fabsf(demand_.dhwSetpoint - f) > 0.01f) { demand_.dhwSetpoint = f; changed = true; }
+        }
+        if (!std::isnan(f = json.GetFloat("tset", NAN)))
+        {
+            if (f < 0.0f) f = 0.0f;
+            if (f > 90.0f) f = 90.0f;
+            if (fabsf(demand_.tSet - f) > 0.01f) { demand_.tSet = f; changed = true; }
+        }
+        if ((i = json.GetInt("ch", -1)) >= 0)
+        {
+            bool v = i != 0;
+            if (demand_.chEnable != v) { demand_.chEnable = v; changed = true; }
+        }
+        if ((i = json.GetInt("dhw", -1)) >= 0)
+        {
+            bool v = i != 0;
+            if (demand_.dhwEnable != v) { demand_.dhwEnable = v; changed = true; }
+        }
+        if ((i = json.GetInt("cool", -1)) >= 0)
+        {
+            bool v = i != 0;
+            if (demand_.coolEnable != v) { demand_.coolEnable = v; changed = true; }
+        }
+        if (changed) demandDirty_ = true;
     }
     Cmd_Status(in, out);   // reply with the resulting full state
 }
