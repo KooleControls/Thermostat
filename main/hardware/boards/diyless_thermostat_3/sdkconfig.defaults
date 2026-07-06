@@ -1,0 +1,22 @@
+# ──────────────────────────────────────────────────────────────
+# Per-board sdkconfig overlay — DIYLESS Thermostat 3 (hw v3.3).
+# Composed after the shared sdkconfig.defaults (root CMakeLists) and wins
+# on conflicts. Target: ESP32-S3 (build dir configured with set-target esp32s3).
+# ──────────────────────────────────────────────────────────────
+
+# 8 MB flash with our 8 MB partition layout (two 3 MB OTA slots + www).
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_8mb.csv"
+
+# 8 MB embedded octal PSRAM @ 80 MHz.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# 240 MHz CPU.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# Console on USB-Serial/JTAG, NOT UART0. UART0's default pins are repurposed
+# on this board: GPIO43 is the LCD reset and GPIO44 the STM32 boot pin — a
+# UART0 console would bit-bang log traffic onto them.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
