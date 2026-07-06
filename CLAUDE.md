@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Strux is a template/foundation for ESP32 firmware (ESP-IDF v6.0, C++, FreeRTOS) with a React web UI. It is meant to be copied and renamed into new projects, so keep the core generic — several downstream forks (e.g. the KC1245 Thermostat) backport improvements from and to this repo.
+The **KC Thermostat** — an OpenTherm room thermostat (OT master) that pairs with the KC1245 Gateway as a drop-in replacement for the third-party unit. Built on the Strux template (ESP-IDF v6.0, C++, FreeRTOS, React web UI); Strux is a local git remote (`strux`) and template improvements flow both ways. Roadmap and backlog: `docs/roadmap.md`.
+
+Deviations from stock Strux: **no MQTT / Home Assistant managers** (the gateway owns smart-home integration).
 
 ## Build commands
 
@@ -38,7 +40,7 @@ Everything in firmware is a "manager" owned by `ApplicationContext` ([main/Appli
 - has copy/move deleted,
 - initializes in `Init()` guarded by an `InitState` (`lib/rtos/InitState.h`), not in the constructor.
 
-`main.cpp` is only ordered `Init()` calls — order matters (Console → Settings → System → Network → Time → Command → Mqtt → Board → HomeAssistant → Update → WebServer). Adding a manager means: create the class, add it to `ServiceProvider`, `ApplicationContext`, `main.cpp`, and `main/CMakeLists.txt` (both `SOURCE_FILES_LIST` and `INCLUDE_DIRS_LIST` — sources are listed explicitly, no globbing).
+`main.cpp` is only ordered `Init()` calls — order matters (Console → Settings → System → Network → Time → Command → Board → Update → WebServer). Adding a manager means: create the class, add it to `ServiceProvider`, `ApplicationContext`, `main.cpp`, and `main/CMakeLists.txt` (both `SOURCE_FILES_LIST` and `INCLUDE_DIRS_LIST` — sources are listed explicitly, no globbing).
 
 ### Layer separation
 
@@ -74,10 +76,6 @@ uint32_t p = port_.Get();   // NVS value or the typed default
 ```
 
 `SettingsManager` is the NVS link; the settings UI is generated dynamically from the registered definitions.
-
-### Home Assistant integration
-
-`MqttManager` handles the MQTT connection; `HomeAssistantManager` publishes MQTT discovery. Any manager can register HA entities: `mqtt.RegisterCommand(name, handler)` for inbound commands and `mqtt.RegisterDiscovery(...)` / `PublishEntityDiscovery(...)` for discovery configs (re-published on every MQTT connect).
 
 ## Conventions
 
