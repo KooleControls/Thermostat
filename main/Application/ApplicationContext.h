@@ -4,6 +4,7 @@
 #include "CommandManager/CommandManager.h"
 #include "ConsoleManager/ConsoleManager.h"
 #include "NetworkManager/NetworkManager.h"
+#include "OpenThermManager/OpenThermManager.h"
 #include "SettingsManager/SettingsManager.h"
 #include "SystemManager/SystemManager.h"
 #include "TimeManager/TimeManager.h"
@@ -22,6 +23,7 @@ public:
     CommandManager& getCommandManager() override { return m_commandManager; }
     ConsoleManager& getConsoleManager() override { return m_consoleManager; }
     NetworkManager& getNetworkManager() override { return m_networkManager; }
+    OpenThermManager& getOpenThermManager() override { return m_openThermManager; }
     SettingsManager& getSettingsManager() override { return m_settingsManager; }
     SystemManager& getSystemManager() override { return m_systemManager; }
     TimeManager& getTimeManager() override { return m_timeManager; }
@@ -36,6 +38,7 @@ private:
     TimeManager m_timeManager{*this};
     CommandManager m_commandManager{*this};
     Board m_board{*this};
+    OpenThermManager m_openThermManager{*this};
     UpdateManager m_updateManager{*this};
     WebServerManager m_webServerManager{*this};
 };

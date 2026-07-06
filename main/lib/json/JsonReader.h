@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 
 // Buffered JSON request reader. Consumes the request stream into an
 // internal bounded buffer at construction, then serves typed getters
@@ -54,5 +55,14 @@ public:
         const char* v = FindJsonField(buf_, key);
         if (!v) return def;
         return *v == 't';   // JSON literals: true / false / null
+    }
+
+    float GetFloat(const char* key, float def = 0.0f) const
+    {
+        const char* v = FindJsonField(buf_, key);
+        if (!v) return def;
+        char* end = nullptr;
+        float f = strtof(v, &end);
+        return end == v ? def : f;
     }
 };
