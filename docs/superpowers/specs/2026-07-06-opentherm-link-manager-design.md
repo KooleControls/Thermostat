@@ -83,8 +83,21 @@ keepalive — plus one secondary message from:
   ID 57 bounds), room setpoint (16), room temp (24), DHW setpoint (56).
 - **Reads** (rotation, each every few seconds): modulation 17, boiler temp
   25, DHW temp 26, return 28, pressure 18, outside 27, OEM fault 5, OEM
-  diag 115, bounds 57, slave config 3.
+  diag 115, **max-t_set bounds ID 49 (s8/s8 — NOT 57, which is f8.8 MaxTSet;
+  corrected after review)**, slave config 3.
 - **Override read** (ID 9): every ~1 s.
+
+**Reply validation (added after review — Critical):** every received frame
+must match `OtFrame::Id(reply) == requested id` before use, and writes must
+see `WriteAck`; the STM32 status byte from `Transact` must be checked. The
+STM32 can deliver late replies from timed-out requests — without the ID
+check, a stale boiler-temp reply can be adopted as an ID 9 override
+setpoint.
+
+**`SetDemand()` contract (added after review):** dirty-marking is
+change-detected (compare against current demand) so a periodic caller (the
+future PID, ~1 s) cannot pin the rotation at slot 0 and starve the back
+half of the schedule.
 
 ## Verification
 
