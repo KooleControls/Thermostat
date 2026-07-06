@@ -13,22 +13,10 @@ Deviations from stock Strux: **no MQTT / Home Assistant managers** (the gateway 
 Firmware (requires ESP-IDF v6.0+ environment):
 
 ```bash
-idf.py set-target esp32
-idf.py build                          # also builds the frontend if pnpm is installed
-idf.py -p <PORT> flash monitor
-idf.py -DBOARD=<name> build           # select a board from main/hardware/boards/ (default: esp32_devkit)
+idf.py set-target esp32s3
+idf.py build                          # DIYLESS Thermostat 3 (the only board)
+idf.py -p <PORT> flash monitor        # console is on USB-Serial/JTAG
 ```
-
-The DIYLESS Thermostat 3 target is ESP32-S3 and must use its own build dir
-(the default `build/` stays esp32/devkit):
-
-```bash
-idf.py -B build_diyless -DSDKCONFIG=sdkconfig_diyless -DBOARD=diyless_thermostat_3 set-target esp32s3   # once
-idf.py -B build_diyless -DSDKCONFIG=sdkconfig_diyless -DBOARD=diyless_thermostat_3 build
-idf.py -B build_diyless -p <PORT> flash monitor    # console is on USB-Serial/JTAG
-```
-
-The `-DSDKCONFIG=sdkconfig_diyless` keeps this variant's config out of the root `sdkconfig`, which belongs to the default devkit build — without it, `set-target` for one variant clobbers the other.
 
 Frontend (React 19 + TypeScript + Vite + Tailwind + shadcn/ui, package manager is pnpm):
 

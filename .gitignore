@@ -19,7 +19,6 @@
 # Build artifacts and directories
 **/build/
 build/
-build_diyless/
 *.o
 *.a
 *.out
@@ -32,7 +31,6 @@ build_diyless/
 flasher_args.json # Generated in build directory
 sdkconfig.old
 sdkconfig
-sdkconfig_diyless*
 
 # ESP-IDF dependencies
 # For older versions or manual component management

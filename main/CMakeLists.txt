@@ -61,7 +61,7 @@ set(COMPONENT_REQUIRES
 # DevKit. Each board lives in main/hardware/boards/<name>/ with its own
 # BoardConfig.h and a board.cmake fragment that may append extra files to
 # BOARD_SOURCES. Shared, board-independent drivers live in hardware/drivers/.
-set(BOARD "esp32_devkit" CACHE STRING "Target board (folder under main/hardware/boards/)")
+set(BOARD "diyless_thermostat_3" CACHE STRING "Target board (folder under main/hardware/boards/)")
 
 set(BOARD_DIR "${CMAKE_CURRENT_LIST_DIR}/hardware/boards/${BOARD}")
 if(NOT EXISTS "${BOARD_DIR}/board.cmake")

@@ -4,9 +4,7 @@
 #   ST7701S · GT911 capacitive touch · AHT20 on the shared I2C bus ·
 #   STM32L051 co-processor (owns the OpenTherm PHY) · no user LED.
 #
-# Build with:  idf.py -B build_diyless -DSDKCONFIG=sdkconfig_diyless -DBOARD=diyless_thermostat_3 build
-# (fresh dir first: same flags with `set-target esp32s3`; -DSDKCONFIG keeps this
-#  variant's config out of the root sdkconfig, which belongs to the devkit build)
+# Build with:  idf.py set-target esp32s3   (once)   then   idf.py build
 #
 # Flash/PSRAM/console config lives in this folder's sdkconfig.defaults.
 # Component deps are NOT set here — managed deps go in main/idf_component.yml,
