@@ -30,11 +30,15 @@ void RoomTemperatureManager::Init()
     ESP_LOGI(TAG, "Initialized (sampling every %d ms)", SampleIntervalMs);
 }
 
-bool RoomTemperatureManager::GetRoomTemperature(float &celsius)
+bool RoomTemperatureManager::IsValid(int64_t readUs, int64_t now)
+{
+    return readUs >= 0 && (now - readUs) <= ValidityUs;
+}
+
+bool RoomTemperatureManager::GetRoomTemperature(float &celsius) const
 {
     LOCK(mutex_);
-    if (lastReadUs_ < 0) return false;
-    if (esp_timer_get_time() - lastReadUs_ > ValidityUs) return false;
+    if (!IsValid(lastReadUs_, esp_timer_get_time())) return false;
     celsius = lastTemp_;
     return true;
 }
@@ -79,7 +83,7 @@ void RoomTemperatureManager::Cmd_RoomTemp(Stream &, Stream &out)
         readUs = lastReadUs_;
     }
     int64_t now = esp_timer_get_time();
-    bool     valid = readUs >= 0 && (now - readUs) <= ValidityUs;
+    bool     valid = IsValid(readUs, now);
     uint32_t ageMs = readUs < 0 ? 0 : (uint32_t)((now - readUs) / 1000);
 
     JsonObject resp(out);

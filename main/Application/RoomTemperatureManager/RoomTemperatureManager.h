@@ -30,11 +30,15 @@ public:
     void Init();
 
     // false = no valid recent measurement (never read, or stale > 30 s).
-    bool GetRoomTemperature(float &celsius);
+    bool GetRoomTemperature(float &celsius) const;
 
 private:
     void Loop();
     void Cmd_RoomTemp(Stream &in, Stream &out);   // roomTemp
+
+    // Shared validity rule: a reading is valid if it exists and is no older
+    // than ValidityUs. Boundary: exactly ValidityUs old is still valid.
+    static bool IsValid(int64_t readUs, int64_t now);
 
     inline static CommandEntry commands_[] = {
         { "roomTemp", &InvokeCommand<&RoomTemperatureManager::Cmd_RoomTemp> },

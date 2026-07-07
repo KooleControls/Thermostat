@@ -23,6 +23,10 @@
 // the caller's poll task, reads are non-blocking: a poll latches the previous
 // (now-complete) measurement and re-triggers the next. The first sample is
 // taken (briefly blocking) in Init() so the UI has a real reading at startup.
+// Failure handling: a failed Trigger() or Latch() is retried on the next
+// Service() call; after MAX_CONSECUTIVE_FAILURES in a row, have_ is cleared
+// so ReadTemperature()/ReadHumidity() report "no data" instead of serving a
+// frozen stale value forever.
 // ──────────────────────────────────────────────────────────────
 
 class Aht20Sensor : public TemperatureSensor, public HumiditySensor
@@ -85,6 +89,8 @@ public:
 
 
 private:
+    static constexpr int MAX_CONSECUTIVE_FAILURES = 3;
+
     void Trigger()
     {
         const uint8_t cmd[] = {0xAC, 0x33, 0x00};
@@ -93,13 +99,26 @@ private:
             pending_ = true;
             triggerUs_ = esp_timer_get_time();
         }
+        else
+        {
+            Fail();
+        }
     }
 
     // If a triggered measurement has had time to complete, latch it and start
-    // the next one. Non-blocking — safe to call from the poll task.
+    // the next one. Non-blocking — safe to call from the poll task. Also
+    // recovers from a previously failed Trigger() (pending_ never got set).
     void Service()
     {
-        if (pending_ && esp_timer_get_time() - triggerUs_ >= MEASURE_US)
+        if (!dev_) return;
+
+        if (!pending_)
+        {
+            Trigger();
+            return;
+        }
+
+        if (esp_timer_get_time() - triggerUs_ >= MEASURE_US)
         {
             Latch();
             Trigger();
@@ -112,15 +131,30 @@ private:
         pending_ = false;
         uint8_t b[7] = {};
         if (i2c_master_receive(dev_, b, sizeof(b), 100) != ESP_OK)
+        {
+            Fail();
             return;
+        }
         if (b[0] & 0x80)  // bit 7 = still busy — drop this sample
+        {
+            Fail();
             return;
+        }
 
         uint32_t rh = ((uint32_t)b[1] << 12) | ((uint32_t)b[2] << 4) | (b[3] >> 4);
         uint32_t t  = (((uint32_t)b[3] & 0x0F) << 16) | ((uint32_t)b[4] << 8) | b[5];
         humidity_ = rh * 100.0f / 1048576.0f;        // 2^20
         temp_     = t * 200.0f / 1048576.0f - 50.0f;
         have_ = true;
+        consecutiveFailures_ = 0;
+    }
+
+    // Track consecutive Trigger()/Latch() failures; after enough in a row,
+    // stop serving the last (now possibly stale-forever) reading.
+    void Fail()
+    {
+        if (++consecutiveFailures_ >= MAX_CONSECUTIVE_FAILURES)
+            have_ = false;
     }
 
     i2c_master_dev_handle_t dev_ = nullptr;
@@ -129,4 +163,5 @@ private:
     int64_t triggerUs_ = 0;
     float temp_ = 0.0f;
     float humidity_ = 0.0f;
+    int consecutiveFailures_ = 0;
 };
