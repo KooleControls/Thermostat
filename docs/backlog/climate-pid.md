@@ -17,3 +17,9 @@ the control loop.
 
 Done when: setpoint step on the bench produces a plausible modulating t_set
 curve (heating) and a cooling request in Cool mode.
+
+**Explicit deliverable — OpenThermManager slims to pure transport:** when
+ClimateManager takes ownership of setpoint/mode/room temp, remove the
+manager's temporary feeds (direct `GetTemperatureSensor()` read for ID 24,
+demand defaults) and reassess its size — the deferred responsibility-split
+question (Bas, 2026-07-07) gets answered here, not before.
