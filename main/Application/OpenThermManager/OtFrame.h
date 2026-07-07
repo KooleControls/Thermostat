@@ -28,6 +28,14 @@ namespace OtFrame
         return f;
     }
 
+    // Even parity over all 32 bits — a received frame must pass this.
+    inline bool ParityOk(uint32_t f)
+    {
+        int ones = 0;
+        while (f) { ones += f & 1; f >>= 1; }
+        return (ones & 1) == 0;
+    }
+
     inline MsgType  Type(uint32_t f)  { return (MsgType)((f >> 28) & 0x7); }
     inline uint8_t  Id(uint32_t f)    { return (f >> 16) & 0xFF; }
     inline uint16_t Value(uint32_t f) { return f & 0xFFFF; }

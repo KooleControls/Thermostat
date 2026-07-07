@@ -100,8 +100,11 @@ public:
         }
         uint8_t status = 0;
         if (!Transact(request, response, status)) return false;
-        // nonzero status = OT-bus level failure reported by the STM32.
-        return status == 0;
+        // The STM32's ResponseStatus byte is firmware-dependent (observed:
+        // 1 accompanying a perfectly valid reply on fwVer=1) — do NOT gate
+        // on it. The reply frame itself is validated upstream: parity via
+        // ParityOk plus msg-type and data-ID matching in OpenThermManager.
+        return true;
     }
 
     bool Recover() override

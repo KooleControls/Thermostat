@@ -161,6 +161,7 @@ bool OpenThermManager::DoStatus(OtLink &link)
     }
     uint32_t reply = 0;
     if (!link.Transaction(OtFrame::Build(F::ReadData, ID_STATUS, master), reply) ||
+        !OtFrame::ParityOk(reply) ||
         OtFrame::Type(reply) != F::ReadAck ||
         OtFrame::Id(reply) != ID_STATUS)
         return false;
@@ -180,6 +181,7 @@ void OpenThermManager::DoOverrideRead(OtLink &link)
 {
     uint32_t reply = 0;
     if (!link.Transaction(OtFrame::Build(F::ReadData, ID_TROVRD, 0), reply) ||
+        !OtFrame::ParityOk(reply) ||
         OtFrame::Type(reply) != F::ReadAck ||
         OtFrame::Id(reply) != ID_TROVRD)
         return;
@@ -252,7 +254,7 @@ void OpenThermManager::DoRotationSlot(OtLink &link)
     }
 
     uint32_t reply = 0;
-    if (!link.Transaction(req, reply)) return;
+    if (!link.Transaction(req, reply) || !OtFrame::ParityOk(reply)) return;
     // Discard stale/late replies from a previously timed-out request before
     // touching anything below — a mismatched data-ID must never be attributed
     // to this slot's request.

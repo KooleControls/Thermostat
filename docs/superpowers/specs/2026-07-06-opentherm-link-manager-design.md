@@ -87,12 +87,15 @@ keepalive — plus one secondary message from:
   corrected after review)**, slave config 3.
 - **Override read** (ID 9): every ~1 s.
 
-**Reply validation (added after review — Critical):** every received frame
-must match `OtFrame::Id(reply) == requested id` before use, and writes must
-see `WriteAck`; the STM32 status byte from `Transact` must be checked. The
+**Reply validation (added after review — Critical; refined on hardware):**
+every received frame must pass `OtFrame::ParityOk`, match
+`OtFrame::Id(reply) == requested id`, and writes must see `WriteAck`. The
 STM32 can deliver late replies from timed-out requests — without the ID
 check, a stale boiler-temp reply can be adopted as an ID 9 override
-setpoint.
+setpoint. The STM32's ResponseStatus byte is **diagnostic only**: its
+semantics are firmware-dependent (fwVer=1 returns status=1 alongside valid
+replies — gating on status==0 broke the link on real hardware). The frame
+is the truth.
 
 **`SetDemand()` contract (added after review):** dirty-marking is
 change-detected (compare against current demand) so a periodic caller (the
