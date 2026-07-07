@@ -5,6 +5,7 @@
 #include "ConsoleManager/ConsoleManager.h"
 #include "NetworkManager/NetworkManager.h"
 #include "OpenThermManager/OpenThermManager.h"
+#include "ClimateManager/ClimateManager.h"
 #include "RoomTemperatureManager/RoomTemperatureManager.h"
 #include "SettingsManager/SettingsManager.h"
 #include "SystemManager/SystemManager.h"
@@ -21,6 +22,7 @@ public:
     ApplicationContext& operator=(const ApplicationContext&) = delete;
 
     Board& getBoard() override { return m_board; }
+    ClimateManager& getClimateManager() override { return m_climateManager; }
     CommandManager& getCommandManager() override { return m_commandManager; }
     ConsoleManager& getConsoleManager() override { return m_consoleManager; }
     NetworkManager& getNetworkManager() override { return m_networkManager; }
@@ -42,6 +44,7 @@ private:
     Board m_board{*this};
     RoomTemperatureManager m_roomTemperatureManager{*this};
     OpenThermManager m_openThermManager{*this};
+    ClimateManager m_climateManager{*this};
     UpdateManager m_updateManager{*this};
     WebServerManager m_webServerManager{*this};
 };

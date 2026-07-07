@@ -1,6 +1,7 @@
 #pragma once
 
 class Board;
+class ClimateManager;
 class CommandManager;
 class ConsoleManager;
 class NetworkManager;
@@ -16,6 +17,7 @@ class ServiceProvider
 {
 public:
     virtual Board& getBoard() = 0;
+    virtual ClimateManager& getClimateManager() = 0;
     virtual CommandManager& getCommandManager() = 0;
     virtual ConsoleManager& getConsoleManager() = 0;
     virtual NetworkManager& getNetworkManager() = 0;
