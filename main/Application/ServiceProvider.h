@@ -4,6 +4,7 @@ class Board;
 class ClimateManager;
 class CommandManager;
 class ConsoleManager;
+class DisplayManager;
 class HotWaterManager;
 class NetworkManager;
 class OpenThermManager;
@@ -21,6 +22,7 @@ public:
     virtual ClimateManager& getClimateManager() = 0;
     virtual CommandManager& getCommandManager() = 0;
     virtual ConsoleManager& getConsoleManager() = 0;
+    virtual DisplayManager& getDisplayManager() = 0;
     virtual HotWaterManager& getHotWaterManager() = 0;
     virtual NetworkManager& getNetworkManager() = 0;
     virtual OpenThermManager& getOpenThermManager() = 0;
