@@ -8,8 +8,8 @@
 #include <cstdint>
 
 // What WE demand from the boiler (thermostat = OT master). Pushed in via the
-// slice setters: SetHeatingDemand() (ClimateManager) + SetDhwDemand() (otSet
-// today, hot-water manager later).
+// slice setters: SetHeatingDemand() (ClimateManager) + SetDhwDemand()
+// (HotWaterManager).
 struct OtDemand
 {
     bool  chEnable     = false;   // ID 0 master bit 0 — heat demand
@@ -81,11 +81,9 @@ public:
 
     OtBoilerState GetState() const;
     OtDemand      GetDemand() const;
-    // ClimateManager's future entry. change-detected: calling it periodically
-    // with an unchanged demand is free.
     // Demand is written in two independent slices so distinct owners don't
-    // clobber each other: ClimateManager owns heating/cooling; the DHW owner
-    // (otSet today, hot-water manager in item 6) owns DHW.
+    // clobber each other: ClimateManager owns heating/cooling, HotWaterManager
+    // owns DHW. Change-detected: pushing an unchanged slice is free.
     void SetHeatingDemand(bool chEnable, bool coolEnable, float roomSetpoint, float tSet);
     void SetDhwDemand(bool dhwEnable, float dhwSetpoint);
 
@@ -119,11 +117,9 @@ private:
     void     MarkLinkDown();
 
     void Cmd_Status(Stream &in, Stream &out);     // otStatus
-    void Cmd_Set(Stream &in, Stream &out);        // otSet
 
     inline static CommandEntry commands_[] = {
         { "otStatus", &InvokeCommand<&OpenThermManager::Cmd_Status> },
-        { "otSet",    &InvokeCommand<&OpenThermManager::Cmd_Set> },
     };
 
     ServiceProvider &serviceProvider_;

@@ -4,7 +4,6 @@
 #include "Board.h"
 #include "RoomTemperatureManager.h"
 #include "JsonScope.h"
-#include "JsonReader.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <cmath>
@@ -418,24 +417,3 @@ void OpenThermManager::Cmd_Status(Stream &, Stream &out)
     resp.field("tSet", d.tSet);
 }
 
-void OpenThermManager::Cmd_Set(Stream &in, Stream &out)
-{
-    // Heating/cooling demand is ClimateManager's now (climateSet). otSet only
-    // pokes DHW until the hot-water manager (item 6) takes it over.
-    JsonReader<256> json(in);
-    OtDemand d = GetDemand();
-    bool  dhw    = d.dhwEnable;
-    float dhwSet = d.dhwSetpoint;
-
-    int i = json.GetInt("dhw", -1);
-    if (i >= 0) dhw = (i != 0);
-    float f = json.GetFloat("dhwSetpoint", NAN);
-    if (!std::isnan(f))
-    {
-        if (f < 30.0f) f = 30.0f;
-        if (f > 80.0f) f = 80.0f;
-        dhwSet = f;
-    }
-    SetDhwDemand(dhw, dhwSet);
-    Cmd_Status(in, out);   // reply with the resulting full state
-}
