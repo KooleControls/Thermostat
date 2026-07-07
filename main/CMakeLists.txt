@@ -63,6 +63,13 @@ set(COMPONENT_REQUIRES
     esp_driver_i2c
     esp_driver_uart
     mdns
+    esp_lcd
+    lvgl__lvgl
+    espressif__esp_lvgl_port
+    espressif__esp_lcd_touch
+    espressif__esp_lcd_touch_gt911
+    espressif__esp_lcd_st7701
+    espressif__esp_lcd_panel_io_additions
 )
 
 # ── Board selection ────────────────────────────────────────────

@@ -20,3 +20,9 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # on this board: GPIO43 is the LCD reset and GPIO44 the STM32 boot pin — a
 # UART0 console would bit-bang log traffic onto them.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# LVGL — Montserrat font sizes used by the on-screen UI (14 is the only default).
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
