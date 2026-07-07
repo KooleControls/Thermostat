@@ -46,27 +46,6 @@ namespace
     // Keeps OpenThermManager.h's fixed-size unsupported_[14] member honest.
     static_assert(kSlots == 14, "OpenThermManager::unsupported_ is sized for kSlots == 14");
 
-    // Clamp v into [lo,hi] and assign if it differs; NAN (absent JSON field)
-    // assigns nothing. Returns whether target changed.
-    bool ClampedAssign(float &target, float v, float lo, float hi)
-    {
-        if (std::isnan(v)) return false;
-        if (v < lo) v = lo;
-        if (v > hi) v = hi;
-        if (fabsf(target - v) <= 0.01f) return false;
-        target = v;
-        return true;
-    }
-
-    // v < 0 means the JSON field was absent. Returns whether target changed.
-    bool AssignFlag(bool &target, int v)
-    {
-        if (v < 0) return false;
-        bool b = v != 0;
-        if (target == b) return false;
-        target = b;
-        return true;
-    }
 }
 
 OpenThermManager::OpenThermManager(ServiceProvider &serviceProvider)
@@ -97,18 +76,32 @@ void OpenThermManager::Init()
 OtBoilerState OpenThermManager::GetState() const { LOCK(mutex_); return state_; }
 OtDemand      OpenThermManager::GetDemand() const { LOCK(mutex_); return demand_; }
 
-void OpenThermManager::SetDemand(const OtDemand &d)
+void OpenThermManager::SetHeatingDemand(bool chEnable, bool coolEnable, float roomSetpoint, float tSet)
 {
     LOCK(mutex_);
-    bool changed = demand_.chEnable != d.chEnable ||
-                   demand_.dhwEnable != d.dhwEnable ||
-                   demand_.coolEnable != d.coolEnable ||
-                   fabsf(demand_.roomSetpoint - d.roomSetpoint) > 0.01f ||
-                   fabsf(demand_.dhwSetpoint - d.dhwSetpoint) > 0.01f ||
-                   fabsf(demand_.tSet - d.tSet) > 0.01f;
+    bool changed = demand_.chEnable != chEnable ||
+                   demand_.coolEnable != coolEnable ||
+                   fabsf(demand_.roomSetpoint - roomSetpoint) > 0.01f ||
+                   fabsf(demand_.tSet - tSet) > 0.01f;
     if (changed)
     {
-        demand_ = d;
+        demand_.chEnable   = chEnable;
+        demand_.coolEnable = coolEnable;
+        demand_.roomSetpoint = roomSetpoint;
+        demand_.tSet       = tSet;
+        demandDirty_ = true;
+    }
+}
+
+void OpenThermManager::SetDhwDemand(bool dhwEnable, float dhwSetpoint)
+{
+    LOCK(mutex_);
+    bool changed = demand_.dhwEnable != dhwEnable ||
+                   fabsf(demand_.dhwSetpoint - dhwSetpoint) > 0.01f;
+    if (changed)
+    {
+        demand_.dhwEnable   = dhwEnable;
+        demand_.dhwSetpoint = dhwSetpoint;
         demandDirty_ = true;
     }
 }
@@ -234,10 +227,14 @@ void OpenThermManager::DoOverrideRead(OtLink &link)
         return;
 
     float ovr = OtFrame::FromF88(raw);
-    if (ovr <= 0.0f) return;         // 0 = no override pending
-    if (ovr < 5.0f) ovr = 5.0f;      // same sanity clamp as otSet
-    if (ovr > 30.0f) ovr = 30.0f;
-    AdoptOverride(ovr);
+    if (ovr < 0.0f) ovr = 0.0f;               // negative is meaningless
+    if (ovr > 0.0f)                            // clamp a real override; 0 = none
+    {
+        if (ovr < 5.0f) ovr = 5.0f;
+        else if (ovr > 30.0f) ovr = 30.0f;
+    }
+    LOCK(mutex_);
+    state_.overrideSetpoint = ovr;             // ClimateManager adopts it
 }
 
 void OpenThermManager::DoRotationSlot(OtLink &link)
@@ -382,15 +379,6 @@ void OpenThermManager::MarkLinkDown()
     state_.linked = false;
 }
 
-void OpenThermManager::AdoptOverride(float setpoint)
-{
-    LOCK(mutex_);
-    if (fabsf(setpoint - demand_.roomSetpoint) <= 0.05f) return;
-    ESP_LOGI(TAG, "Remote override: setpoint %.1f -> %.1f", demand_.roomSetpoint, setpoint);
-    demand_.roomSetpoint = setpoint;   // ID 16 echoes it from the next cycles
-    demandDirty_ = true;
-}
-
 // ── commands (web-UI console / WebSocket) ─────────────────────
 
 void OpenThermManager::Cmd_Status(Stream &, Stream &out)
@@ -421,6 +409,7 @@ void OpenThermManager::Cmd_Status(Stream &, Stream &out)
     resp.field("oemDiagCode", (uint32_t)s.oemDiagCode);
     resp.field("maxTSetUpper", s.maxTSetUpper);
     resp.field("maxTSetLower", s.maxTSetLower);
+    resp.field("overrideSetpoint", s.overrideSetpoint);
     resp.field("chEnable", d.chEnable);
     resp.field("dhwEnable", d.dhwEnable);
     resp.field("coolEnable", d.coolEnable);
@@ -431,17 +420,22 @@ void OpenThermManager::Cmd_Status(Stream &, Stream &out)
 
 void OpenThermManager::Cmd_Set(Stream &in, Stream &out)
 {
+    // Heating/cooling demand is ClimateManager's now (climateSet). otSet only
+    // pokes DHW until the hot-water manager (item 6) takes it over.
     JsonReader<256> json(in);
+    OtDemand d = GetDemand();
+    bool  dhw    = d.dhwEnable;
+    float dhwSet = d.dhwSetpoint;
+
+    int i = json.GetInt("dhw", -1);
+    if (i >= 0) dhw = (i != 0);
+    float f = json.GetFloat("dhwSetpoint", NAN);
+    if (!std::isnan(f))
     {
-        LOCK(mutex_);
-        bool changed = false;
-        changed |= ClampedAssign(demand_.roomSetpoint, json.GetFloat("setpoint", NAN),     5.0f, 30.0f);
-        changed |= ClampedAssign(demand_.dhwSetpoint,  json.GetFloat("dhwSetpoint", NAN), 30.0f, 80.0f);
-        changed |= ClampedAssign(demand_.tSet,         json.GetFloat("tset", NAN),         0.0f, 90.0f);
-        changed |= AssignFlag(demand_.chEnable,   json.GetInt("ch", -1));
-        changed |= AssignFlag(demand_.dhwEnable,  json.GetInt("dhw", -1));
-        changed |= AssignFlag(demand_.coolEnable, json.GetInt("cool", -1));
-        if (changed) demandDirty_ = true;
+        if (f < 30.0f) f = 30.0f;
+        if (f > 80.0f) f = 80.0f;
+        dhwSet = f;
     }
+    SetDhwDemand(dhw, dhwSet);
     Cmd_Status(in, out);   // reply with the resulting full state
 }

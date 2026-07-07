@@ -7,8 +7,9 @@
 #include "CommandManager/CommandEntry.h"
 #include <cstdint>
 
-// What WE demand from the boiler (thermostat = OT master). Pushed in via
-// SetDemand() — bench: the otSet command; later: ClimateManager's PID.
+// What WE demand from the boiler (thermostat = OT master). Pushed in via the
+// slice setters: SetHeatingDemand() (ClimateManager) + SetDhwDemand() (otSet
+// today, hot-water manager later).
 struct OtDemand
 {
     bool  chEnable     = false;   // ID 0 master bit 0 — heat demand
@@ -51,6 +52,10 @@ struct OtBoilerState
     // t_set clamp from the boiler (ID 49, s8/s8 upper/lower)
     float maxTSetUpper = 80;
     float maxTSetLower = 30;
+
+    // Remote setpoint override from the boiler/gateway (ID 9). 0 = none.
+    // Exposed raw; the setpoint owner (ClimateManager) decides adoption.
+    float overrideSetpoint = 0;
 };
 
 // OpenTherm MASTER (gateway = slave/boiler emulator). 500 ms cycle:
@@ -78,7 +83,11 @@ public:
     OtDemand      GetDemand() const;
     // ClimateManager's future entry. change-detected: calling it periodically
     // with an unchanged demand is free.
-    void          SetDemand(const OtDemand &d);
+    // Demand is written in two independent slices so distinct owners don't
+    // clobber each other: ClimateManager owns heating/cooling; the DHW owner
+    // (otSet today, hot-water manager in item 6) owns DHW.
+    void SetHeatingDemand(bool chEnable, bool coolEnable, float roomSetpoint, float tSet);
+    void SetDhwDemand(bool dhwEnable, float dhwSetpoint);
 
 private:
     // Outcome of one validated exchange (see Exchange() in the .cpp).
@@ -97,7 +106,7 @@ private:
     OtResult Write(class OtLink &link, uint8_t id, uint16_t value);
 
     bool DoStatus(class OtLink &link);            // ID 0 keepalive + status decode
-    void DoOverrideRead(class OtLink &link);      // ID 9 → AdoptOverride
+    void DoOverrideRead(class OtLink &link);      // ID 9 → state_.overrideSetpoint
     void DoRotationSlot(class OtLink &link);      // one slot of the rotation
     size_t NextSlot();                            // dirty-jump, unsupported-skip, advance
     void   AdvanceSlot();
@@ -108,7 +117,6 @@ private:
     uint16_t MasterStatusBits();
     void     StoreSlaveStatus(uint8_t bits);
     void     MarkLinkDown();
-    void     AdoptOverride(float setpoint);
 
     void Cmd_Status(Stream &in, Stream &out);     // otStatus
     void Cmd_Set(Stream &in, Stream &out);        // otSet
@@ -125,7 +133,7 @@ private:
 
     OtDemand      demand_;
     OtBoilerState state_;
-    bool demandDirty_ = false;    // set by SetDemand/otSet → jump the rotation
+    bool demandDirty_ = false;    // set by the demand setters → jump the rotation
 
     uint32_t cycle_ = 0;
     size_t   slot_ = 0;
