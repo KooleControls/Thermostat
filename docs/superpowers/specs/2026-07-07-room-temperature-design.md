@@ -78,4 +78,10 @@ fault instead of a stale value.
    within a rotation period.
 4. Fault path: not exercisable on hardware (AHT20 soldered on-board) —
    verified by review of the 30 s staleness logic and the skip-slot
-   behavior it triggers in OpenThermManager.
+   behavior it triggers in OpenThermManager. **Amendment (final review):**
+   the pre-existing `Aht20Sensor` driver could serve a frozen value forever
+   after a post-boot I2C failure (failed trigger halted measurement;
+   `have_` never expired), making the staleness window unreachable for that
+   mode — fixed on this branch (re-trigger recovery + 3-consecutive-failure
+   expiry), so a dead bus now surfaces as `ReadTemperature() == false`
+   within 3 poll cycles and the manager faults ~30 s later.
