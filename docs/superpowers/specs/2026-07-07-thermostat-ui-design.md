@@ -111,23 +111,6 @@ used, RGB565, the tick source esp_lvgl_port expects). Framebuffer(s) in PSRAM
 - `DisplayManager::Init` guards on a valid panel handle; if the board came up
   headless, it logs and no-ops rather than starting LVGL.
 
-## Files
-
-| File | Content |
-|---|---|
-| `main/hardware/drivers/St7701Panel.h` | Ported ST7701 3-wire-SPI-init + RGB panel. |
-| `main/hardware/drivers/Gt911Touch.h` | Ported GT911 touch driver. |
-| `main/hardware/boards/diyless_thermostat_3/Board.h/.cpp` | Own panel + touch; init in the order above; `GetPanel()`/`GetTouch()`/`SetBacklight()`. |
-| `main/Application/DisplayManager/DisplayManager.h/.cpp` | LVGL + esp_lvgl_port bring-up, the minimal screen, refresh + revert timers. |
-| `main/Application/DisplayManager/fonts/font_temp_96.c` (+ header) | Big numeric font (reused). |
-| `main/Application/ClimateManager/ClimateManager.h/.cpp` | Add `GetUserSetpoint()` + `NudgeSetpoint()`. |
-| `main/Application/ServiceProvider.h` | `getDisplayManager()` accessor + forward decl. |
-| `main/Application/ApplicationContext.h` | Member (after HotWater) + accessor. |
-| `main/main.cpp` | `Init()` after HotWater, before Update. |
-| `main/CMakeLists.txt` | DisplayManager source + include dir; font source. |
-| `main/idf_component.yml` | LVGL + esp_lvgl_port + ST7701 + GT911 + panel_io_additions. |
-| `lv_conf.h` / sdkconfig | LVGL config (mined). |
-
 ## Verification (hardware)
 
 1. Build green; flash. Boot log shows panel + touch init OK (or a clean
