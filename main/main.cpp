@@ -18,6 +18,7 @@ extern "C" void app_main(void)
     g_appContext.getTimeManager().Init();
     g_appContext.getCommandManager().Init();
     g_appContext.getBoard().Init();
+    g_appContext.getRoomTemperatureManager().Init();
     g_appContext.getOpenThermManager().Init();
     g_appContext.getUpdateManager().Init();
     g_appContext.getWebServerManager().Init();
