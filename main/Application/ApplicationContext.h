@@ -6,6 +6,7 @@
 #include "NetworkManager/NetworkManager.h"
 #include "OpenThermManager/OpenThermManager.h"
 #include "ClimateManager/ClimateManager.h"
+#include "HotWaterManager/HotWaterManager.h"
 #include "RoomTemperatureManager/RoomTemperatureManager.h"
 #include "SettingsManager/SettingsManager.h"
 #include "SystemManager/SystemManager.h"
@@ -25,6 +26,7 @@ public:
     ClimateManager& getClimateManager() override { return m_climateManager; }
     CommandManager& getCommandManager() override { return m_commandManager; }
     ConsoleManager& getConsoleManager() override { return m_consoleManager; }
+    HotWaterManager& getHotWaterManager() override { return m_hotWaterManager; }
     NetworkManager& getNetworkManager() override { return m_networkManager; }
     OpenThermManager& getOpenThermManager() override { return m_openThermManager; }
     RoomTemperatureManager& getRoomTemperatureManager() override { return m_roomTemperatureManager; }
@@ -45,6 +47,7 @@ private:
     RoomTemperatureManager m_roomTemperatureManager{*this};
     OpenThermManager m_openThermManager{*this};
     ClimateManager m_climateManager{*this};
+    HotWaterManager m_hotWaterManager{*this};
     UpdateManager m_updateManager{*this};
     WebServerManager m_webServerManager{*this};
 };
