@@ -47,6 +47,10 @@ public:
 
     void Init();
 
+    // On-screen UI control surface (calls, not JSON commands).
+    float GetUserSetpoint() const;
+    void  NudgeSetpoint(float deltaC);   // ±, clamped to [5,30], persisted
+
 private:
     void Loop();
     void ControlStep();

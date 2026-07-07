@@ -50,6 +50,28 @@ void ClimateManager::Loop()
     }
 }
 
+float ClimateManager::GetUserSetpoint() const
+{
+    LOCK(mutex_);
+    return userSetpoint_;
+}
+
+void ClimateManager::NudgeSetpoint(float deltaC)
+{
+    float sp;
+    {
+        LOCK(mutex_);
+        sp = userSetpoint_ + deltaC;
+        if (sp < kSetpointMin) sp = kSetpointMin;
+        if (sp > kSetpointMax) sp = kSetpointMax;
+        if (fabsf(sp - userSetpoint_) < 0.001f) return;   // clamped, no change
+        userSetpoint_ = sp;
+    }
+    setpointSetting_.Set(sp);
+    serviceProvider_.getSettingsManager().Save();
+    // Takes effect on the next ControlStep (which reads userSetpoint_).
+}
+
 void ClimateManager::ControlStep()
 {
     int64_t now = esp_timer_get_time();
