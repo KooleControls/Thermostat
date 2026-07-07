@@ -81,10 +81,35 @@ public:
     void          SetDemand(const OtDemand &d);
 
 private:
+    // Outcome of one validated exchange (see Exchange() in the .cpp).
+    enum class OtResult { Ok, Fail, Unsupported, Rejected };
+
     void Loop();
-    bool DoStatus(class OtLink &link);            // ID 0 exchange + state update
-    void DoOverrideRead(class OtLink &link);      // ID 9
-    void DoRotationSlot(class OtLink &link);      // one write/read slot
+    void ServiceLink(class OtLink &link);         // one cycle while the link is up
+    void RecoverLink(class OtLink &link);         // backoff recovery while it is down
+    void LogLinkTransition();
+
+    // One OT exchange with full reply validation (parity + data-ID + ack type).
+    OtResult Exchange(class OtLink &link, bool write, uint8_t id,
+                      uint16_t requestValue, uint16_t &replyValue);
+    OtResult Read(class OtLink &link, uint8_t id, uint16_t &value,
+                  uint16_t requestValue = 0);
+    OtResult Write(class OtLink &link, uint8_t id, uint16_t value);
+
+    bool DoStatus(class OtLink &link);            // ID 0 keepalive + status decode
+    void DoOverrideRead(class OtLink &link);      // ID 9 → AdoptOverride
+    void DoRotationSlot(class OtLink &link);      // one slot of the rotation
+    size_t NextSlot();                            // dirty-jump, unsupported-skip, advance
+    void   AdvanceSlot();
+    bool   GetWriteValue(uint8_t id, float &v);   // demand value for a write slot
+    void   StoreRead(uint8_t id, uint16_t value); // decode a read reply into state_
+
+    // Locked leaf helpers — take mutex_ themselves; callers hold no lock.
+    uint16_t MasterStatusBits();
+    void     StoreSlaveStatus(uint8_t bits);
+    void     MarkLinkDown();
+    void     AdoptOverride(float setpoint);
+
     void Cmd_Status(Stream &in, Stream &out);     // otStatus
     void Cmd_Set(Stream &in, Stream &out);        // otSet
 
@@ -107,6 +132,7 @@ private:
     int      failStreak_ = 0;
     int      recoverBackoffS_ = 5;
     int64_t  nextRecoverUs_ = 0;
+    bool     lastLoggedLinked_ = false;   // LogLinkTransition edge detector
 
     // Unsupported-ID bookkeeping for the rotation (UNKNOWN-DATAID reply → rare
     // retry). kSlots (see OpenThermManager.cpp) is currently 14.

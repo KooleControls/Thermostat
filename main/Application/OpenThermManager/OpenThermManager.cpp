@@ -44,6 +44,28 @@ namespace
     constexpr size_t kSlots = sizeof(kRotation) / sizeof(kRotation[0]);
     // Keeps OpenThermManager.h's fixed-size unsupported_[14] member honest.
     static_assert(kSlots == 14, "OpenThermManager::unsupported_ is sized for kSlots == 14");
+
+    // Clamp v into [lo,hi] and assign if it differs; NAN (absent JSON field)
+    // assigns nothing. Returns whether target changed.
+    bool ClampedAssign(float &target, float v, float lo, float hi)
+    {
+        if (std::isnan(v)) return false;
+        if (v < lo) v = lo;
+        if (v > hi) v = hi;
+        if (fabsf(target - v) <= 0.01f) return false;
+        target = v;
+        return true;
+    }
+
+    // v < 0 means the JSON field was absent. Returns whether target changed.
+    bool AssignFlag(bool &target, int v)
+    {
+        if (v < 0) return false;
+        bool b = v != 0;
+        if (target == b) return false;
+        target = b;
+        return true;
+    }
 }
 
 OpenThermManager::OpenThermManager(ServiceProvider &serviceProvider)
@@ -95,215 +117,280 @@ void OpenThermManager::SetDemand(const OtDemand &d)
 void OpenThermManager::Loop()
 {
     OtLink &link = serviceProvider_.getBoard().GetOtLink();
-    bool lastLinked = false;
 
     while (true)
     {
         if (link.Ready())
-        {
-            bool ok = DoStatus(link);
-            if (ok)
-            {
-                failStreak_ = 0;
-                recoverBackoffS_ = 5;
-                if ((cycle_ & 1) == 0)
-                    DoOverrideRead(link);
-                DoRotationSlot(link);
-            }
-            else if (++failStreak_ >= LinkFailLimit)
-            {
-                LOCK(mutex_);
-                state_.linked = false;
-            }
-        }
+            ServiceLink(link);
         else
-        {
-            // Link down: safe state (no frames = no demand). Recover with backoff.
-            { LOCK(mutex_); state_.linked = false; }
-            int64_t now = esp_timer_get_time();
-            if (now >= nextRecoverUs_)
-            {
-                if (!link.Recover())
-                {
-                    nextRecoverUs_ = now + (int64_t)recoverBackoffS_ * 1000000;
-                    recoverBackoffS_ = (recoverBackoffS_ * 2 > 30) ? 30 : recoverBackoffS_ * 2;
-                }
-                else
-                {
-                    recoverBackoffS_ = 5;
-                }
-            }
-        }
+            RecoverLink(link);
 
-        // Log link transitions once.
-        {
-            LOCK(mutex_);
-            if (state_.linked != lastLinked)
-            {
-                ESP_LOGI(TAG, "OT link %s", state_.linked ? "up" : "down");
-                lastLinked = state_.linked;
-            }
-        }
-
+        LogLinkTransition();
         cycle_++;
         vTaskDelay(pdMS_TO_TICKS(LoopDelayMs));
     }
 }
 
+// One 500 ms cycle while the link is up: Status keepalive, ID 9 override
+// read every other cycle, one slot of the write/read rotation.
+void OpenThermManager::ServiceLink(OtLink &link)
+{
+    if (!DoStatus(link))
+    {
+        if (++failStreak_ >= LinkFailLimit)
+            MarkLinkDown();
+        return;
+    }
+
+    failStreak_ = 0;
+    recoverBackoffS_ = 5;
+    if ((cycle_ & 1) == 0)
+        DoOverrideRead(link);
+    DoRotationSlot(link);
+}
+
+// Link down: safe state (no frames = no demand). Retry Recover with backoff.
+void OpenThermManager::RecoverLink(OtLink &link)
+{
+    MarkLinkDown();
+
+    int64_t now = esp_timer_get_time();
+    if (now < nextRecoverUs_) return;
+
+    if (link.Recover())
+    {
+        recoverBackoffS_ = 5;
+        return;
+    }
+    nextRecoverUs_ = now + (int64_t)recoverBackoffS_ * 1000000;
+    recoverBackoffS_ = (recoverBackoffS_ * 2 > 30) ? 30 : recoverBackoffS_ * 2;
+}
+
+void OpenThermManager::LogLinkTransition()
+{
+    LOCK(mutex_);
+    if (state_.linked != lastLoggedLinked_)
+    {
+        ESP_LOGI(TAG, "OT link %s", state_.linked ? "up" : "down");
+        lastLoggedLinked_ = state_.linked;
+    }
+}
+
+// ── one validated OT exchange ─────────────────────────────────
+
+// Build + Transaction + full reply validation in one place. The STM32 can
+// deliver late replies from timed-out requests, so a reply is only trusted
+// when parity holds AND the data-ID matches the request. The msg type then
+// splits the outcome: the expected ack -> Ok, UNKNOWN-DATAID -> Unsupported,
+// any other valid frame (e.g. DataInvalid) -> Rejected.
+OpenThermManager::OtResult OpenThermManager::Exchange(OtLink &link, bool write, uint8_t id,
+                                                      uint16_t requestValue, uint16_t &replyValue)
+{
+    uint32_t req = OtFrame::Build(write ? F::WriteData : F::ReadData, id, requestValue);
+    uint32_t reply = 0;
+    if (!link.Transaction(req, reply) || !OtFrame::ParityOk(reply))
+        return OtResult::Fail;
+    if (OtFrame::Id(reply) != id)
+        return OtResult::Fail;
+
+    F type = OtFrame::Type(reply);
+    if (type == F::UnknownDataId)
+        return OtResult::Unsupported;
+    if (type != (write ? F::WriteAck : F::ReadAck))
+        return OtResult::Rejected;
+
+    replyValue = OtFrame::Value(reply);
+    return OtResult::Ok;
+}
+
+OpenThermManager::OtResult OpenThermManager::Read(OtLink &link, uint8_t id,
+                                                  uint16_t &value, uint16_t requestValue)
+{
+    return Exchange(link, false, id, requestValue, value);
+}
+
+OpenThermManager::OtResult OpenThermManager::Write(OtLink &link, uint8_t id, uint16_t value)
+{
+    uint16_t echo = 0;
+    return Exchange(link, true, id, value, echo);
+}
+
+// ── the scheduled messages ────────────────────────────────────
+
 bool OpenThermManager::DoStatus(OtLink &link)
 {
-    uint16_t master;
-    {
-        LOCK(mutex_);
-        master = (uint16_t)(((demand_.chEnable   ? 1 : 0) << 0 |
-                             (demand_.dhwEnable  ? 1 : 0) << 1 |
-                             (demand_.coolEnable ? 1 : 0) << 2) << 8);
-    }
-    uint32_t reply = 0;
-    if (!link.Transaction(OtFrame::Build(F::ReadData, ID_STATUS, master), reply) ||
-        !OtFrame::ParityOk(reply) ||
-        OtFrame::Type(reply) != F::ReadAck ||
-        OtFrame::Id(reply) != ID_STATUS)
+    uint16_t slave = 0;
+    if (Read(link, ID_STATUS, slave, MasterStatusBits()) != OtResult::Ok)
         return false;
-
-    uint8_t slave = OtFrame::Value(reply) & 0xFF;
-    LOCK(mutex_);
-    state_.linked        = true;
-    state_.fault         = slave & 0x01;
-    state_.chActive      = slave & 0x02;
-    state_.dhwActive     = slave & 0x04;
-    state_.flame         = slave & 0x08;
-    state_.coolingActive = slave & 0x10;
+    StoreSlaveStatus(slave & 0xFF);
     return true;
 }
 
 void OpenThermManager::DoOverrideRead(OtLink &link)
 {
-    uint32_t reply = 0;
-    if (!link.Transaction(OtFrame::Build(F::ReadData, ID_TROVRD, 0), reply) ||
-        !OtFrame::ParityOk(reply) ||
-        OtFrame::Type(reply) != F::ReadAck ||
-        OtFrame::Id(reply) != ID_TROVRD)
+    uint16_t raw = 0;
+    if (Read(link, ID_TROVRD, raw) != OtResult::Ok)
         return;
 
-    float ovr = OtFrame::FromF88(OtFrame::Value(reply));
-    if (ovr <= 0.0f) return;   // 0 = no override pending
+    float ovr = OtFrame::FromF88(raw);
+    if (ovr <= 0.0f) return;         // 0 = no override pending
     if (ovr < 5.0f) ovr = 5.0f;      // same sanity clamp as otSet
     if (ovr > 30.0f) ovr = 30.0f;
-
-    LOCK(mutex_);
-    if (fabsf(ovr - demand_.roomSetpoint) > 0.05f)
-    {
-        ESP_LOGI(TAG, "Remote override: setpoint %.1f -> %.1f", demand_.roomSetpoint, ovr);
-        demand_.roomSetpoint = ovr;   // ID 16 echoes it from the next cycles
-        demandDirty_ = true;
-    }
+    AdoptOverride(ovr);
 }
 
 void OpenThermManager::DoRotationSlot(OtLink &link)
 {
-    // A dirty demand jumps the queue: restart at slot 0 so the writes
-    // (t_set, setpoints) go out within ~2 s of the change.
+    size_t idx = NextSlot();
+    const Slot s = kRotation[idx];
+
+    OtResult r;
+    uint16_t value = 0;
+    if (s.write)
+    {
+        float v;
+        if (!GetWriteValue(s.id, v)) return;   // no valid value to send this slot
+        r = Write(link, s.id, OtFrame::F88(v));
+    }
+    else
+    {
+        r = Read(link, s.id, value);
+    }
+
+    switch (r)
+    {
+    case OtResult::Ok:
+        unsupported_[idx] = false;
+        if (!s.write) StoreRead(s.id, value);
+        break;
+    case OtResult::Unsupported:
+        if (!unsupported_[idx])
+            ESP_LOGI(TAG, "Data-ID %u not supported by slave", s.id);
+        unsupported_[idx] = true;
+        break;
+    case OtResult::Rejected:
+        // DataInvalid etc.: the slave knows the ID, the value wasn't usable.
+        // Reads clear the unsupported flag; a rejected write must not.
+        if (!s.write) unsupported_[idx] = false;
+        break;
+    case OtResult::Fail:
+        break;
+    }
+}
+
+// Pick this cycle's rotation slot: a dirty demand jumps the queue (restart
+// at slot 0 so the writes go out within ~2 s of the change), unsupported IDs
+// are skipped except on the rare retry pass.
+size_t OpenThermManager::NextSlot()
+{
     {
         LOCK(mutex_);
         if (demandDirty_) { slot_ = 0; demandDirty_ = false; }
     }
 
-    // Skip unsupported IDs except on the rare retry pass.
     size_t tries = 0;
     while (unsupported_[slot_] && (pass_ % RetryUnsupportedEvery) != 0 && tries++ < kSlots)
-        if (++slot_ >= kSlots) { slot_ = 0; pass_++; }
+        AdvanceSlot();
 
-    const Slot s = kRotation[slot_];
     size_t idx = slot_;
+    AdvanceSlot();
+    return idx;
+}
+
+void OpenThermManager::AdvanceSlot()
+{
     if (++slot_ >= kSlots) { slot_ = 0; pass_++; }
+}
 
-    uint32_t req;
-    if (s.write)
+// The demand value behind a write slot; false = nothing valid to send.
+bool OpenThermManager::GetWriteValue(uint8_t id, float &v)
+{
+    if (id == ID_TROOM)
     {
-        float v;
-        {
-            LOCK(mutex_);
-            switch (s.id)
-            {
-            case ID_TSET:
-                v = demand_.tSet;
-                if (v < state_.maxTSetLower) v = (demand_.chEnable && v > 0) ? state_.maxTSetLower : 0;
-                if (v > state_.maxTSetUpper) v = state_.maxTSetUpper;
-                break;
-            case ID_TRSET:   v = demand_.roomSetpoint; break;
-            case ID_TDHWSET: v = demand_.dhwSetpoint;  break;
-            case ID_TROOM:
-            default:         v = NAN; break;   // filled below without the lock
-            }
-        }
-        if (s.id == ID_TROOM)
-        {
-            // Temporary feed until ClimateManager owns the (calibrated) value.
-            float t = 0;
-            if (!serviceProvider_.getBoard().GetTemperatureSensor().ReadTemperature(t))
-                return;   // no valid sample -> skip this slot
-            v = t;
-        }
-        if (std::isnan(v)) return;   // no valid value to send this slot
-        req = OtFrame::Build(F::WriteData, s.id, OtFrame::F88(v));
-    }
-    else
-    {
-        req = OtFrame::Build(F::ReadData, s.id, 0);
+        // Temporary feed until ClimateManager owns the (calibrated) value.
+        float t = 0;
+        if (!serviceProvider_.getBoard().GetTemperatureSensor().ReadTemperature(t))
+            return false;
+        v = t;
+        return true;
     }
 
-    uint32_t reply = 0;
-    if (!link.Transaction(req, reply) || !OtFrame::ParityOk(reply)) return;
-    // Discard stale/late replies from a previously timed-out request before
-    // touching anything below — a mismatched data-ID must never be attributed
-    // to this slot's request.
-    if (OtFrame::Id(reply) != s.id) return;
-
-    if (OtFrame::Type(reply) == F::UnknownDataId)
-    {
-        if (!unsupported_[idx])
-            ESP_LOGI(TAG, "Data-ID %u not supported by slave", s.id);
-        unsupported_[idx] = true;
-        return;
-    }
-
-    if (s.write)
-    {
-        // A WriteAck confirms the slave accepted it; anything else (e.g.
-        // DataInvalid) must not clear the unsupported flag — just bail.
-        if (OtFrame::Type(reply) != F::WriteAck) return;
-        unsupported_[idx] = false;
-        return;
-    }
-
-    unsupported_[idx] = false;
-    if (OtFrame::Type(reply) != F::ReadAck) return;
-
-    uint16_t val = OtFrame::Value(reply);
     LOCK(mutex_);
-    switch (s.id)
+    switch (id)
     {
-    case ID_RELMOD:   state_.modulation  = OtFrame::FromF88(val); break;
-    case ID_TBOILER:  state_.boilerTemp  = OtFrame::FromF88(val); break;
-    case ID_TDHW:     state_.dhwTemp     = OtFrame::FromF88(val); break;
-    case ID_TRET:     state_.returnTemp  = OtFrame::FromF88(val); break;
-    case ID_CHPRESS:  state_.chPressure  = OtFrame::FromF88(val); break;
-    case ID_TOUTSIDE: state_.outsideTemp = OtFrame::FromF88(val); break;
-    case ID_OEMFAULT: state_.oemFaultCode = val; break;
-    case ID_OEMDIAG:  state_.oemDiagCode  = val; break;
+    case ID_TSET:
+        v = demand_.tSet;
+        if (v < state_.maxTSetLower) v = (demand_.chEnable && v > 0) ? state_.maxTSetLower : 0;
+        if (v > state_.maxTSetUpper) v = state_.maxTSetUpper;
+        return true;
+    case ID_TRSET:   v = demand_.roomSetpoint; return true;
+    case ID_TDHWSET: v = demand_.dhwSetpoint;  return true;
+    default:         return false;
+    }
+}
+
+// Decode a read-slot reply into state_.
+void OpenThermManager::StoreRead(uint8_t id, uint16_t value)
+{
+    LOCK(mutex_);
+    switch (id)
+    {
+    case ID_RELMOD:   state_.modulation  = OtFrame::FromF88(value); break;
+    case ID_TBOILER:  state_.boilerTemp  = OtFrame::FromF88(value); break;
+    case ID_TDHW:     state_.dhwTemp     = OtFrame::FromF88(value); break;
+    case ID_TRET:     state_.returnTemp  = OtFrame::FromF88(value); break;
+    case ID_CHPRESS:  state_.chPressure  = OtFrame::FromF88(value); break;
+    case ID_TOUTSIDE: state_.outsideTemp = OtFrame::FromF88(value); break;
+    case ID_OEMFAULT: state_.oemFaultCode = value; break;
+    case ID_OEMDIAG:  state_.oemDiagCode  = value; break;
     case ID_MAXTSET_BOUNDS:
-        state_.maxTSetUpper = (int8_t)(val >> 8);
-        state_.maxTSetLower = (int8_t)(val & 0xFF);
+        state_.maxTSetUpper = (int8_t)(value >> 8);
+        state_.maxTSetLower = (int8_t)(value & 0xFF);
         break;
     case ID_SCONFIG:
     {
-        uint8_t cfg = val >> 8;
+        uint8_t cfg = value >> 8;
         state_.dhwPresent       = cfg & 0x01;
         state_.coolingSupported = cfg & 0x04;
         break;
     }
     }
+}
+
+// ── locked leaf helpers (take mutex_; callers hold no lock) ───
+
+uint16_t OpenThermManager::MasterStatusBits()
+{
+    LOCK(mutex_);
+    return (uint16_t)(((demand_.chEnable   ? 1 : 0) << 0 |
+                       (demand_.dhwEnable  ? 1 : 0) << 1 |
+                       (demand_.coolEnable ? 1 : 0) << 2) << 8);
+}
+
+void OpenThermManager::StoreSlaveStatus(uint8_t bits)
+{
+    LOCK(mutex_);
+    state_.linked        = true;
+    state_.fault         = bits & 0x01;
+    state_.chActive      = bits & 0x02;
+    state_.dhwActive     = bits & 0x04;
+    state_.flame         = bits & 0x08;
+    state_.coolingActive = bits & 0x10;
+}
+
+void OpenThermManager::MarkLinkDown()
+{
+    LOCK(mutex_);
+    state_.linked = false;
+}
+
+void OpenThermManager::AdoptOverride(float setpoint)
+{
+    LOCK(mutex_);
+    if (fabsf(setpoint - demand_.roomSetpoint) <= 0.05f) return;
+    ESP_LOGI(TAG, "Remote override: setpoint %.1f -> %.1f", demand_.roomSetpoint, setpoint);
+    demand_.roomSetpoint = setpoint;   // ID 16 echoes it from the next cycles
+    demandDirty_ = true;
 }
 
 // ── commands (web-UI console / WebSocket) ─────────────────────
@@ -347,44 +434,15 @@ void OpenThermManager::Cmd_Status(Stream &, Stream &out)
 void OpenThermManager::Cmd_Set(Stream &in, Stream &out)
 {
     JsonReader<256> json(in);
-    bool changed = false;
     {
         LOCK(mutex_);
-        float f;
-        int   i;
-        if (!std::isnan(f = json.GetFloat("setpoint", NAN)))
-        {
-            if (f < 5.0f) f = 5.0f;
-            if (f > 30.0f) f = 30.0f;
-            if (fabsf(demand_.roomSetpoint - f) > 0.01f) { demand_.roomSetpoint = f; changed = true; }
-        }
-        if (!std::isnan(f = json.GetFloat("dhwSetpoint", NAN)))
-        {
-            if (f < 30.0f) f = 30.0f;
-            if (f > 80.0f) f = 80.0f;
-            if (fabsf(demand_.dhwSetpoint - f) > 0.01f) { demand_.dhwSetpoint = f; changed = true; }
-        }
-        if (!std::isnan(f = json.GetFloat("tset", NAN)))
-        {
-            if (f < 0.0f) f = 0.0f;
-            if (f > 90.0f) f = 90.0f;
-            if (fabsf(demand_.tSet - f) > 0.01f) { demand_.tSet = f; changed = true; }
-        }
-        if ((i = json.GetInt("ch", -1)) >= 0)
-        {
-            bool v = i != 0;
-            if (demand_.chEnable != v) { demand_.chEnable = v; changed = true; }
-        }
-        if ((i = json.GetInt("dhw", -1)) >= 0)
-        {
-            bool v = i != 0;
-            if (demand_.dhwEnable != v) { demand_.dhwEnable = v; changed = true; }
-        }
-        if ((i = json.GetInt("cool", -1)) >= 0)
-        {
-            bool v = i != 0;
-            if (demand_.coolEnable != v) { demand_.coolEnable = v; changed = true; }
-        }
+        bool changed = false;
+        changed |= ClampedAssign(demand_.roomSetpoint, json.GetFloat("setpoint", NAN),     5.0f, 30.0f);
+        changed |= ClampedAssign(demand_.dhwSetpoint,  json.GetFloat("dhwSetpoint", NAN), 30.0f, 80.0f);
+        changed |= ClampedAssign(demand_.tSet,         json.GetFloat("tset", NAN),         0.0f, 90.0f);
+        changed |= AssignFlag(demand_.chEnable,   json.GetInt("ch", -1));
+        changed |= AssignFlag(demand_.dhwEnable,  json.GetInt("dhw", -1));
+        changed |= AssignFlag(demand_.coolEnable, json.GetInt("cool", -1));
         if (changed) demandDirty_ = true;
     }
     Cmd_Status(in, out);   // reply with the resulting full state
