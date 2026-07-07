@@ -95,8 +95,8 @@ Derived from the DIYLESS reference yaml + the demo experience:
 | # | Backlog item | Notes |
 |---|--------------|-------|
 | 1 | ~~`diyless-board-target`~~ | **Done (2026-07-06, ff3b14b).** Minimal-boot scope: board folder + AHT20 (TemperatureSensor/HumiditySensor role interfaces) + 8 MB partitions + USB-JTAG console; verified on hardware. ST7701/GT911 drivers deferred to `thermostat-ui`; CI to `release-workflow`. |
-| 2 | `opentherm-link` | `Stm32OpenThermLink` driver: STM32L051 nibble protocol (TX12/RX11, boot 44 / reset 13, 900 ms warm-up). Proven on the old branch (RA2-398) — port, don't reinvent. |
-| 3 | `opentherm-master-manager` | Master poll loop + typed accessors for all IDs listed above, incl. remote setpoint override (ID 9/100); link supervision + safe state. (Old RA2-399 scope + DHW + cooling + diagnostics.) |
+| 2 | ~~`opentherm-link`~~ | **Done (2026-07-07, 8c5c5cb, with item 3).** `Stm32OpenThermLink` ported behind the `OtLink` role interface; board owns reset + handshake. Gotcha: STM32 ResponseStatus byte is diagnostic-only (fwVer=1 returns 1 on success) — replies validated by parity + type + ID instead. esp32_devkit board dropped; DIYLESS T3 is the product. |
+| 3 | ~~`opentherm-master-manager`~~ | **Done (2026-07-07, 8c5c5cb).** 500 ms master loop, full ID schedule (writes 1/16/24/56, reads 3/5/17/18/25/26/27/28/49/115), ID 9 override adoption + ID 16 echo, link supervision (6 fails → down, backoff recover), `otSet`/`otStatus` bench commands. Gateway E2E verified: heat call drives `HeatManager`, override round-trips via KC1 `CTMP SET`, wire pull → link down/up recovery. |
 | 4 | `room-temperature` | AHT20 sampling, offset setting, sensor-failure handling. Small but owns the "input" contract for the PID. |
 | 5 | `climate-pid` | ClimateManager: setpoint/mode ownership (Heat/Cool/Off), clean-room PID + deadband + output averaging for heating, on/off cooling demand, t_set clamps. (Old RA2-400 scope.) |
 | 6 | `hot-water` | DHW enable + setpoint + readout, persistence, web exposure. |
