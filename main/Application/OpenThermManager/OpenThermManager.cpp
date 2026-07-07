@@ -2,6 +2,7 @@
 #include "OtFrame.h"
 #include "CommandManager/CommandManager.h"
 #include "Board.h"
+#include "RoomTemperatureManager.h"
 #include "JsonScope.h"
 #include "JsonReader.h"
 #include "esp_log.h"
@@ -307,12 +308,9 @@ bool OpenThermManager::GetWriteValue(uint8_t id, float &v)
 {
     if (id == ID_TROOM)
     {
-        // Temporary feed until ClimateManager owns the (calibrated) value.
-        float t = 0;
-        if (!serviceProvider_.getBoard().GetTemperatureSensor().ReadTemperature(t))
-            return false;
-        v = t;
-        return true;
+        // RoomTemperatureManager owns the measured value (validity-checked);
+        // false -> the rotation slot is skipped, gateway keeps its last value.
+        return serviceProvider_.getRoomTemperatureManager().GetRoomTemperature(v);
     }
 
     LOCK(mutex_);
