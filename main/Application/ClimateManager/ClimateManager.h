@@ -10,6 +10,21 @@
 #include "PidController.h"
 #include <cstdint>
 
+// What the last control step computed — filled by ControlStep(), read by the
+// climateStatus command. Grouped so both sides copy one value under the lock.
+// (mode_/userSetpoint_ are the live config, kept separate from this mirror.)
+struct ClimateStatus
+{
+    float roomTemp = 0.0f;
+    bool  roomValid = false;
+    float activeSetpoint = 0.0f;
+    float pidOutput = 0.0f;
+    float tSet = 0.0f;
+    bool  chEnable = false;
+    bool  coolEnable = false;
+    bool  overrideActive = false;
+};
+
 // Owns the thermostat's control logic: mode (Off/Heat/Cool) + setpoint, a
 // deadband heating PID producing OpenTherm t_set, on/off cooling demand, and
 // remote-override (ID 9) adoption. Consumes RoomTemperatureManager (measured
@@ -47,7 +62,7 @@ private:
     };
 
     inline static UInt32Setting modeSetting_{ "climate.mode", "Climate Mode", (uint32_t)ClimateMode::Off };
-    inline static FloatSetting  setpointSetting_{ "climate.setpoint", "Setpoint", 20.0f };
+    inline static FloatSetting  setpointSetting_{ "climate.setpt", "Setpoint", 20.0f };   // NVS key ≤15 chars
 
     ServiceProvider &serviceProvider_;
     InitState initState_;
@@ -55,17 +70,10 @@ private:
     Task task_;
     PidController pid_;
 
-    // state (guarded by mutex_)
+    // live config + last-step snapshot (guarded by mutex_)
     ClimateMode mode_ = ClimateMode::Off;
     float userSetpoint_ = 20.0f;
-    float lastRoomTemp_ = 0.0f;
-    bool  lastRoomValid_ = false;
-    float lastActiveSetpoint_ = 0.0f;
-    float lastPidOutput_ = 0.0f;
-    float lastTSet_ = 0.0f;
-    bool  lastChEnable_ = false;
-    bool  lastCoolEnable_ = false;
-    bool  lastOverrideActive_ = false;
+    ClimateStatus status_;
 
     // loop-task-only
     int64_t lastStepUs_ = -1;

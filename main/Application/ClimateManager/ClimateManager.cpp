@@ -74,7 +74,6 @@ void ClimateManager::ControlStep()
         }
         pid_.Reset();
         PushSafeState();
-        { LOCK(mutex_); lastRoomValid_ = false; }
         return;
     }
     if (lastSafe_)
@@ -99,7 +98,7 @@ void ClimateManager::ControlStep()
         activeSp = userSp;
     }
 
-    if (overrideActive && !lastOverrideActive_)
+    if (overrideActive && !status_.overrideActive)
         ESP_LOGI(TAG, "Remote override adopted: setpoint %.1f", activeSp);
 
     bool  ch = false, cool = false;
@@ -120,14 +119,7 @@ void ClimateManager::ControlStep()
     serviceProvider_.getOpenThermManager().SetHeatingDemand(ch, cool, activeSp, tset);
 
     LOCK(mutex_);
-    lastRoomTemp_ = room;
-    lastRoomValid_ = true;
-    lastActiveSetpoint_ = activeSp;
-    lastPidOutput_ = output;
-    lastTSet_ = tset;
-    lastChEnable_ = ch;
-    lastCoolEnable_ = cool;
-    lastOverrideActive_ = overrideActive;
+    status_ = { room, true, activeSp, output, tset, ch, cool, overrideActive };
 }
 
 float ClimateManager::OutputToTSet(float output, float lo, float hi)
@@ -145,11 +137,8 @@ void ClimateManager::PushSafeState()
 {
     serviceProvider_.getOpenThermManager().SetHeatingDemand(false, false, 0.0f, 0.0f);
     LOCK(mutex_);
-    lastChEnable_ = false;
-    lastCoolEnable_ = false;
-    lastTSet_ = 0.0f;
-    lastPidOutput_ = 0.0f;
-    lastOverrideActive_ = false;
+    // roomValid=false is the fault signal; everything else zeroed.
+    status_ = ClimateStatus{};
 }
 
 void ClimateManager::Cmd_ClimateSet(Stream &in, Stream &out)
@@ -193,30 +182,23 @@ void ClimateManager::Cmd_ClimateStatus(Stream &, Stream &out)
 void ClimateManager::WriteStatus(Stream &out)
 {
     ClimateMode mode;
-    float userSp, room, activeSp, output, tset;
-    bool  roomValid, ch, cool, ovr;
+    float userSp;
+    ClimateStatus s;
     {
         LOCK(mutex_);
         mode = mode_;
         userSp = userSetpoint_;
-        room = lastRoomTemp_;
-        roomValid = lastRoomValid_;
-        activeSp = lastActiveSetpoint_;
-        output = lastPidOutput_;
-        tset = lastTSet_;
-        ch = lastChEnable_;
-        cool = lastCoolEnable_;
-        ovr = lastOverrideActive_;
+        s = status_;
     }
     JsonObject resp(out);
     resp.field("mode", ClimateModeName(mode));
     resp.field("userSetpoint", userSp);
-    resp.field("activeSetpoint", activeSp);
-    resp.field("roomTemp", room);
-    resp.field("roomValid", roomValid);
-    resp.field("pidOutput", output);
-    resp.field("tSet", tset);
-    resp.field("chEnable", ch);
-    resp.field("coolEnable", cool);
-    resp.field("overrideActive", ovr);
+    resp.field("activeSetpoint", s.activeSetpoint);
+    resp.field("roomTemp", s.roomTemp);
+    resp.field("roomValid", s.roomValid);
+    resp.field("pidOutput", s.pidOutput);
+    resp.field("tSet", s.tSet);
+    resp.field("chEnable", s.chEnable);
+    resp.field("coolEnable", s.coolEnable);
+    resp.field("overrideActive", s.overrideActive);
 }
