@@ -324,6 +324,40 @@ class BackendService {
     return this.send("reboot")
   }
 
+  // ── Thermostat / OpenTherm ────────────────────────────────────
+
+  async getClimateStatus(): Promise<ClimateStatus> {
+    return this.send<ClimateStatus>("climateStatus")
+  }
+
+  /** mode and/or setpoint; reply is the full fresh climate status. */
+  async setClimate(params: {
+    mode?: "off" | "heat" | "cool"
+    setpoint?: number
+  }): Promise<ClimateStatus> {
+    return this.send<ClimateStatus>("climateSet", params)
+  }
+
+  async getHotWaterStatus(): Promise<HotWaterStatus> {
+    return this.send<HotWaterStatus>("hotWaterStatus")
+  }
+
+  /** enable and/or setpoint; `enable` maps to the device's int (1/0),
+   *  omitted → the device leaves it unchanged. Reply is fresh DHW status. */
+  async setHotWater(params: {
+    enable?: boolean
+    setpoint?: number
+  }): Promise<HotWaterStatus> {
+    const payload: Record<string, unknown> = {}
+    if (params.enable !== undefined) payload.enable = params.enable ? 1 : 0
+    if (params.setpoint !== undefined) payload.setpoint = params.setpoint
+    return this.send<HotWaterStatus>("hotWaterSet", payload)
+  }
+
+  async getOtStatus(): Promise<OtStatus> {
+    return this.send<OtStatus>("otStatus")
+  }
+
   private commandUrl(type: string): string {
     return this.apiUrl(`/api/command?type=${encodeURIComponent(type)}`)
   }
@@ -555,5 +589,54 @@ export interface Partition {
 
 export interface PartitionsResponse {
   partitions: Partition[]
+}
+
+export interface ClimateStatus {
+  mode: "off" | "heat" | "cool"
+  userSetpoint: number
+  activeSetpoint: number
+  roomTemp: number
+  roomValid: boolean
+  pidOutput: number
+  tSet: number
+  chEnable: boolean
+  coolEnable: boolean
+  overrideActive: boolean
+}
+
+export interface HotWaterStatus {
+  enable: boolean
+  setpoint: number
+  dhwActive: boolean
+  dhwTemp: number
+  dhwPresent: boolean
+}
+
+export interface OtStatus {
+  linked: boolean
+  fault: boolean
+  chActive: boolean
+  dhwActive: boolean
+  flame: boolean
+  coolingActive: boolean
+  dhwPresent: boolean
+  coolingSupported: boolean
+  boilerTemp: number
+  returnTemp: number
+  dhwTemp: number
+  modulation: number
+  chPressure: number
+  outsideTemp: number
+  oemFaultCode: number
+  oemDiagCode: number
+  maxTSetUpper: number
+  maxTSetLower: number
+  overrideSetpoint: number
+  chEnable: boolean
+  dhwEnable: boolean
+  coolEnable: boolean
+  roomSetpoint: number
+  dhwSetpoint: number
+  tSet: number
 }
 

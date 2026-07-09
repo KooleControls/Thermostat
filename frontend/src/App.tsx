@@ -3,6 +3,8 @@ import { AppSidebar, type Page } from "@/components/AppSidebar"
 import { useRoute } from "@/hooks/use-route"
 import { useAuth } from "@/hooks/use-auth"
 import HomePage from "@/pages/HomePage"
+import ThermostatPage from "@/pages/ThermostatPage"
+import DiagnosticsPage from "@/pages/DiagnosticsPage"
 import ConsolePage from "@/pages/ConsolePage"
 import SettingsPage from "@/pages/SettingsPage"
 import FirmwarePage from "@/pages/FirmwarePage"
@@ -12,6 +14,10 @@ function PageContent({ page }: { page: Page }) {
   switch (page) {
     case "home":
       return <HomePage />
+    case "thermostat":
+      return <ThermostatPage />
+    case "diagnostics":
+      return <DiagnosticsPage />
     case "console":
       return <ConsolePage />
     case "settings":
