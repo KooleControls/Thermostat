@@ -1,5 +1,12 @@
 # CLAUDE.md
 
+> **⚠️ ACTION BEFORE CONTINUING (2026-07-09):** The WebSocket transport rework is
+> being done in the **Strux** repo (`strux` remote / `C:/Workspace/Strux`) — reply
+> + inbound streaming shipped, session-multiplexed stream transport spec committed,
+> endpoint-decommission issues queued. **Merge Strux back in first:**
+> `git fetch strux && git merge strux/main`, resolve conflicts, build + `pnpm typecheck`.
+> Delete this banner once merged.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this is
