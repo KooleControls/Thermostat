@@ -4,6 +4,7 @@ import type { Page } from "@/components/AppSidebar"
 const validPages: Page[] = [
   "home",
   "thermostat",
+  "diagnostics",
   "console",
   "settings",
   "firmware",
