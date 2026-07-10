@@ -5,8 +5,12 @@ set(SOURCE_FILES_LIST
     "Application/NetworkManager/WiFiInterface.cpp"
     "Application/NetworkManager/DnsConfiguration.cpp"
     "Application/WebServerManager/WebServerManager.cpp"
+    "Application/WebServerManager/Authenticator.cpp"
     "Application/WebServerManager/StaticFileHandler.cpp"
     "Application/WebServerManager/WebSocketHandler.cpp"
+    "Application/WebServerManager/ConnectionRegistry.cpp"
+    "Application/WebServerManager/AuthGate.cpp"
+    "Application/WebServerManager/SessionMux.cpp"
     "Application/WebServerManager/SessionTable.cpp"
     "Application/CommandManager/CommandManager.cpp"
     "Application/OpenThermManager/OpenThermManager.cpp"
@@ -16,6 +20,7 @@ set(SOURCE_FILES_LIST
     "Application/DisplayManager/DisplayManager.cpp"
     "Application/DisplayManager/fonts/font_temp_96.c"
     "Application/UpdateManager/UpdateManager.cpp"
+    "Application/UpdateManager/PartitionWriter.cpp"
     "Application/SettingsManager/SettingsManager.cpp"
     "Application/SettingsManager/Setting.cpp"
     "Application/SystemManager/SystemManager.cpp"
@@ -60,6 +65,7 @@ set(COMPONENT_REQUIRES
     esp_app_format
     app_update
     esp_partition
+    spi_flash
     fatfs
     wear_levelling
     esp_driver_gpio

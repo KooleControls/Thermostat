@@ -1,12 +1,5 @@
 # CLAUDE.md
 
-> **⚠️ ACTION BEFORE CONTINUING (2026-07-09):** The WebSocket transport rework is
-> being done in the **Strux** repo (`strux` remote / `C:/Workspace/Strux`) — reply
-> + inbound streaming shipped, session-multiplexed stream transport spec committed,
-> endpoint-decommission issues queued. **Merge Strux back in first:**
-> `git fetch strux && git merge strux/main`, resolve conflicts, build + `pnpm typecheck`.
-> Delete this banner once merged.
-
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this is
@@ -34,7 +27,7 @@ pnpm build        # tsc -b && vite build && gzip into ../www (embedded in flash 
 pnpm typecheck    # tsc --noEmit
 ```
 
-There are no automated tests; verification is building and flashing a device. Design notes and deferred ideas live in `docs/backlog/`.
+There are no automated tests; verification is building and flashing a device. `docs/backlog/` holds things actually planned to be done; `docs/ideas/` holds set-aside sketches of how something *could* be solved someday — suggestions, not commitments.
 
 ## Architecture
 
@@ -46,7 +39,7 @@ Everything in firmware is a "manager" owned by `ApplicationContext` ([main/Appli
 - has copy/move deleted,
 - initializes in `Init()` guarded by an `InitState` (`lib/rtos/InitState.h`), not in the constructor.
 
-`main.cpp` is only ordered `Init()` calls — order matters (Console → Settings → System → Network → Time → Command → Board → OpenTherm → Update → WebServer). Adding a manager means: create the class, add it to `ServiceProvider`, `ApplicationContext`, `main.cpp`, and `main/CMakeLists.txt` (both `SOURCE_FILES_LIST` and `INCLUDE_DIRS_LIST` — sources are listed explicitly, no globbing).
+`main.cpp` is only ordered `Init()` calls — order matters (Console → Settings → System → Network → Time → Command → Board → RoomTemperature → OpenTherm → Climate → HotWater → Display → Update → WebServer). Adding a manager means: create the class, add it to `ServiceProvider`, `ApplicationContext`, `main.cpp`, and `main/CMakeLists.txt` (both `SOURCE_FILES_LIST` and `INCLUDE_DIRS_LIST` — sources are listed explicitly, no globbing).
 
 ### Layer separation
 
@@ -65,23 +58,51 @@ Note: `board.cmake` fragments cannot change component `REQUIRES` (ESP-IDF resolv
 
 - Handlers have the signature `void Handler(Stream& in, Stream& out)`: `in` carries the request payload, the handler writes its complete reply to `out`. Streams are the contract; JSON is a dialect the handler opts into by constructing `JsonReader`/`JsonObject` on line one. Binary payloads (e.g. firmware chunks) use the same contract.
 - Owners declare an `inline static CommandEntry commands_[]` table ([CommandEntry.h](main/Application/CommandManager/CommandEntry.h)) with `InvokeCommand<&Owner::Method>` trampolines, and hand it to `CommandManager::Register()` from their `Init()`. Tables must have static storage duration — a registered entry that dies aborts with `FATAL`.
-- Two transports reach `Execute()`: the WebSocket (`WebSocketHandler`, JSON envelope with `id`/`type`) and a generic `POST /api/command` HTTP route used for large transfers (firmware uploads are chunked; partition downloads stream).
+- Commands reach `Execute()` over **one transport: the WebSocket** (`/ws`), using
+  the session-multiplexed binary protocol (`SessionProtocol.h`, spec
+  `docs/superpowers/specs/2026-07-09-session-mux-transport-design.md`). Each frame
+  is `[session:u16 LE][flags:u8][payload]`; a request is one `FLAG_FINAL` chunk
+  whose payload is the command JSON (`{"type":…,…}` + `\n`), and the reply comes
+  back on the same session id. HTTP (`StaticFileHandler`) now serves the static
+  frontend only — `/api/command` and `/api/login` were retired in the Strux
+  session-transport rework. Auth is per-connection, established in-band right
+  after the socket opens (`hello` → `login`/`auth`); `WebServerManager` splits
+  into `Authenticator`, `AuthGate`, `ConnectionRegistry`, and `SessionMux`.
 
-Log lines broadcast to all WebSocket clients via `ConsoleManager`. The frontend side is a singleton `BackendService` ([frontend/src/lib/backend.ts](frontend/src/lib/backend.ts)) that matches replies to requests by id and auto-reconnects.
+Log lines broadcast to authenticated WebSocket clients via `ConsoleManager` on the
+reserved broadcast session (0). The frontend side is a singleton `BackendService`
+([frontend/src/lib/backend.ts](frontend/src/lib/backend.ts)) that matches replies
+to requests by session id and auto-reconnects.
 
-`UpdateManager`'s entire external surface is its command table: session-based updates addressed by partition label (`updateBegin`/`updateWrite`/`updateEnd`), pull OTA from URL, and partition download. App partitions go through `esp_ota_*` (image validation, running slot refused); data partitions are raw erase+write. The built frontend is gzipped into `www/` and flashed as a FAT partition, updatable independently of the app.
+`UpdateManager`'s entire external surface is its command table: a streamed
+`writePartition` session (envelope chunk + body chunks, last one `FLAG_FINAL`,
+progress reported device-side on the reply), pull OTA from URL, and partition
+download. App partitions go through `esp_ota_*` (image validation, running slot
+refused); data partitions are raw erase+write. The built frontend is gzipped into
+`www/` and flashed as a FAT partition, updatable independently of the app.
+
+> **Bench-testing note:** since `/api/command` is gone, `curl` no longer drives
+> commands — use a WS session client (`scratchpad/ws_cmd.py`) that speaks the
+> framing above.
 
 ### Settings
 
 Settings are typed leaf objects (`lib`-style, [TypedSettings.h](main/Application/SettingsManager/TypedSettings.h)) declared in the manager that owns them and registered at runtime:
 
 ```cpp
-inline static UInt32Setting port_{ "mqtt.port", "MQTT Port", 1883 };
+inline static UInt32Setting port_{ "myfeature.port", "My Feature Port", 1883 };
 // in Init():  settings.Register({ &port_ });
 uint32_t p = port_.Get();   // NVS value or the typed default
 ```
 
 `SettingsManager` is the NVS link; the settings UI is generated dynamically from the registered definitions.
+
+### Deliberately out of scope
+
+MQTT and Home Assistant integration were removed 2026-07-06: the gateway owns
+smart-home integration, so the thermostat has no MQTT/HA layer. Do not
+reintroduce it — resurrect the old managers from git history only if that ever
+changes.
 
 ## Conventions
 
