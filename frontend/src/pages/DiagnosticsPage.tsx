@@ -6,46 +6,42 @@ import { useDiagnostics } from "@/hooks/use-diagnostics"
 export default function DiagnosticsPage() {
   const ot = useDiagnostics()
 
-  if (!ot) {
-    return (
-      <div className="mx-auto max-w-2xl">
-        <p className="text-sm text-muted-foreground">Connecting...</p>
-      </div>
-    )
-  }
-
-  const val = (n: number, unit: string, digits = 1) =>
-    ot.linked ? `${n.toFixed(digits)}${unit}` : "—"
+  // Header (esp. Link) always renders — never hidden behind a "Connecting…"
+  // guard — so link state is always visible. Sensor values show "—" until
+  // there's a live, linked reading.
+  const linked = ot?.linked ?? false
+  const val = (n: number | undefined, unit: string, digits = 1) =>
+    linked && n !== undefined ? `${n.toFixed(digits)}${unit}` : "—"
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Diagnostics</h1>
         <div className="flex items-center gap-2">
-          <StateBadge label="Link" on={ot.linked} onLabel="Up" offLabel="Down" offVariant="destructive" />
-          <StateBadge label="Fault" on={ot.fault} onVariant="destructive" />
-          <StateBadge label="Cooling" on={ot.coolingSupported} />
+          <StateBadge label="Link" on={linked} onLabel="Up" offLabel="Down" offVariant="destructive" />
+          <StateBadge label="Fault" on={ot?.fault ?? false} onVariant="destructive" />
+          <StateBadge label="Cooling" on={ot?.coolingSupported ?? false} />
         </div>
       </div>
 
       <Card title="Sensors">
-        <Row label="Boiler temp" value={val(ot.boilerTemp, "°")} />
-        <Row label="Return temp" value={val(ot.returnTemp, "°")} />
-        <Row label="DHW temp" value={val(ot.dhwTemp, "°")} />
-        <Row label="Modulation" value={val(ot.modulation, "%", 0)} />
-        <Row label="CH pressure" value={val(ot.chPressure, " bar", 2)} />
-        <Row label="Outside temp" value={val(ot.outsideTemp, "°")} />
+        <Row label="Boiler temp" value={val(ot?.boilerTemp, "°")} />
+        <Row label="Return temp" value={val(ot?.returnTemp, "°")} />
+        <Row label="DHW temp" value={val(ot?.dhwTemp, "°")} />
+        <Row label="Modulation" value={val(ot?.modulation, "%", 0)} />
+        <Row label="CH pressure" value={val(ot?.chPressure, " bar", 2)} />
+        <Row label="Outside temp" value={val(ot?.outsideTemp, "°")} />
       </Card>
 
       <Card title="Diagnostics">
-        <Row label="OEM fault code" value={ot.linked ? String(ot.oemFaultCode) : "—"} />
-        <Row label="OEM diag code" value={ot.linked ? String(ot.oemDiagCode) : "—"} />
+        <Row label="OEM fault code" value={linked ? String(ot?.oemFaultCode) : "—"} />
+        <Row label="OEM diag code" value={linked ? String(ot?.oemDiagCode) : "—"} />
       </Card>
 
       <Card title="Setpoint clamps">
-        <Row label="t_set upper" value={`${ot.maxTSetUpper.toFixed(0)}°`} />
-        <Row label="t_set lower" value={`${ot.maxTSetLower.toFixed(0)}°`} />
-        <Row label="Current t_set" value={val(ot.tSet, "°", 0)} />
+        <Row label="t_set upper" value={ot ? `${ot.maxTSetUpper.toFixed(0)}°` : "—"} />
+        <Row label="t_set lower" value={ot ? `${ot.maxTSetLower.toFixed(0)}°` : "—"} />
+        <Row label="Current t_set" value={val(ot?.tSet, "°", 0)} />
       </Card>
     </div>
   )

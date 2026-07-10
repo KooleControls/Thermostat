@@ -160,6 +160,7 @@ export default function ThermostatPage() {
         <Badge variant="secondary">Active {climate.activeSetpoint.toFixed(1)}°</Badge>
         <Badge variant="secondary">t_set {climate.tSet.toFixed(0)}°</Badge>
         <Badge variant="secondary">PID {climate.pidOutput.toFixed(0)}</Badge>
+        <StateBadge label="Link" on={!!ot?.linked} onLabel="Up" offLabel="Down" offVariant="destructive" />
         <StateBadge label="Flame" on={!!ot?.flame} />
         <StateBadge label="CH" on={!!ot?.chActive} />
         <StateBadge label="DHW" on={!!ot?.dhwActive} />
