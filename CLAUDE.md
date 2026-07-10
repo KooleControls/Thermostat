@@ -1,12 +1,5 @@
 # CLAUDE.md
 
-> **⚠️ ACTION BEFORE CONTINUING (2026-07-09):** The WebSocket transport rework is
-> being done in the **Strux** repo (`strux` remote / `C:/Workspace/Strux`) — reply
-> + inbound streaming shipped, session-multiplexed stream transport spec committed,
-> endpoint-decommission issues queued. **Merge Strux back in first:**
-> `git fetch strux && git merge strux/main`, resolve conflicts, build + `pnpm typecheck`.
-> Delete this banner once merged.
-
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this is
@@ -34,7 +27,7 @@ pnpm build        # tsc -b && vite build && gzip into ../www (embedded in flash 
 pnpm typecheck    # tsc --noEmit
 ```
 
-There are no automated tests; verification is building and flashing a device. Design notes and deferred ideas live in `docs/backlog/`.
+There are no automated tests; verification is building and flashing a device. `docs/backlog/` holds things actually planned to be done; `docs/ideas/` holds set-aside sketches of how something *could* be solved someday — suggestions, not commitments.
 
 ## Architecture
 
@@ -46,7 +39,7 @@ Everything in firmware is a "manager" owned by `ApplicationContext` ([main/Appli
 - has copy/move deleted,
 - initializes in `Init()` guarded by an `InitState` (`lib/rtos/InitState.h`), not in the constructor.
 
-`main.cpp` is only ordered `Init()` calls — order matters (Console → Settings → System → Network → Time → Command → Board → OpenTherm → Update → WebServer). Adding a manager means: create the class, add it to `ServiceProvider`, `ApplicationContext`, `main.cpp`, and `main/CMakeLists.txt` (both `SOURCE_FILES_LIST` and `INCLUDE_DIRS_LIST` — sources are listed explicitly, no globbing).
+`main.cpp` is only ordered `Init()` calls — order matters (Console → Settings → System → Network → Time → Command → Board → RoomTemperature → OpenTherm → Climate → HotWater → Display → Update → WebServer). Adding a manager means: create the class, add it to `ServiceProvider`, `ApplicationContext`, `main.cpp`, and `main/CMakeLists.txt` (both `SOURCE_FILES_LIST` and `INCLUDE_DIRS_LIST` — sources are listed explicitly, no globbing).
 
 ### Layer separation
 
@@ -76,12 +69,19 @@ Log lines broadcast to all WebSocket clients via `ConsoleManager`. The frontend 
 Settings are typed leaf objects (`lib`-style, [TypedSettings.h](main/Application/SettingsManager/TypedSettings.h)) declared in the manager that owns them and registered at runtime:
 
 ```cpp
-inline static UInt32Setting port_{ "mqtt.port", "MQTT Port", 1883 };
+inline static UInt32Setting port_{ "myfeature.port", "My Feature Port", 1883 };
 // in Init():  settings.Register({ &port_ });
 uint32_t p = port_.Get();   // NVS value or the typed default
 ```
 
 `SettingsManager` is the NVS link; the settings UI is generated dynamically from the registered definitions.
+
+### Deliberately out of scope
+
+MQTT and Home Assistant integration were removed 2026-07-06: the gateway owns
+smart-home integration, so the thermostat has no MQTT/HA layer. Do not
+reintroduce it — resurrect the old managers from git history only if that ever
+changes.
 
 ## Conventions
 

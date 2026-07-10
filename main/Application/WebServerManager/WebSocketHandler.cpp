@@ -1,23 +1,26 @@
 #include "WebSocketHandler.h"
 #include "CommandManager.h"
-#include "WebServerManager.h"
+#include "Authenticator.h"
+#include "AuthGate.h"
 #include "JsonHelpers.h"
-#include "BufferStream.h"
-#include "MemoryStream.h"
-#include "JsonWriter.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
-#include <cinttypes>
+#include <algorithm>
 #include <cstring>
 
 static constexpr const char* TAG = "WebSocketHandler";
+
+// The inbound frame-drain primitive (the private httpd_ws_get_frame_type wart)
+// now lives in WsSessionLink::RecvChunk; Session::read() pulls streamed request
+// bodies through it. See WsSessionLink.h.
 
 void WebSocketHandler::SetCommandManager(CommandManager& commandManager)
 {
     commandManager_ = &commandManager;
 }
 
-void WebSocketHandler::SetAuth(WebServerManager& auth)
+void WebSocketHandler::SetAuth(Authenticator& auth)
 {
     auth_ = &auth;
 }
@@ -40,61 +43,21 @@ void WebSocketHandler::RegisterRoute(httpd_handle_t server)
 // Client tracking
 // ──────────────────────────────────────────────────────────────
 
-bool WebSocketHandler::AddWsClient(int fd, const char* token)
+bool WebSocketHandler::AddWsClient(int fd)
 {
-    LOCK(wsMutex_);
-
-    for (int i = 0; i < MAX_WS_CLIENTS; i++)
-    {
-        if (wsClients_[i] == fd) return true;
-    }
-
-    for (int i = 0; i < MAX_WS_CLIENTS; i++)
-    {
-        if (wsClients_[i] == 0)
-        {
-            wsClients_[i] = fd;
-            strlcpy(clientTokens_[i], token, sizeof(clientTokens_[i]));
-            ESP_LOGI(TAG, "WS client added: fd=%d slot=%d", fd, i);
-            return true;
-        }
-    }
-    ESP_LOGW(TAG, "WS client rejected (max reached): fd=%d", fd);
-    return false;
+    bool authed = !(auth_ && auth_->AuthRequired());   // empty password ⇒ authed at connect
+    return registry_.add(fd, authed, esp_timer_get_time()) != nullptr;
 }
 
 void WebSocketHandler::RemoveWsClient(int fd)
 {
-    LOCK(wsMutex_);
-    for (int i = 0; i < MAX_WS_CLIENTS; i++)
-    {
-        if (wsClients_[i] == fd)
-        {
-            wsClients_[i] = 0;
-            consecBinFails_[i] = 0;
-            clientTokens_[i][0] = 0;
-            ESP_LOGI(TAG, "WS client removed: fd=%d slot=%d", fd, i);
-            return;
-        }
-    }
+    registry_.remove(fd);
 }
 
 void WebSocketHandler::TouchClient(int fd)
 {
-    char token[SessionTable::TOKEN_LEN] = {};
-    {
-        LOCK(wsMutex_);
-        for (int i = 0; i < MAX_WS_CLIENTS; i++)
-        {
-            if (wsClients_[i] == fd)
-            {
-                strlcpy(token, clientTokens_[i], sizeof(token));
-                break;
-            }
-        }
-    }
-    if (token[0] != 0 && auth_)
-        auth_->TouchSession(token);   // outside wsMutex_ — TouchSession locks its own table
+    if (auto* c = registry_.find(fd); c && c->authed)
+        auth_->TouchKey(c->key);   // TouchKey locks its own table
 }
 
 void WebSocketHandler::OnClientDisconnected(int fd)
@@ -104,44 +67,49 @@ void WebSocketHandler::OnClientDisconnected(int fd)
 
 void WebSocketHandler::Broadcast(httpd_handle_t server, const char* json, int len)
 {
-    // Snapshot clients under lock, then send outside the lock. Holding wsMutex_
-    // across send would deadlock when a broadcaster source (e.g. ConsoleManager)
-    // already holds its own mutex and httpd internals call back into us.
-    int clients[MAX_WS_CLIENTS];
+    // Snapshot authed client fds under the registry lock, then send outside it.
+    // Holding the lock across send would deadlock when a broadcaster source
+    // (e.g. ConsoleManager) already holds its own mutex and httpd internals
+    // call back into us.
+    int clients[ConnectionRegistry::MAX];
+    int count = 0;
+    registry_.forEach([&](const WsConnection& c) {
+        if (c.authed && count < ConnectionRegistry::MAX) clients[count++] = c.fd;
+    });
 
-    {
-        LOCK(wsMutex_);
-        memcpy(clients, wsClients_, sizeof(clients));
-    }
+    // Broadcast as a binary session chunk on the reserved broadcast session 0,
+    // so the socket carries ONE uniform chunk format for replies and broadcasts
+    // alike (no TEXT frames). Clients allocate session ids from 1, so 0 never
+    // collides with a command.
+    uint8_t buf[session::HEADER_LEN + 256];
+    int cap = static_cast<int>(sizeof(buf) - session::HEADER_LEN);
+    if (len > cap) len = cap;
+    session::writeHeader(buf, session::BROADCAST_SESSION, session::FLAG_FINAL);
+    memcpy(buf + session::HEADER_LEN, json, len);
 
     httpd_ws_frame_t frame = {};
-    frame.type = HTTPD_WS_TYPE_TEXT;
-    frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(json));
-    frame.len = len;
+    frame.type = HTTPD_WS_TYPE_BINARY;
+    frame.payload = buf;
+    frame.len = session::HEADER_LEN + len;
 
     LOCK(sendMutex_);
-    for (int i = 0; i < MAX_WS_CLIENTS; i++)
+    for (int i = 0; i < count; i++)
     {
-        if (clients[i] != 0)
+        if (httpd_ws_send_frame_async(server, clients[i], &frame) != ESP_OK)
         {
-            if (httpd_ws_send_frame_async(server, clients[i], &frame) != ESP_OK)
-            {
-                ESP_LOGW(TAG, "Broadcast failed to fd=%d, removing", clients[i]);
-                LOCK(wsMutex_);
-                wsClients_[i] = 0;
-            }
+            ESP_LOGW(TAG, "Broadcast failed to fd=%d, removing", clients[i]);
+            registry_.remove(clients[i]);
         }
     }
 }
 
 void WebSocketHandler::BroadcastBinary(httpd_handle_t server, const uint8_t* data, size_t len)
 {
-    int clients[MAX_WS_CLIENTS];
-
-    {
-        LOCK(wsMutex_);
-        memcpy(clients, wsClients_, sizeof(clients));
-    }
+    int clients[ConnectionRegistry::MAX];
+    int count = 0;
+    registry_.forEach([&](const WsConnection& c) {
+        if (c.authed && count < ConnectionRegistry::MAX) clients[count++] = c.fd;
+    });
 
     httpd_ws_frame_t frame = {};
     frame.type = HTTPD_WS_TYPE_BINARY;
@@ -149,14 +117,13 @@ void WebSocketHandler::BroadcastBinary(httpd_handle_t server, const uint8_t* dat
     frame.len = len;
 
     LOCK(sendMutex_);
-    for (int i = 0; i < MAX_WS_CLIENTS; i++)
+    for (int i = 0; i < count; i++)
     {
-        if (clients[i] == 0) continue;
+        int fd = clients[i];
 
-        if (httpd_ws_send_frame_async(server, clients[i], &frame) == ESP_OK)
+        if (httpd_ws_send_frame_async(server, fd, &frame) == ESP_OK)
         {
-            LOCK(wsMutex_);
-            consecBinFails_[i] = 0;
+            if (auto* c = registry_.find(fd)) c->consecBinFails = 0;
             continue;
         }
 
@@ -164,13 +131,14 @@ void WebSocketHandler::BroadcastBinary(httpd_handle_t server, const uint8_t* dat
         // load. Don't remove the client on a single failure; the socket-close
         // callback cleans up real disconnects. Only after many consecutive
         // failures do we give up on this client.
-        LOCK(wsMutex_);
-        if (++consecBinFails_[i] >= MAX_BIN_FAILS)
+        if (auto* c = registry_.find(fd))
         {
-            ESP_LOGW(TAG, "BroadcastBinary giving up on fd=%d after %d consecutive failures",
-                     clients[i], consecBinFails_[i]);
-            wsClients_[i] = 0;
-            consecBinFails_[i] = 0;
+            if (++c->consecBinFails >= MAX_BIN_FAILS)
+            {
+                ESP_LOGW(TAG, "BroadcastBinary giving up on fd=%d after %d consecutive failures",
+                         fd, c->consecBinFails);
+                registry_.remove(fd);
+            }
         }
     }
 }
@@ -185,25 +153,11 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
 
     if (req->method == HTTP_GET)
     {
-        // Auth happens HERE, once. esp_http_server has already sent the
-        // 101 handshake before invoking us; returning ESP_FAIL makes
-        // httpd close the socket immediately, which is how an upgrade
-        // is "refused". The frontend can't read a close reason — it
-        // discriminates bad-token from network failure via an HTTP
-        // ping before connecting (see backend.ts).
-        char query[96] = {};
-        char token[SessionTable::TOKEN_LEN] = {};
-        if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
-            httpd_query_key_value(query, "token", token, sizeof(token)) != ESP_OK ||
-            !self->auth_ || !self->auth_->ValidateToken(token))
-        {
-            ESP_LOGW(TAG, "WS upgrade refused: missing/invalid token");
-            return ESP_FAIL;
-        }
-        // A client beyond the table would stay open but untracked: no
-        // broadcasts, no session refresh — a half-alive tab that GCs
-        // after 30 min. Refuse instead so it hits the reconnect loop.
-        if (!self->AddWsClient(httpd_req_to_sockfd(req), token))
+        // The WS now opens UNAUTHENTICATED — auth is an in-band handshake
+        // (see AuthGate). esp_http_server has already sent the 101; we
+        // only need a client slot. A full table (after reaping stale un-authed
+        // sockets) refuses the upgrade so the client hits its reconnect loop.
+        if (!self->AddWsClient(httpd_req_to_sockfd(req)))
             return ESP_FAIL;
         return ESP_OK;
     }
@@ -229,54 +183,87 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
         return ESP_OK;
     }
 
-    if (frame.type != HTTPD_WS_TYPE_TEXT || frame.len == 0)
+    if (frame.type == HTTPD_WS_TYPE_BINARY)
+    {
+        if (frame.len >= session::HEADER_LEN)
+            self->HandleBinary(req, buf, frame.len);
         return ESP_OK;
+    }
 
-    buf[frame.len] = '\0';
-    const char* json = reinterpret_cast<const char*>(buf);
-
-    int32_t id = ExtractJsonInt(json, "id");
-    char type[32] = {};
-    ExtractJsonString(json, "type", type, sizeof(type));
-
-    if (id <= 0 || type[0] == '\0')
-        return ESP_OK;
-
-    self->DispatchMessage(req, id, type, json);
+    // Inbound TEXT frames are no longer used: requests are binary session
+    // chunks and no client sends text. Ignore any stray text frame.
     return ESP_OK;
 }
 
-void WebSocketHandler::DispatchMessage(httpd_req_t* req, int32_t id, const char* type, const char* json)
+// ──────────────────────────────────────────────────────────────
+// Binary session transport. One inbound binary frame = one
+// session chunk; step-1 requests are a single chunk dispatched synchronously.
+// ──────────────────────────────────────────────────────────────
+
+void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size_t len)
 {
-    BufferStream out(wsBuf_, sizeof(wsBuf_));
+    uint16_t sid   = session::readU16(frame);
+    uint8_t  flags = frame[2];
+    const uint8_t* payload = frame + session::HEADER_LEN;
+    size_t plen = len - session::HEADER_LEN;
+    int fd = httpd_req_to_sockfd(req);
 
-    // Envelope by concatenation: the handler writes one complete JSON
-    // object into `out`; we wrap it as {"id":N,"payload":<object>}.
-    char head[48];
-    int n = snprintf(head, sizeof(head), "{\"id\":%" PRId32 ",\"payload\":", id);
-    out.write(head, n);
+    // All inbound frames are processed single-threaded on the httpd task, so the
+    // AuthGate below is the only writer of this connection's state (authed/key).
+    // Broadcast runs on another task and may reset (remove) a slot concurrently,
+    // but it only ever *clears* a slot — it never sets `authed` — so the auth gate
+    // can't be defeated by that race, and a cleared slot reads as empty (self-
+    // healing). If a worker task ever consumes these pointers (step 6), this needs
+    // real locking (copy-under-lock, as the pre-refactor code did).
+    WsConnection* conn = registry_.find(fd);
+    if (!conn) return;   // unknown fd (closed mid-frame)
 
-    MemoryStream in(json, strlen(json));
-
-    if (commandManager_ && commandManager_->Execute(type, in, out))
+    WsSessionLink link(req, sendMutex_);
+    AuthGate gate(*auth_);
+    switch (gate.Handle(*conn, link, sid, payload, plen))
     {
-        out.write("}", 1);
+        case AuthGate::Disposition::PassToMux:
+        {
+            SessionMux mux(link, *this, sessionFrame_, SESSION_WINDOW,
+                           sessionInbound_, sizeof(sessionInbound_));
+            mux.OnChunk(sid, flags, payload, plen);
+            break;
+        }
+        case AuthGate::Disposition::Handled:
+        case AuthGate::Disposition::Rejected:
+            break;
     }
-    else
+}
+
+void WebSocketHandler::OnSessionOpened(Session& session)
+{
+    // The request's first chunk carries the header line — {"type":"...",...args}
+    // terminated by '\n' — followed (for a streamed command) by the body. Peek
+    // it (without consuming) to route on "type"; the handler then reads the same
+    // line for its own args and the body from the same session (in == out).
+    const uint8_t* head = nullptr;
+    size_t headLen = 0;
+    session.peekRequest(head, headLen);
+
+    char line[128];
+    size_t n = std::min(headLen, sizeof(line) - 1);
+    memcpy(line, head, n);
+    line[n] = '\0';
+    if (char* nl = strchr(line, '\n')) *nl = '\0';
+
+    char type[32] = {};
+    ExtractJsonString(line, "type", type, sizeof(type));
+
+    if (type[0] == '\0')
     {
-        out.reset();
-        JsonWriter err(out);   // reuse JsonWriter's escaping for the type echo
-        err.beginObject();
-        err.field("id", id);
-        err.field("error", type);
-        err.endObject();
+        session.reject("missing type");
+        return;
     }
 
-    httpd_ws_frame_t frame = {};
-    frame.type = HTTPD_WS_TYPE_TEXT;
-    frame.payload = reinterpret_cast<uint8_t*>(const_cast<char*>(out.data()));
-    frame.len = out.length();
-
-    LOCK(sendMutex_);
-    httpd_ws_send_frame(req, &frame);
+    if (!commandManager_ || !commandManager_->Execute(type, session, session))
+    {
+        session.reject(type);   // unknown command
+        return;
+    }
+    session.finish();   // FINAL — end of reply
 }
