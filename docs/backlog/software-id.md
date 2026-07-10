@@ -1,6 +1,6 @@
 # Software ID
 
-**Infra I1.** Company-wide firmware identity.
+**Infra I1.** (2026-07-06) Company-wide firmware identity.
 
 - Reserved: **ID 28 (hex 0000001C)** on the canonical
   [Software ID's page](https://koolecontrolsdevelopment.atlassian.net/wiki/spaces/DEV/pages/430211074)

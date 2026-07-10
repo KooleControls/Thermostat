@@ -1,6 +1,6 @@
 # Unified WebSocket transport (Strux redesign)
 
-**Status: brainstorm, not committed.** This is a Strux-template architecture
+**Status: brainstorm, not committed (2026-07-09).** This is a Strux-template architecture
 direction, explored while debugging a Console timeout in this project. It should
 land as a Strux issue/spec and be developed in its own cycle. Nothing here is
 built yet.

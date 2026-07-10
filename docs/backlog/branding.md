@@ -1,6 +1,6 @@
 # Branding / identity
 
-**Infra I3.** The device currently identifies as "Strux" everywhere.
+**Infra I3.** (2026-07-06) The device currently identifies as "Strux" everywhere.
 
 - Device name "KC Thermostat": default `device.name`, AP SSID, mDNS
   hostname, web UI title/sidebar, project/binary name in CMake.
