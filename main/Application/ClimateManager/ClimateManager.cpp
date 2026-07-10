@@ -46,6 +46,7 @@ void ClimateManager::Loop()
     while (true)
     {
         ControlStep();
+        MaybeCommitSettings();   // outside ControlStep: it early-returns on sensor fault
         vTaskDelay(pdMS_TO_TICKS(LoopDelayMs));
     }
 }
@@ -58,18 +59,33 @@ float ClimateManager::GetUserSetpoint() const
 
 void ClimateManager::NudgeSetpoint(float deltaC)
 {
-    float sp;
+    LOCK(mutex_);
+    float sp = userSetpoint_ + deltaC;
+    if (sp < kSetpointMin) sp = kSetpointMin;
+    if (sp > kSetpointMax) sp = kSetpointMax;
+    if (fabsf(sp - userSetpoint_) < 0.001f) return;   // clamped, no change
+    userSetpoint_ = sp;
+    settingsDirty_ = true;
+    lastChangeUs_ = esp_timer_get_time();
+    // Takes effect on the next ControlStep; persisted later by MaybeCommitSettings.
+}
+
+void ClimateManager::MaybeCommitSettings()
+{
+    ClimateMode mode;
+    float setpoint;
     {
         LOCK(mutex_);
-        sp = userSetpoint_ + deltaC;
-        if (sp < kSetpointMin) sp = kSetpointMin;
-        if (sp > kSetpointMax) sp = kSetpointMax;
-        if (fabsf(sp - userSetpoint_) < 0.001f) return;   // clamped, no change
-        userSetpoint_ = sp;
+        if (!settingsDirty_) return;
+        if (esp_timer_get_time() - lastChangeUs_ < kCommitIdleUs) return;   // still being adjusted
+        mode = mode_;
+        setpoint = userSetpoint_;
+        settingsDirty_ = false;   // a change during the write below re-dirties → committed next tick
     }
-    setpointSetting_.Set(sp);
+    // Flash work outside the lock. One coalesced write per quiet period.
+    modeSetting_.Set((uint32_t)mode);
+    setpointSetting_.Set(setpoint);
     serviceProvider_.getSettingsManager().Save();
-    // Takes effect on the next ControlStep (which reads userSetpoint_).
 }
 
 void ClimateManager::ControlStep()
@@ -166,8 +182,6 @@ void ClimateManager::PushSafeState()
 void ClimateManager::Cmd_ClimateSet(Stream &in, Stream &out)
 {
     JsonReader<128> json(in);
-    ClimateMode mode;
-    float setpoint;
     bool changed = false;
     {
         LOCK(mutex_);
@@ -184,14 +198,11 @@ void ClimateManager::Cmd_ClimateSet(Stream &in, Stream &out)
             if (sp > kSetpointMax) sp = kSetpointMax;
             if (fabsf(userSetpoint_ - sp) > 0.001f) { userSetpoint_ = sp; changed = true; }
         }
-        mode = mode_;
-        setpoint = userSetpoint_;
-    }
-    if (changed)
-    {
-        modeSetting_.Set((uint32_t)mode);
-        setpointSetting_.Set(setpoint);
-        serviceProvider_.getSettingsManager().Save();
+        if (changed)
+        {
+            settingsDirty_ = true;
+            lastChangeUs_ = esp_timer_get_time();   // persisted later by MaybeCommitSettings
+        }
     }
     WriteStatus(out);
 }

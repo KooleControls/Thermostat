@@ -32,7 +32,8 @@ struct ClimateStatus
 class ClimateManager
 {
     static constexpr const char *TAG = "ClimateManager";
-    static constexpr int   LoopDelayMs = 5000;
+    static constexpr int     LoopDelayMs = 5000;
+    static constexpr int64_t kCommitIdleUs = 5'000'000;   // defer NVS write until setpoint/mode is quiet this long
     static constexpr float kFrostSetpointC = 5.0f;
     static constexpr float kSetpointMin = 5.0f;
     static constexpr float kSetpointMax = 30.0f;
@@ -49,11 +50,12 @@ public:
 
     // On-screen UI control surface (calls, not JSON commands).
     float GetUserSetpoint() const;
-    void  NudgeSetpoint(float deltaC);   // ±, clamped to [5,30], persisted
+    void  NudgeSetpoint(float deltaC);   // ±, clamped to [5,30]; persisted lazily (see MaybeCommitSettings)
 
 private:
     void Loop();
     void ControlStep();
+    void MaybeCommitSettings();   // flush mode/setpoint to NVS once input has gone quiet
     float OutputToTSet(float output, float loBound, float hiBound);
     void  PushSafeState();
     void  Cmd_ClimateSet(Stream &in, Stream &out);
@@ -78,6 +80,11 @@ private:
     ClimateMode mode_ = ClimateMode::Off;
     float userSetpoint_ = 20.0f;
     ClimateStatus status_;
+
+    // deferred NVS persistence (guarded by mutex_): changes update RAM instantly
+    // and mark dirty; the loop flushes one write once input is quiet.
+    bool    settingsDirty_ = false;
+    int64_t lastChangeUs_ = 0;
 
     // loop-task-only
     int64_t lastStepUs_ = -1;
