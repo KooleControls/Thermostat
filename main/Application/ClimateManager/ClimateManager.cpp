@@ -124,8 +124,18 @@ void ClimateManager::ControlStep()
     float activeSp;
     if (mode != ClimateMode::Off && boiler.overrideSetpoint > 0.0f)
     {
-        activeSp = boiler.overrideSetpoint;
+        // Adopt the gateway's remote override as our own setpoint (RAM only —
+        // deliberately NOT persisted): the display follows it and we stop
+        // re-requesting the pre-override value, so the gateway sees its cap
+        // satisfied and stops re-capping — otherwise ID 16 oscillates. The
+        // user can still nudge locally afterwards; on reboot we boot to the
+        // stored value and the gateway re-caps, so it self-heals.
+        float ov = boiler.overrideSetpoint;
+        if (ov < kSetpointMin) ov = kSetpointMin;
+        if (ov > kSetpointMax) ov = kSetpointMax;
+        activeSp = ov;
         overrideActive = true;
+        { LOCK(mutex_); userSetpoint_ = ov; userSp = ov; }
     }
     else if (mode == ClimateMode::Off)
     {
