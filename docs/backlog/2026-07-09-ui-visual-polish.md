@@ -25,7 +25,7 @@ and finish on top of what's there.
 ## Relations
 
 - Builds on item 7 (`thermostat-ui`, minimal — done).
-- Consider alongside `ui-command-driven.md` (if the screen goes
+- Consider alongside `2026-07-07-ui-command-driven.md` (if the screen goes
   command-driven, a web replica shares the same layout/LVGL, so polish could
   be done once for both).
 - The fuller home-screen elements (mode/DHW/icons/fault/arc) deferred from

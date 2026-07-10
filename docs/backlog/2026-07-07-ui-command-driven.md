@@ -13,8 +13,8 @@ rendered in the browser).
 
 - One control path → screen and web can't drift. Every action is a command,
   already the device's tested RPC surface.
-- Pairs naturally with `command-page.md` (a generic command UI) and
-  `web-integration.md` (item 8, the web climate/DHW page).
+- Pairs naturally with `2026-07-07-command-page.md` (a generic command UI) and
+  `2026-07-06-web-integration.md` (item 8, the web climate/DHW page).
 - LVGL can target the browser (WASM), so in principle the exact screen layout
   could be reused on the web, not just reimplemented.
 
@@ -25,7 +25,7 @@ rendered in the browser).
   command-plumbing detour. Approved that way.
 - Going command-driven touches the command layer's shape (in-process command
   invocation from the UI task, reply handling) and overlaps the undecided
-  KC-command rework (`kc-command-tunnel.md`) and `command-page.md` — better
+  KC-command rework (`2026-07-07-kc-command-tunnel.md`) and `2026-07-07-command-page.md` — better
   designed once those are settled.
 
 ## Revisit when

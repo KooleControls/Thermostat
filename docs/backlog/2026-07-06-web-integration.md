@@ -1,6 +1,6 @@
 # Web UI integration
 
-**Step 1, item 8.** (2026-07-06) Expose climate/DHW/diagnostics through Strux's existing
+**Step 1, item 8.** Expose climate/DHW/diagnostics through Strux's existing
 WebSocket command plumbing (no MQTT/HA — removed; the gateway owns
 smart-home integration).
 

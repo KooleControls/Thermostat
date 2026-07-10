@@ -1,6 +1,6 @@
 # Drop-in validation against the gateway
 
-**Step 1, item 9 (exit criterion).** (2026-07-06) Prove the thermostat is a 1:1
+**Step 1, item 9 (exit criterion).** Prove the thermostat is a 1:1
 replacement for the third-party unit — no gateway changes (THR=1).
 
 - Heat path: setpoint above room temp → PID → t_set/CH-enable → gateway

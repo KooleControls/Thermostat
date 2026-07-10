@@ -1,6 +1,6 @@
 # Release workflow (gateway-style)
 
-**Infra I2.** (2026-07-06) Rework `.github/workflows/release.yml` (currently stock Strux)
+**Infra I2.** Rework `.github/workflows/release.yml` (currently stock Strux)
 to match the gateway's release conventions:
 
 - Tags `VX.Y.Z`; parse major/minor/patch, pass as

@@ -17,10 +17,10 @@ this deserves design time. Things a proper page could offer:
 
 ## Relations
 
-- Depends on the command surface shape: see `kc-command-tunnel.md` —
+- Depends on the command surface shape: see `2026-07-07-kc-command-tunnel.md` —
   whether commands stay JSON-typed, gain a KC-style (4-char ASCII)
   dialect, or both, changes what this page speaks.
-- Overlaps `web-integration.md` (item 8) — that item covers purpose-built
+- Overlaps `2026-07-06-web-integration.md` (item 8) — that item covers purpose-built
   OT status/control UI; this page is the generic escape hatch that keeps
   working for every future command without frontend changes.
 

@@ -1,6 +1,6 @@
 # Unified WebSocket transport (Strux redesign)
 
-**Status: brainstorm, not committed (2026-07-09).** This is a Strux-template architecture
+**Status: brainstorm, not committed.** This is a Strux-template architecture
 direction, explored while debugging a Console timeout in this project. It should
 land as a Strux issue/spec and be developed in its own cycle. Nothing here is
 built yet.
@@ -91,7 +91,7 @@ that one socket.
   one that terminates TLS. (Not a regression — token-in-URL has the same exposure
   today.)
 - **stdout/console command transport** is its own idea; relates to
-  `command-page.md`, `ui-command-driven.md`, `kc-command-tunnel.md`.
+  `2026-07-07-command-page.md`, `2026-07-07-ui-command-driven.md`, `2026-07-07-kc-command-tunnel.md`.
 
 ## Build/backport plan
 
