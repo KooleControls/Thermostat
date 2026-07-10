@@ -14,7 +14,7 @@ rendered in the browser).
 - One control path → screen and web can't drift. Every action is a command,
   already the device's tested RPC surface.
 - Pairs naturally with `2026-07-07-command-page.md` (a generic command UI) and
-  `2026-07-06-web-integration.md` (item 8, the web climate/DHW page).
+  the web integration (roadmap item 8, the web climate/DHW page).
 - LVGL can target the browser (WASM), so in principle the exact screen layout
   could be reused on the web, not just reimplemented.
 
