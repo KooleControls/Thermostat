@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import { ActivityIcon } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { StateBadge } from "@/components/StateBadge"
 import { useDiagnostics } from "@/hooks/use-diagnostics"
 
 export default function DiagnosticsPage() {
@@ -22,11 +22,9 @@ export default function DiagnosticsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Diagnostics</h1>
         <div className="flex items-center gap-2">
-          <Badge variant={ot.linked ? "default" : "destructive"}>
-            {ot.linked ? "Link up" : "Link down"}
-          </Badge>
-          {ot.fault && <Badge variant="destructive">Fault</Badge>}
-          {ot.coolingSupported && <Badge variant="secondary">Cooling</Badge>}
+          <StateBadge label="Link" on={ot.linked} onLabel="Up" offLabel="Down" offVariant="destructive" />
+          <StateBadge label="Fault" on={ot.fault} onVariant="destructive" />
+          <StateBadge label="Cooling" on={ot.coolingSupported} />
         </div>
       </div>
 

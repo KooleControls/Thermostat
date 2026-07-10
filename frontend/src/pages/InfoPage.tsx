@@ -7,12 +7,12 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KB`
 }
 
-export default function HomePage() {
+export default function InfoPage() {
   const info = useDeviceInfo()
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <h1 className="text-2xl font-bold">Info</h1>
 
       <div className="rounded-xl border bg-card p-6 text-card-foreground shadow-sm">
         <div className="mb-4 flex items-center gap-2">

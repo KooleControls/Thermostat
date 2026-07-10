@@ -1,6 +1,6 @@
 import { useEffect } from "react"
 import {
-  HomeIcon,
+  InfoIcon,
   TerminalIcon,
   SettingsIcon,
   DownloadIcon,
@@ -25,12 +25,12 @@ import { isNewerVersion } from "@/lib/version"
 import { PreReleaseBadge } from "@/components/PreReleaseBadge"
 
 const navItems = [
-  { title: "Home", icon: HomeIcon, page: "home" as const },
   { title: "Thermostat", icon: ThermometerIcon, page: "thermostat" as const },
   { title: "Diagnostics", icon: ActivityIcon, page: "diagnostics" as const },
   { title: "Console", icon: TerminalIcon, page: "console" as const },
   { title: "Settings", icon: SettingsIcon, page: "settings" as const },
   { title: "Firmware", icon: DownloadIcon, page: "firmware" as const },
+  { title: "Info", icon: InfoIcon, page: "info" as const },
 ]
 
 export type Page = (typeof navItems)[number]["page"]

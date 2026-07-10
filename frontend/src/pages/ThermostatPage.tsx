@@ -3,6 +3,7 @@ import { ThermometerIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
+import { StateBadge } from "@/components/StateBadge"
 import { useThermostatStatus } from "@/hooks/use-thermostat-status"
 
 const SETPOINT_MIN = 5
@@ -159,10 +160,10 @@ export default function ThermostatPage() {
         <Badge variant="secondary">Active {climate.activeSetpoint.toFixed(1)}°</Badge>
         <Badge variant="secondary">t_set {climate.tSet.toFixed(0)}°</Badge>
         <Badge variant="secondary">PID {climate.pidOutput.toFixed(0)}</Badge>
-        {ot?.flame && <Badge>Flame</Badge>}
-        {ot?.chActive && <Badge>CH</Badge>}
-        {ot?.dhwActive && <Badge>DHW</Badge>}
-        {climate.overrideActive && <Badge variant="outline">Override</Badge>}
+        <StateBadge label="Flame" on={!!ot?.flame} />
+        <StateBadge label="CH" on={!!ot?.chActive} />
+        <StateBadge label="DHW" on={!!ot?.dhwActive} />
+        <StateBadge label="Override" on={climate.overrideActive} />
       </div>
     </div>
   )

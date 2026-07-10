@@ -2,22 +2,23 @@ import { useState, useEffect, useCallback } from "react"
 import type { Page } from "@/components/AppSidebar"
 
 const validPages: Page[] = [
-  "home",
   "thermostat",
   "diagnostics",
   "console",
   "settings",
   "firmware",
+  "info",
 ]
 
+// Thermostat is the landing page: it lives at "/" (no "home" route).
 function pathToPage(pathname: string): Page {
   const segment = pathname.replace(/^\/+/, "").split("/")[0]?.toLowerCase()
   if (segment && validPages.includes(segment as Page)) return segment as Page
-  return "home"
+  return "thermostat"
 }
 
 function pageToPath(page: Page): string {
-  return page === "home" ? "/" : `/${page}`
+  return page === "thermostat" ? "/" : `/${page}`
 }
 
 export function useRoute() {
