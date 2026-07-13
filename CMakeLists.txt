@@ -2,19 +2,26 @@
 # CMakeLists in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.16)
 
-# Derive version from git tag (v0.1.0 -> 0.1.0), fallback to 0.0.0-dev
-execute_process(
-    COMMAND git describe --tags --abbrev=0
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE GIT_TAG
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-    RESULT_VARIABLE GIT_TAG_RESULT
-)
-if(GIT_TAG_RESULT EQUAL 0 AND GIT_TAG MATCHES "^v(.+)$")
-    set(PROJECT_VER "${CMAKE_MATCH_1}")
+# Version resolution:
+#   CI passes -DSOFTWARE_VERSION_MAJOR/MINOR/PATCH parsed from the VX.Y.Z tag.
+#   Local builds derive it from the nearest uppercase-V tag (git describe);
+#   fall back to 0.0.0-dev when git or a matching tag is unavailable.
+if(DEFINED SOFTWARE_VERSION_MAJOR)
+    set(PROJECT_VER "${SOFTWARE_VERSION_MAJOR}.${SOFTWARE_VERSION_MINOR}.${SOFTWARE_VERSION_PATCH}")
 else()
-    set(PROJECT_VER "0.0.0-dev")
+    execute_process(
+        COMMAND git describe --tags --abbrev=0 --match "V*"
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE GIT_TAG
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE GIT_TAG_RESULT
+    )
+    if(GIT_TAG_RESULT EQUAL 0 AND GIT_TAG MATCHES "^V0*([0-9]+)\\.0*([0-9]+)\\.0*([0-9]+)$")
+        set(PROJECT_VER "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
+    else()
+        set(PROJECT_VER "0.0.0-dev")
+    endif()
 endif()
 
 # ── Per-board sdkconfig ───────────────────────────────────────
@@ -35,7 +42,7 @@ endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 idf_build_set_property(MINIMAL_BUILD ON)
-project(Strux)
+project(Thermostat)
 
 # ── Frontend build ────────────────────────────────────────────
 # Automatically build the React frontend before generating the FAT image.
