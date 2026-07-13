@@ -96,7 +96,7 @@ name; hostname surfaces derive a sanitized `kc-thermostat`.
 | Surface | File | From | To |
 |---|---|---|---|
 | `device.name` default | `main/Application/SystemManager/SystemManager.h` | `"Strux"` | `"KC Thermostat"` |
-| `GetDeviceName` fallback | same | `"Strux"` | `"KC Thermostat"` |
+| `GetDeviceName` empty-name fallback | same (`.cpp`) | `project_name` (was `Strux`) | `project_name` (now `Thermostat`) — unchanged code; follows the CMake project rename. Only fires if the user blanks `device.name`; the friendly `KC Thermostat` comes from the setting default above. |
 | mDNS hostname / instance | `main/Application/NetworkManager/NetworkManager.cpp` | device name verbatim | sanitized → `kcthermostat.local` |
 | AP SSID default | `main/Application/NetworkManager/NetworkManager.h` | `"Strux-AP"` | `"KC Thermostat-AP"` |
 | CMake project/binary | `CMakeLists.txt` | `project(Strux)` | `project(Thermostat)` |
