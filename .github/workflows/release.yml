@@ -3,16 +3,20 @@ name: Release (ESP-IDF)
 on:
   push:
     tags:
-      - "v*"
+      - "V*"
   workflow_dispatch: {}
 
 permissions:
   contents: write
 
+# Easy-to-change constants
 env:
+  PROJECT_NAME: "Thermostat"
   IDF_VERSION: "v6.0"
   IDF_TARGET: "esp32s3"
-  PROJECT_NAME: "Strux"
+  BOARD: "diyless_thermostat_3"
+  SOFTWARE_ID: "28"
+  ARTIFACT_PREFIX: "KC"
 
 jobs:
   build-and-release:
@@ -23,6 +27,31 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Parse version from tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [[ ! "$TAG" =~ ^V([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Tag '$TAG' does not match expected format VX.Y.Z" >&2
+            exit 1
+          fi
+
+          echo "major=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          echo "minor=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+          echo "patch=${BASH_REMATCH[3]}" >> "$GITHUB_OUTPUT"
+
+          VERSION_STR="$(printf "%02d_%02d_%02d" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}")"
+          ARTIFACT_BASE="${VERSION_STR}_${SOFTWARE_ID}_${ARTIFACT_PREFIX}_${PROJECT_NAME}"
+          echo "ARTIFACT_BASE=${ARTIFACT_BASE}" >> "$GITHUB_ENV"
+
+          if [[ "${BASH_REMATCH[3]}" -eq 0 ]]; then
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -47,33 +76,39 @@ jobs:
           command: |
             set -euo pipefail
             idf.py set-target ${{ env.IDF_TARGET }}
-            idf.py build
+            idf.py -DBOARD=${{ env.BOARD }} \
+              -DSOFTWARE_VERSION_MAJOR=${{ steps.version.outputs.major }} \
+              -DSOFTWARE_VERSION_MINOR=${{ steps.version.outputs.minor }} \
+              -DSOFTWARE_VERSION_PATCH=${{ steps.version.outputs.patch }} \
+              build
             cd build && esptool.py --chip ${{ env.IDF_TARGET }} merge_bin -o merged-factory.bin -f raw @flash_args
 
       - name: Prepare release artifacts
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
 
-          # Full factory image (bootloader + partition table + all partitions)
-          cp build/merged-factory.bin dist/${{ env.PROJECT_NAME }}-factory.bin
+          # Full factory image (bootloader + partition table + app + www)
+          cp build/merged-factory.bin "dist/${ARTIFACT_BASE}-factory.bin"
 
-          # Application-only binary (for OTA update via /api/upload/app)
-          cp build/${{ env.PROJECT_NAME }}.bin dist/${{ env.PROJECT_NAME }}-app.bin
+          # Application-only binary (web-UI OTA)
+          cp "build/${PROJECT_NAME}.bin" "dist/${ARTIFACT_BASE}.bin"
 
-          # WWW FAT partition image (for update via /api/upload/www)
-          cp build/www.bin dist/${{ env.PROJECT_NAME }}-www.bin
+          # WWW FAT partition image (independent web-UI OTA)
+          cp build/www.bin "dist/${ARTIFACT_BASE}-www.bin"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ steps.version.outputs.prerelease }}
           generate_release_notes: true
           body: |
             ### Firmware files
-            - **${{ env.PROJECT_NAME }}-factory.bin** — Full factory image (bootloader + partition table + app + www). Use for initial flashing or full recovery via `esptool.py`.
-            - **${{ env.PROJECT_NAME }}-app.bin** — Application firmware only. Upload via the web UI (Firmware > Application Firmware) for OTA update.
-            - **${{ env.PROJECT_NAME }}-www.bin** — Web interface FAT image. Upload via the web UI (Firmware > WWW Partition) to update the frontend independently.
+            - **${{ env.ARTIFACT_BASE }}-factory.bin** — Full factory image (bootloader + partition table + app + www). Use for initial flashing or full recovery via `esptool.py`.
+            - **${{ env.ARTIFACT_BASE }}.bin** — Application firmware only. Upload via the web UI (Firmware > Application Firmware) for OTA update.
+            - **${{ env.ARTIFACT_BASE }}-www.bin** — Web interface FAT image. Upload via the web UI (Firmware > WWW Partition) to update the frontend independently.
           files: |
-            dist/${{ env.PROJECT_NAME }}-factory.bin
-            dist/${{ env.PROJECT_NAME }}-app.bin
-            dist/${{ env.PROJECT_NAME }}-www.bin
+            dist/${{ env.ARTIFACT_BASE }}-factory.bin
+            dist/${{ env.ARTIFACT_BASE }}.bin
+            dist/${{ env.ARTIFACT_BASE }}-www.bin
