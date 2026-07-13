@@ -20,8 +20,6 @@ import {
 } from "@/components/ui/sidebar"
 import { useConnectionStatus } from "@/hooks/use-connection-status"
 import { useDeviceInfo } from "@/hooks/use-device-info"
-import { useLatestRelease } from "@/hooks/use-latest-release"
-import { isNewerVersion } from "@/lib/version"
 import { PreReleaseBadge } from "@/components/PreReleaseBadge"
 
 const navItems = [
@@ -55,8 +53,6 @@ const statusLabel = {
 export function AppSidebar({ currentPage, onNavigate }: AppSidebarProps) {
   const connection = useConnectionStatus()
   const info = useDeviceInfo()
-  const release = useLatestRelease()
-  const updateAvailable = info && release && isNewerVersion(info.firmware, release.version)
 
   // Browser tab title follows the device name (login page covers pre-auth).
   useEffect(() => {
@@ -83,9 +79,6 @@ export function AppSidebar({ currentPage, onNavigate }: AppSidebarProps) {
                   >
                     <item.icon />
                     <span>{item.title}</span>
-                    {item.page === "firmware" && updateAvailable && (
-                      <span className="ml-auto h-2 w-2 rounded-full bg-emerald-500" />
-                    )}
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
