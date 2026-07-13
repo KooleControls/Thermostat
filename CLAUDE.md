@@ -108,4 +108,4 @@ changes.
 
 - C++17, no exceptions/RTTI-heavy patterns; `snprintf` with `sizeof` bounds, no `strcpy`/`strcat`.
 - JSON is generated with `lib/json/JsonWriter.h` and parsed with `JsonReader` (no external JSON lib); `JsonScope.h` provides RAII `JsonObject`/`JsonArray` with auto-close.
-- Firmware version derives from the latest git tag (`v0.1.0` → `0.1.0`) in the root CMakeLists.
+- Firmware version derives from the latest uppercase-`V` git tag (`V0.1.0` → `0.1.0`), or from CI-injected `-DSOFTWARE_VERSION_MAJOR/MINOR/PATCH`, in the root CMakeLists.

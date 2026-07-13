@@ -29,8 +29,8 @@ public:
 
     void Init();
 
-    /// Copies the device name into `out`; falls back to "Strux" if the
-    /// stored value is empty.
+    /// Copies the device name into `out`; falls back to the firmware's
+    /// project name ("Thermostat") if the stored value is empty.
     void GetDeviceName(char* out, size_t maxLen);
 
 private:
