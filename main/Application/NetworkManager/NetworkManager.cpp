@@ -13,6 +13,26 @@ NetworkManager::NetworkManager(ServiceProvider& serviceProvider)
 {
 }
 
+// mDNS/DNS hostnames may not contain spaces or punctuation. Derive a safe
+// label from the friendly device name: lowercase, keep [a-z0-9], drop the
+// rest. "KC Thermostat" -> "kcthermostat". Falls back to "thermostat".
+static void SanitizeHostname(const char* in, char* out, size_t maxLen)
+{
+    size_t j = 0;
+    for (size_t i = 0; in[i] != '\0' && j + 1 < maxLen; ++i)
+    {
+        unsigned char c = static_cast<unsigned char>(in[i]);
+        if (c >= 'A' && c <= 'Z')
+            out[j++] = static_cast<char>(c - 'A' + 'a');
+        else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+            out[j++] = static_cast<char>(c);
+        // everything else (spaces, punctuation) is dropped
+    }
+    out[j] = '\0';
+    if (out[0] == '\0')
+        snprintf(out, maxLen, "thermostat");
+}
+
 void NetworkManager::Init()
 {
     auto initAttempt = initState.TryBeginInit();
@@ -47,14 +67,17 @@ void NetworkManager::Init()
     wifi_interface_.SetEventHandler([this](const NetworkEvent& e) { HandleNetworkEvent(e); });
     wifi_interface_.Init();
 
-    // Set hostname from the device name so it shows in the router
+    // Friendly name (router label + human-facing mDNS instance) and a
+    // hostname-safe form derived from it (mDNS/DNS host label).
     char deviceName[33] = {};
     serviceProvider_.getSystemManager().GetDeviceName(deviceName, sizeof(deviceName));
-    wifi_interface_.SetHostname(deviceName);
+    char hostName[33] = {};
+    SanitizeHostname(deviceName, hostName, sizeof(hostName));
+    wifi_interface_.SetHostname(hostName);
 
-    // mDNS — <deviceName>.local
+    // mDNS — <hostName>.local, advertised under the friendly instance name
     ESP_ERROR_CHECK(mdns_init());
-    mdns_hostname_set(deviceName);
+    mdns_hostname_set(hostName);
     mdns_instance_name_set(deviceName);
     mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
 

@@ -38,7 +38,7 @@ private:
     InitState initState_;
 
     // ── Settings (registered with SettingsManager in Init) ──
-    inline static StringSetting name_{ "device.name", "Device Name", "Strux" };
+    inline static StringSetting name_{ "device.name", "Device Name", "KC Thermostat" };
 
     // ── WebSocket commands (registered with CommandManager in Init) ──
     void Cmd_Ping(Stream& in, Stream& out);
