@@ -21,9 +21,12 @@ work; the release name needs no change.
 - **KC numbers are hardware.** The thermostat's hardware product number is
   **KC1247**; it does not appear in any software/firmware name. (The gateway's
   legacy `KC1245-gateway` is the old convention, not the pattern to copy.)
-- **Firmware / CMake project / binary name:** `KCThermostat` (brand prefix "KC"
-  is fine; a hardware *number* is not). This is the `<name>` slot in the release
-  artifact.
+- **Firmware / CMake project / binary name:** `Thermostat` (no KC hardware
+  number). This is the `<name>` slot in the release artifact; the `KC` prefix is
+  supplied separately by `ARTIFACT_PREFIX`, so the artifact reads
+  `..._KC_Thermostat` (not the redundant `KC_KCThermostat`). Keeping the CMake
+  project name equal to the artifact name token preserves the gateway pattern
+  where the workflow copies `build/<PROJECT_NAME>.bin` directly.
 - **Product display name:** `KC Thermostat` (with a space) — friendly, shown in
   UI and to the user. It is *not* hostname-safe, so surfaces that need a
   hostname derive a sanitized form (see branding below).
@@ -38,7 +41,7 @@ build (the gateway has no frontend). Structure:
 
 - **Trigger:** `push` on tags `V*`, plus `workflow_dispatch`.
 - **Env constants block** (easy-to-change, gateway-style):
-  - `PROJECT_NAME: "KCThermostat"`
+  - `PROJECT_NAME: "Thermostat"`
   - `IDF_VERSION: "v6.0"`
   - `IDF_TARGET: "esp32s3"`
   - `BOARD: "diyless_thermostat_3"`
@@ -48,7 +51,7 @@ build (the gateway has no frontend). Structure:
   `^V([0-9]+)\.([0-9]+)\.([0-9]+)$`, fail otherwise. Emit `major`/`minor`/`patch`
   outputs. `patch != 0 ⇒ prerelease=true`. Build the artifact base string
   `MM_mm_pp_<SOFTWARE_ID>_<ARTIFACT_PREFIX>_<PROJECT_NAME>`
-  (e.g. `01_00_00_28_KC_KCThermostat`), zero-padded two-digit fields.
+  (e.g. `01_00_00_28_KC_Thermostat`), zero-padded two-digit fields.
 - **Frontend build:** pnpm setup + `cd frontend && pnpm install --frozen-lockfile
   && pnpm build` (as today). Runs before the firmware build so `www/` is
   populated for the FAT image.
@@ -77,7 +80,8 @@ injected defines. Change to gateway-style version resolution:
 - Else fall back to `git describe --tags --abbrev=0 --match "V*"`, parse
   `^V0*([0-9]+)\.0*([0-9]+)\.0*([0-9]+)$` (uppercase V, leading zeros stripped),
   and build `PROJECT_VER` from that; final fallback `0.0.0-dev`.
-- `project(KCThermostat)` (was `Strux`).
+- `project(Thermostat)` (was `Strux`) — matches `PROJECT_NAME`, so
+  `build/Thermostat.bin` is what the workflow copies.
 
 No `SOFTWARE_ID` define, no `SOFTWARE_VERSION*` compile definitions — firmware
 version continues to surface via `PROJECT_VER` →
@@ -93,11 +97,11 @@ name; hostname surfaces derive a sanitized `kc-thermostat`.
 |---|---|---|---|
 | `device.name` default | `main/Application/SystemManager/SystemManager.h` | `"Strux"` | `"KC Thermostat"` |
 | `GetDeviceName` fallback | same | `"Strux"` | `"KC Thermostat"` |
-| mDNS hostname / instance | `main/Application/NetworkManager/NetworkManager.cpp` | device name verbatim | sanitized → `kc-thermostat.local` |
+| mDNS hostname / instance | `main/Application/NetworkManager/NetworkManager.cpp` | device name verbatim | sanitized → `kcthermostat.local` |
 | AP SSID default | `main/Application/NetworkManager/NetworkManager.h` | `"Strux-AP"` | `"KC Thermostat-AP"` |
-| CMake project/binary | `CMakeLists.txt` | `project(Strux)` | `project(KCThermostat)` |
+| CMake project/binary | `CMakeLists.txt` | `project(Strux)` | `project(Thermostat)` |
 | Login product name | `frontend/src/config.ts` `PRODUCT_NAME` | `"Strux"` | `"KC Thermostat"` |
-| Dev proxy host | `frontend/src/config.ts` `DEV_HOST` | `"strux.local"` | `"kc-thermostat.local"` |
+| Dev proxy host | `frontend/src/config.ts` `DEV_HOST` | `"strux.local"` | `"kcthermostat.local"` |
 | Browser tab title | `frontend/index.html` `<title>` | `"Device"` | `"KC Thermostat"` |
 | Project docs | `README.md` | Strux template | rebranded to KC Thermostat |
 
@@ -108,11 +112,11 @@ which is invalid in an mDNS/DNS hostname. `NetworkManager` currently passes the
 device name verbatim to `mdns_hostname_set` / `mdns_instance_name_set` /
 `esp_netif_set_hostname`. Add a small local sanitizer (in NetworkManager, where
 the hostname is built) that maps the device name to a hostname-safe label:
-lowercase, spaces and any non-`[a-z0-9-]` char → `-`, collapse repeats, trim
-leading/trailing `-`, non-empty fallback. `"KC Thermostat"` → `kc-thermostat`.
-The **instance name** (the human-facing mDNS label) keeps the friendly device
-name; only the **hostname** is sanitized. `esp_netif` hostname also uses the
-sanitized form.
+lowercase and drop every non-`[a-z0-9]` character (spaces removed, not
+hyphenated — no dash). `"KC Thermostat"` → `kcthermostat`. Non-empty fallback if
+the result is empty. The **instance name** (the human-facing mDNS label) keeps
+the friendly device name; only the **hostname** is sanitized. `esp_netif`
+hostname also uses the sanitized form.
 
 Scope guard: the sanitizer is the only new logic; it lives beside the existing
 mDNS setup, not a new module. Visual design of the web UI is explicitly out of
@@ -144,12 +148,12 @@ No automated tests (per repo convention). Verify by building:
 - `cd frontend && pnpm typecheck && pnpm build` — clean after the update-check
   removal and config/title changes.
 - `idf.py set-target esp32s3 && idf.py -DBOARD=diyless_thermostat_3 build` —
-  clean; binary emits as `KCThermostat.bin`; `PROJECT_VER` still resolves.
+  clean; binary emits as `Thermostat.bin`; `PROJECT_VER` still resolves.
 - Sanity-check CI version injection locally:
   `idf.py -DSOFTWARE_VERSION_MAJOR=1 -DSOFTWARE_VERSION_MINOR=2 -DSOFTWARE_VERSION_PATCH=3 build`
   → device reports `1.2.3`.
 - On hardware (optional, later): AP SSID shows `KC Thermostat-AP`; device
-  resolves at `kc-thermostat.local`; web UI title/login show `KC Thermostat`.
+  resolves at `kcthermostat.local`; web UI title/login show `KC Thermostat`.
 - The release workflow itself is verified by pushing a `V*` tag (or
   `workflow_dispatch`) and confirming the three correctly-named artifacts attach
   to the release with the right prerelease flag.
