@@ -29,8 +29,8 @@ public:
 
     void Init();
 
-    /// Copies the device name into `out`; falls back to "Strux" if the
-    /// stored value is empty.
+    /// Copies the device name into `out`; falls back to the firmware's
+    /// project name ("Thermostat") if the stored value is empty.
     void GetDeviceName(char* out, size_t maxLen);
 
 private:
@@ -38,7 +38,7 @@ private:
     InitState initState_;
 
     // ── Settings (registered with SettingsManager in Init) ──
-    inline static StringSetting name_{ "device.name", "Device Name", "Strux" };
+    inline static StringSetting name_{ "device.name", "Device Name", "KC Thermostat" };
 
     // ── WebSocket commands (registered with CommandManager in Init) ──
     void Cmd_Ping(Stream& in, Stream& out);

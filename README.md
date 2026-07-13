@@ -1,10 +1,6 @@
-# Strux
+# KC Thermostat
 
-*Start structured. Make it your own.*
-
-Strux is a flexible foundation for building embedded applications on ESP32. It gives you a clean, modular starting point with WiFi, a web UI, OTA updates, and the infrastructure to grow your project without fighting your own codebase.
-
-It's not a framework that forces you into rigid patterns. It's a well-organized starting point that you copy, rename, and shape into whatever you're building.
+The **KC Thermostat** is an OpenTherm room thermostat (OT master) that pairs with the **KC1245 Gateway** as a drop-in replacement for the third-party thermostat it previously shipped with. It owns its own control logic and talks OpenTherm to the gateway, which bridges that demand to the real HVAC equipment — no gateway firmware changes required for standard behavior. It's built on the [Strux](https://github.com/vanBassum/Strux) template (ESP-IDF v6.0, ESP32-S3), which provides WiFi, a web UI, OTA updates, and the surrounding application infrastructure.
 
 <img width="1096" height="591" alt="image" src="https://github.com/user-attachments/assets/cc282e06-f84b-497d-8e5a-3e04add95bac" />
 
@@ -12,7 +8,7 @@ It's not a framework that forces you into rigid patterns. It's a well-organized 
 
 ## What's Included
 
-- **WiFi** — Station mode with automatic AP fallback (`Strux-AP`) after failed connections
+- **WiFi** — Station mode with automatic AP fallback (`KC Thermostat-AP`) after failed connections
 - **Web UI** — React + TypeScript dashboard served from flash, accessible from any browser
 - **OTA Updates** — Dual-partition firmware updates and independent web UI updates, no USB after initial flash
 - **Live Console** — Stream device logs to the browser in real time over WebSocket
@@ -26,7 +22,7 @@ It's not a framework that forces you into rigid patterns. It's a well-organized 
 |-------|-------|
 | Firmware | C++, ESP-IDF v6.0, FreeRTOS |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS, shadcn/ui |
-| Target | ESP32 (4 MB flash) |
+| Target | ESP32-S3 (8 MB flash, 8 MB octal PSRAM) — DIYLESS OpenTherm Thermostat 3 |
 | CI/CD | GitHub Actions — builds firmware + frontend, publishes releases |
 
 ---
@@ -34,7 +30,7 @@ It's not a framework that forces you into rigid patterns. It's a well-organized 
 ## Project Structure
 
 ```
-Strux/
+Thermostat/
 ├── main/                              # ESP-IDF firmware
 │   ├── main.cpp                       # Boot sequence — just Init() calls
 │   ├── Application/                   # Application logic (managers)
@@ -126,7 +122,7 @@ If pnpm is not available, the firmware still builds — you just won't have a we
 
 If you just want to flash a pre-built release without installing ESP-IDF, you can use the **ESP Web Flasher** directly from your browser:
 
-1. Download the latest `Strux-factory.bin` from [GitHub Releases](https://github.com/vanBassum/Strux/releases)
+1. Download the latest `MM_mm_pp_28_KC_Thermostat-factory.bin` from [GitHub Releases](https://github.com/KooleControls/Thermostat/releases)
 2. Open [ESP Web Flasher](https://espressif.github.io/esptool-js/)
 3. Connect your ESP32 via USB
 4. Select the serial port, set flash offset to `0x0`, and upload the factory binary
@@ -183,7 +179,7 @@ g_appContext.getWebServerManager().Init();
 
 The `main.cpp` stays clean — just `Init()` calls. Hardware drivers live in the board's `Board` class; application managers reach them through `getBoard()`.
 
-> **Looking for Home Assistant / MQTT?** That's deliberately not what Strux is for — [ESPHome](https://esphome.io/) does HA-native devices far better. Strux targets product firmware with its own web UI and logic. (An earlier version shipped MQTT + HA discovery; it lives on in git history if a fork wants it.)
+> **Looking for Home Assistant / MQTT?** The KC Thermostat deliberately has no MQTT or Home Assistant integration — the **KC1245 Gateway** owns smart-home integration for the system; the thermostat's own web UI and OpenTherm link cover its device-level logic. (The Strux template this is built on shipped MQTT + HA discovery; that layer was removed for this product and lives on in git history if a fork wants it.)
 
 ---
 
@@ -198,9 +194,9 @@ The CI pipeline produces three artifacts per release:
 
 | File | Purpose |
 |------|---------|
-| `Strux-factory.bin` | Full image (bootloader + partitions + app + www) for initial flash |
-| `Strux-app.bin` | Firmware only, for OTA update via web UI |
-| `Strux-www.bin` | Web UI only, for updating the frontend independently |
+| `MM_mm_pp_28_KC_Thermostat-factory.bin` | Full image (bootloader + partitions + app + www) for initial flash |
+| `MM_mm_pp_28_KC_Thermostat.bin` | Firmware only, for OTA update via web UI |
+| `MM_mm_pp_28_KC_Thermostat-www.bin` | Web UI only, for updating the frontend independently |
 
 ---
 
@@ -208,7 +204,7 @@ The CI pipeline produces three artifacts per release:
 
 1. On boot, attempts to connect to the configured WiFi network (stored in NVS)
 2. Retries up to 3 times on failure
-3. Falls back to an open access point (`Strux-AP`) if all retries fail
+3. Falls back to an open access point (`KC Thermostat-AP`) if all retries fail
 4. Connect to the AP and access the web UI to configure WiFi credentials
 
 ---
