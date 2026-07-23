@@ -1,6 +1,9 @@
 # KC-style commands + KC command tunnel over OpenTherm
 
 **Status: idea, needs refinement — direction not decided yet.** (Bas, 2026-07-07)
+**Belongs to [RA2-435](https://koolecontrolsdevelopment.atlassian.net/browse/RA2-435)**
+(KC extensions over OT) — brainstorm this when that deliverable is picked up;
+gated by RA2-396 (can the gateway's OT co-processor pass arbitrary data-IDs?).
 
 Two related steps:
 

@@ -36,7 +36,7 @@ find-connection → gate → dispatch. See
 Also `ws-inbound-streaming` shipped: `WsRequestStream` (dormant in step 1) became
 `WsSessionLink::RecvChunk` in step 2.
 
-Deferred by choice: [broadcast-redesign](backlog/2026-07-09-broadcast-redesign.md) —
+Deferred by choice: [broadcast-redesign](ideas/2026-07-09-broadcast-redesign.md) —
 log broadcasts (session 0) are the last non-session path; to be folded into
 device-initiated sessions and have their dead-client / warning-storm handling
 designed properly at a later stage.
