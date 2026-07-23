@@ -150,6 +150,11 @@ stands between here and "installable on location, updatable remotely":
   → plan.
 - **On-site mounting / hardware** — enclosure + wall mount sorted far enough to
   fit at a location. Gated by RA2-389 (DIYLESS/Ihor).
+- **Touchscreen UI overhaul** — the on-device LVGL face is still the bare
+  first-light screen (room-temp number + −/+ buttons) and looks unfinished; it
+  needs a proper visual pass before a unit ships to a customer. Detail in
+  `2026-07-09-ui-visual-polish.md` (no longer "deferred / finetune-later" —
+  it's a ship requirement). Needs its own brainstorm → spec → plan.
 - **Real-boiler sanity check** — validated so far against the gateway boiler
   emulator only; still pending real hardware.
 

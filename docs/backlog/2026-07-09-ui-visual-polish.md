@@ -1,6 +1,10 @@
 # Thermostat UI — visual design / polish
 
-**Status: idea, deferred — Bas will finetune the look himself later.** (2026-07-07)
+**Status: ship requirement for RA2-395 — not yet started.** (updated 2026-07-23)
+The on-device screen looks unfinished and must get a proper visual pass before a
+unit ships to a customer. Not being done right now, but it's a blocker, not a
+nice-to-have. Needs its own brainstorm → spec → plan when picked up.
+(Originally logged 2026-07-07 as "deferred, Bas will finetune himself later.")
 
 The minimal first-light screen (item 7) **works** — big room-temp number,
 − / + setpoint buttons — but it **doesn't look good**. This item is the
