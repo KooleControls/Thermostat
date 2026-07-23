@@ -11,17 +11,29 @@ rebuilt deliberately on that baseline, one feature at a time, each through its
 own brainstorm → spec → plan cycle. The old demo (branch
 `feature/ot-thermostat-dropin`) is reference material, not a merge source.
 
-## The two steps
+## The deliverable this roadmap serves
 
-1. **Step 1 — a normal OpenTherm thermostat.** Feature parity with the DIYLESS
-   ESPHome reference ([diyless-thermostat-3.yaml](https://github.com/diyless/esphome-opentherm-thermostat/blob/main/diyless-thermostat-3.yaml)):
-   heating with PID modulation, cooling demand, domestic hot water, boiler
-   status/diagnostics, touchscreen + web UI (no MQTT/HA — the gateway owns
-   smart-home integration). A drop-in replacement for the third-party
-   thermostat — no gateway changes.
-2. **Step 2 — KC extensions.** Everything that makes it *ours*: KC features
-   over OT, out-of-band updating, productization. Each item needs its own
-   brainstorming before it's committed to.
+The work is split into two Jira stories. **This roadmap covers the first one;**
+the second is tracked separately and is out of scope here.
+
+1. **[RA2-395](https://koolecontrolsdevelopment.atlassian.net/browse/RA2-395) —
+   1:1 OpenTherm drop-in, installable on location.** A unit that can be fitted
+   at a location as a drop-in for the third-party thermostat *and updated
+   remotely*. Standard OpenTherm master (THR=1): heating with PID modulation,
+   cooling demand, domestic hot water, boiler status/diagnostics, touchscreen +
+   web UI (no MQTT/HA — the gateway owns smart-home integration), remote setpoint
+   override. Plus **remote firmware update** — which needs a gateway-side change,
+   so "no gateway changes" does *not* hold for that item — and hardware /
+   wall-mounting sorted enough to install on site (gated by RA2-389). **Done
+   when:** a thermostat can be fitted on site as a drop-in and updated remotely.
+2. **[RA2-435](https://koolecontrolsdevelopment.atlassian.net/browse/RA2-435) —
+   guest chooses mode (heat/cool) + KC extensions.** The "make it ours" version:
+   customer picks heat/cool from the thermostat, custom KC control behaviour and
+   KC features over OT (custom data-IDs / KC-frame tunnel, gated behind OT
+   member-ID detection with fallback to standard OT), the gateway-side changes
+   those need, and later external sensors / schedules / productization. Gated by
+   RA2-396. **Separate deliverable — not planned in this roadmap;** each item
+   gets its own brainstorm when RA2-435 is picked up.
 
 ---
 
@@ -127,31 +139,27 @@ gateway gets a dedicated thermostat-type option (working name `CSHWTHR`), which
 is more explicit configuration. Either way Step 1 works as a standard OTH
 drop-in; revisit when KC extensions (Step 2) become real.
 
-## Step 2 candidates (each needs its own brainstorm first — not committed)
+## Remaining for RA2-395 (this deliverable is not done yet)
 
-- **Out-of-band updating** — BLE OTA channel? (Strux already does WiFi OTA +
-  web-UI upload; define what problem BLE solves: no-WiFi commissioning,
-  in-field recovery, installer app?) ← *brainstorm first, per Bas.*
-- **KC custom extensions over OT** — custom data-IDs or KC-frame mailbox,
-  gated behind member-ID detection. Blocked by RA2-396 (can the gateway's OT
-  co-processor pass arbitrary data-IDs?).
-- **External/BLE room sensor** (the yaml's Xiaomi pattern) + multi-sensor.
-- **Schedules/programs** (week program, holiday) — decide if the product needs
-  it or the gateway/backend owns scheduling.
-- **User-selectable modes** (cool/auto) — analysis exists, deliberately
-  deferred.
-- **Productization**: enclosure/wall mount (RA2-389), sensor accuracy
-  strategy, production flashing.
+The drop-in *software* is complete (all 9 backlog items above). What still
+stands between here and "installable on location, updatable remotely":
 
-## Jira restructuring proposal (to execute after this doc is approved)
+- **Remote firmware update** — the field-update path. Not purely
+  thermostat-side: it needs a gateway-side change to carry the update, so this
+  is where "no gateway changes" stops holding. Needs its own brainstorm → spec
+  → plan.
+- **On-site mounting / hardware** — enclosure + wall mount sorted far enough to
+  fit at a location. Gated by RA2-389 (DIYLESS/Ihor).
+- **Real-boiler sanity check** — validated so far against the gateway boiler
+  emulator only; still pending real hardware.
 
-- **RA2-395 (story):** rewrite description → the two-step idea in a few
-  paragraphs + link to this roadmap. Technical detail lives here, not in Jira.
-- **RA2-398, RA2-399 (Done):** leave as-is — completed history.
-- **RA2-400, RA2-401 (In Progress), RA2-402 (To Do):** close with a comment
-  "superseded by the Strux reset; re-scoped in the repo roadmap/backlog".
-- **RA2-403 (Phase 5):** close likewise — its content is the Step 2 section.
-- **RA2-396 (investigation):** keep open — it gates the Step 2 OT extensions.
-- **RA2-389 (Ihor questions):** keep open (hardware track, unchanged).
-- New Jira issues only for genuinely big future features (e.g. "KC extensions
-  over OT"), created when we actually start them.
+## KC extensions live in RA2-435, not here
+
+Everything that makes the thermostat *ours* — customer-selectable heat/cool,
+KC features over OT (custom data-IDs / KC-frame mailbox, gated behind member-ID
+detection, blocked by RA2-396), external/BLE room sensors, schedules/programs,
+productization beyond mounting — is scoped under
+[RA2-435](https://koolecontrolsdevelopment.atlassian.net/browse/RA2-435) and is
+**deliberately out of scope for this roadmap.** Each item gets its own
+brainstorm when that story is picked up; the technical breakdown will land in
+this repo then.
