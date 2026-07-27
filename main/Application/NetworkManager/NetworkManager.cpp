@@ -133,6 +133,31 @@ const WiFiInterface& NetworkManager::wifi() const
     return wifi_interface_;
 }
 
+void NetworkManager::ConnectToStation(const char* ssid, const char* password)
+{
+    if (ssid == nullptr || ssid[0] == '\0')
+    {
+        ESP_LOGW(TAG, "ConnectToStation with no SSID — ignored");
+        return;
+    }
+
+    snprintf(staSsid_, sizeof(staSsid_), "%s", ssid);
+    snprintf(staPassword_, sizeof(staPassword_), "%s", password ? password : "");
+
+    wifiSsid_.Set(staSsid_);
+    wifiPassword_.Set(staPassword_);
+    serviceProvider_.getSettingsManager().Save();
+
+    ESP_LOGI(TAG, "New credentials for '%s' stored — connecting", staSsid_);
+    staRetryCount_ = 0;
+    AttemptStaConnect();
+}
+
+void NetworkManager::GetStaSsid(char* out, size_t maxLen) const
+{
+    snprintf(out, maxLen, "%s", staSsid_);
+}
+
 void NetworkManager::AttemptStaConnect()
 {
     if (staSsid_[0] == '\0')
@@ -147,6 +172,7 @@ void NetworkManager::AttemptStaConnect()
 
     wifi_interface_.Stop();
     staConnected_ = false;
+    staConnecting_ = true;
     wifi_interface_.ConnectSta(staSsid_, staPassword_);
     connectTimer_.Start();
 }
@@ -156,6 +182,7 @@ void NetworkManager::FallbackToAP()
     connectTimer_.Stop();
     wifi_interface_.Stop();
 
+    staConnecting_ = false;
     ESP_LOGW(TAG, "Falling back to AP mode: '%s'", DefaultApSsid);
     wifi_interface_.StartAP(DefaultApSsid, DefaultApPassword);
 }
@@ -197,6 +224,7 @@ void NetworkManager::HandleNetworkEvent(const NetworkEvent& event)
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event.status.ipv4.ip));
         connectTimer_.Stop();
         staConnected_ = true;
+        staConnecting_ = false;
         staRetryCount_ = 0;
         break;
 

@@ -4,12 +4,13 @@
 #include "lvgl.h"
 
 // Which page the shell should show. Add an id when a new screen class lands
-// (the WiFi and firmware service screens are the next two).
+// (the firmware service screen is the next one).
 enum class ScreenId
 {
     Home,
     Pin,        // resolved to Settings by the shell when no PIN is set
     Settings,
+    Wifi,
     Info,
 };
 

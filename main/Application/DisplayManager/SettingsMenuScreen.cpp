@@ -1,4 +1,5 @@
 #include "SettingsMenuScreen.h"
+#include "NetworkManager/NetworkManager.h"
 
 void SettingsMenuScreen::Build(lv_obj_t* root)
 {
@@ -14,15 +15,31 @@ void SettingsMenuScreen::Build(lv_obj_t* root)
     lv_obj_set_style_pad_row(list, 8, 0);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
 
-    // Both pending rows are the shared shell the WiFi backlog items plug into
-    // (docs/backlog/2026-07-27-wifi-connect-ui.md and -wifi-update-ui.md).
-    AddPendingRow(list, LV_SYMBOL_WIFI, "WiFi");
+    wifiSummary_ = AddRow(list, LV_SYMBOL_WIFI, "WiFi", ScreenId::Wifi);
+    // Still the shared shell the firmware-update item plugs into
+    // (docs/backlog/2026-07-27-wifi-update-ui.md).
     AddPendingRow(list, LV_SYMBOL_DOWNLOAD, "Firmware");
     AddRow(list, LV_SYMBOL_LIST, "Info", ScreenId::Info);
 }
 
+void SettingsMenuScreen::OnShow()
+{
+    NetworkManager& net = serviceProvider_.getNetworkManager();
+    char ssid[33] = {};
+    net.GetStaSsid(ssid, sizeof(ssid));
+
+    // Keep the chevron: the summary replaces the row's trailing label, and the
+    // row still has to read as "leads somewhere".
+    const char* summary = "not connected";
+    if (net.IsStaConnected())       summary = ssid;
+    else if (net.IsStaConnecting()) summary = "connecting...";
+    else if (net.IsAccessPoint())   summary = "own AP";
+
+    lv_label_set_text_fmt(wifiSummary_, "%s  " LV_SYMBOL_RIGHT, summary);
+}
+
 lv_obj_t* SettingsMenuScreen::MakeRow(lv_obj_t* list, const char* icon, const char* text,
-                                     const char* trailing)
+                                      const char* trailing, lv_obj_t** trailingLabel)
 {
     lv_obj_t* row = lv_button_create(list);
     lv_obj_set_size(row, LV_PCT(100), UiTheme::RowH);
@@ -41,27 +58,31 @@ lv_obj_t* SettingsMenuScreen::MakeRow(lv_obj_t* list, const char* icon, const ch
     lv_obj_t* tail = lv_label_create(row);
     lv_obj_set_style_text_font(tail, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(tail, UiTheme::TextDim(), 0);
+    lv_obj_set_width(tail, 200);
+    lv_label_set_long_mode(tail, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_style_text_align(tail, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_text(tail, trailing);
     lv_obj_align(tail, LV_ALIGN_RIGHT_MID, 0, 0);
 
+    if (trailingLabel) *trailingLabel = tail;
     return row;
 }
 
 lv_obj_t* SettingsMenuScreen::AddRow(lv_obj_t* list, const char* icon, const char* text,
                                      ScreenId target)
 {
-    lv_obj_t* row = MakeRow(list, icon, text, LV_SYMBOL_RIGHT);
-    // The target rides in the event user data — no per-row state to keep.
+    lv_obj_t* tail = nullptr;
+    lv_obj_t* row = MakeRow(list, icon, text, LV_SYMBOL_RIGHT, &tail);
+    // The target rides in the row's user data — no per-row state to keep.
     lv_obj_add_event_cb(row, RowCb, LV_EVENT_CLICKED, this);
     lv_obj_set_user_data(row, reinterpret_cast<void*>(static_cast<uintptr_t>(target)));
-    return row;
+    return tail;
 }
 
-lv_obj_t* SettingsMenuScreen::AddPendingRow(lv_obj_t* list, const char* icon, const char* text)
+void SettingsMenuScreen::AddPendingRow(lv_obj_t* list, const char* icon, const char* text)
 {
-    lv_obj_t* row = MakeRow(list, icon, text, "soon");
+    lv_obj_t* row = MakeRow(list, icon, text, "soon", nullptr);
     lv_obj_add_state(row, LV_STATE_DISABLED);
-    return row;
 }
 
 void SettingsMenuScreen::RowCb(lv_event_t* e)

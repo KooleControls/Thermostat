@@ -7,6 +7,7 @@
 #include "HomeScreen.h"
 #include "PinScreen.h"
 #include "SettingsMenuScreen.h"
+#include "WifiScreen.h"
 #include "InfoScreen.h"
 #include "lvgl.h"
 
@@ -52,7 +53,8 @@ private:
     // Declaration order matters: these take serviceProvider_ and *this.
     HomeScreen homeScreen_{serviceProvider_, *this};
     PinScreen pinScreen_{pinGate_, *this};
-    SettingsMenuScreen settingsScreen_{*this};
+    SettingsMenuScreen settingsScreen_{serviceProvider_, *this};
+    WifiScreen wifiScreen_{serviceProvider_, *this};
     InfoScreen infoScreen_{serviceProvider_, *this};
 
     ScreenId current_ = ScreenId::Home;

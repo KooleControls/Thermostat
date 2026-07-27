@@ -29,6 +29,8 @@ void DisplayManager::Init()
     }
     if (!InitLvgl()) return;
 
+    wifiScreen_.Init();   // hands the scan worker its NetworkManager
+
     // Touch (best-effort — display still works without it).
     if (serviceProvider_.getBoard().GetTouch())
     {
@@ -100,6 +102,7 @@ Screen* DisplayManager::Resolve(ScreenId id)
         case ScreenId::Home:     return &homeScreen_;
         case ScreenId::Pin:      return &pinScreen_;
         case ScreenId::Settings: return &settingsScreen_;
+        case ScreenId::Wifi:     return &wifiScreen_;
         case ScreenId::Info:     return &infoScreen_;
     }
     return &homeScreen_;

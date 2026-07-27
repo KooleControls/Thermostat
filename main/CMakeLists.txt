@@ -22,6 +22,8 @@ set(SOURCE_FILES_LIST
     "Application/DisplayManager/HomeScreen.cpp"
     "Application/DisplayManager/PinScreen.cpp"
     "Application/DisplayManager/SettingsMenuScreen.cpp"
+    "Application/DisplayManager/WifiScreen.cpp"
+    "Application/DisplayManager/WifiScanner.cpp"
     "Application/DisplayManager/InfoScreen.cpp"
     "Application/DisplayManager/fonts/font_temp_96.c"
     "Application/UpdateManager/UpdateManager.cpp"

@@ -35,6 +35,19 @@ public:
 
     bool IsAccessPoint() const { return wifi_interface_.IsAP(); }
 
+    // ── On-screen UI control surface (calls, not JSON commands) ──
+    /// Persist new STA credentials and (re)connect right away. Until this
+    /// existed, credentials were only read at boot, so changing networks meant
+    /// a reboot. Note that it tears down the fallback AP: the caller is standing
+    /// at the unit's own touchscreen, where that is exactly the intent.
+    void ConnectToStation(const char* ssid, const char* password);
+
+    bool IsStaConnected() const { return staConnected_; }
+    bool IsStaConnecting() const { return staConnecting_; }
+
+    /// The SSID we are on, or trying — empty when none is configured.
+    void GetStaSsid(char* out, size_t maxLen) const;
+
 private:
     ServiceProvider& serviceProvider_;
 
@@ -46,6 +59,7 @@ private:
     char staPassword_[65] = {};
     std::atomic<int> staRetryCount_{0};
     std::atomic<bool> staConnected_{false};
+    std::atomic<bool> staConnecting_{false};
 
     Timer connectTimer_;
 
