@@ -15,8 +15,7 @@
 //
 // On the DIYLESS Thermostat 3 the ESP32-S3 does NOT bit-bang OpenTherm; a
 // small STM32L051 owns the OT PHY and the ESP drives it over a UART using the
-// DIYLESS "STM32 app-protocol". This is the thermostat-side equivalent of the
-// gateway's OpenThermModule. (Phase 0, RA2-398.)
+// DIYLESS "STM32 app-protocol".
 //
 // Wire framing (re-implemented from the DIYLESS esphome-opentherm-t3 component;
 // this is original code written to interoperate, not a copy of that GPLv3 source):
@@ -82,7 +81,7 @@ public:
 
     // ── OtLink role implementation ────────────────────────────
     // The STM32 stops servicing OtCommandRequests unless it has seen a
-    // recent CpuStatus exchange (bring-up finding, RA2-398). Transaction()
+    // recent CpuStatus exchange (bring-up finding). Transaction()
     // refreshes that heartbeat transparently so callers never know.
 
     bool Ready() const override { return ready_ && handshakeOk_; }

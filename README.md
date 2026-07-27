@@ -122,7 +122,7 @@ If pnpm is not available, the firmware still builds — you just won't have a we
 
 If you just want to flash a pre-built release without installing ESP-IDF, you can use the **ESP Web Flasher** directly from your browser:
 
-1. Download the latest `MM_mm_pp_28_KC_Thermostat-factory.bin` from [GitHub Releases](https://github.com/KooleControls/Thermostat/releases)
+1. Download the latest `Thermostat-<version>-factory.bin` from [GitHub Releases](https://github.com/KooleControls/Thermostat/releases)
 2. Open [ESP Web Flasher](https://espressif.github.io/esptool-js/)
 3. Connect your ESP32 via USB
 4. Select the serial port, set flash offset to `0x0`, and upload the factory binary
@@ -194,9 +194,9 @@ The CI pipeline produces three artifacts per release:
 
 | File | Purpose |
 |------|---------|
-| `MM_mm_pp_28_KC_Thermostat-factory.bin` | Full image (bootloader + partitions + app + www) for initial flash |
-| `MM_mm_pp_28_KC_Thermostat.bin` | Firmware only, for OTA update via web UI |
-| `MM_mm_pp_28_KC_Thermostat-www.bin` | Web UI only, for updating the frontend independently |
+| `Thermostat-<version>-factory.bin` | Full image (bootloader + partitions + app + www) for initial flash |
+| `Thermostat-<version>.bin` | Firmware only, for OTA update via web UI |
+| `Thermostat-<version>-www.bin` | Web UI only, for updating the frontend independently |
 
 ---
 
@@ -276,7 +276,7 @@ private:
 
 This is a template — copy it, rename it, and build on top of it:
 
-1. **Rename the project** in `CMakeLists.txt` (`project(YourProject)`), `.github/workflows/release.yml`, and `frontend/src/config.ts` (dev-server host + GitHub repo for the release check) — the UI itself needs no renaming: it shows the device name and project name reported by the firmware
+1. **Rename the project** in `CMakeLists.txt` (`project(YourProject)`), `.github/workflows/release.yml`, and `frontend/src/config.ts` (dev-server host) — the UI itself needs no renaming: it shows the device name and project name reported by the firmware
 2. **Update `BoardConfig.h`** (or add a new board folder under `hardware/boards/`) with your board's pin assignments
 3. **Add hardware drivers** in `hardware/drivers/` and instantiate them in the board's `Board` class
 4. **Add application logic** as new managers in `Application/`
@@ -323,4 +323,5 @@ See [`OtLink.h`](main/hardware/interfaces/OtLink.h), [`Stm32OpenThermLink.h`](ma
 
 ## License
 
-This project is unlicensed. Use it however you want.
+Released under the [MIT License](LICENSE). Built on the
+[Strux](https://github.com/vanBassum/Strux) template.

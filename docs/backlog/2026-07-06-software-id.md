@@ -1,13 +1,18 @@
 # Software ID
 
-**Infra I1. Partially done — one piece still open.** Company-wide firmware identity.
+**Closed — dropped (2026-07-27).** The thermostat is an open-source, standalone
+product (as if bought from a third party), so it carries **no KC software ID**.
 
-- ✅ **Reserved: ID 28 (hex 0000001C)** on the canonical
-  [Software ID's page](https://koolecontrolsdevelopment.atlassian.net/wiki/spaces/DEV/pages/430211074)
-  (Development space) — group "KC Thermostat", ESP32-S3, TCP/IP ✓, BLE ✓.
-- ✅ Used by the release workflow's artifact naming (the ID appears in the
-  release filename — done with the release-workflow item).
-- ⏳ **Open: embed the ID in the firmware itself** (CMake define, gateway-style)
-  and report it in version/system info (web UI + commands). Deferred pending the
-  open-source decision (until then the ID lives only in the release filename,
-  not baked into the image).
+Decision: with open-source approved (`2026-07-27-open-source-public-repo.md`), we
+stop treating the thermostat as part of KC's internal firmware-identity scheme.
+
+- The SID was **never embedded** in the firmware, so nothing has to be removed
+  there — version/system-info reports the git-tag-derived firmware version and
+  carries no KC identifier, which is already the desired end state.
+- The only place the SID appeared was the **release-artifact filename**
+  (`…_28_KC_Thermostat`). That has been removed: artifacts now use standalone
+  naming (`Thermostat-<version>-…`) with no KC identifiers. See
+  `docs/superpowers/specs/2026-07-27-open-source-and-release-workflow-design.md`.
+
+The reservation on the Development-space Software IDs page can stay as a record;
+it simply isn't used by this product. Recorded on Jira RA2-442.

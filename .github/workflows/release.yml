@@ -15,8 +15,6 @@ env:
   IDF_VERSION: "v6.0"
   IDF_TARGET: "esp32s3"
   BOARD: "diyless_thermostat_3"
-  SOFTWARE_ID: "28"
-  ARTIFACT_PREFIX: "KC"
 
 jobs:
   build-and-release:
@@ -43,8 +41,7 @@ jobs:
           echo "minor=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
           echo "patch=${BASH_REMATCH[3]}" >> "$GITHUB_OUTPUT"
 
-          VERSION_STR="$(printf "%02d_%02d_%02d" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}")"
-          ARTIFACT_BASE="${VERSION_STR}_${SOFTWARE_ID}_${ARTIFACT_PREFIX}_${PROJECT_NAME}"
+          ARTIFACT_BASE="${PROJECT_NAME}-${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
           echo "ARTIFACT_BASE=${ARTIFACT_BASE}" >> "$GITHUB_ENV"
 
           if [[ "${BASH_REMATCH[3]}" -eq 0 ]]; then
