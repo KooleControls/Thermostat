@@ -14,6 +14,12 @@ The **backend already exists** — Strux provides WiFi STA plus an AP fallback a
 NVS-persisted credentials. This item is the **front-end** to drive it: scan,
 pick, enter key, show connection state.
 
+**The display shell is done (2026-07-27).** `DisplayManager` is now a navigation
+shell (screens + a `Navigator` interface), the home screen has a gear that leads
+into a service menu, and that menu is gated by a `ui.pin` setting (default
+`0000`). The menu already carries a **disabled "WiFi" row** — this item enables
+it and fills in the screen behind it. Reasoning: `docs/reasoning/0001-display-service-menu-shell.md`.
+
 ## Likely scope
 
 - **Where it lives** — the field-relevant surface is the **display** (a screen in

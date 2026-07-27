@@ -17,6 +17,11 @@ changing this), not throwaway.
 - Web side: `FirmwarePage` already lists partitions and uploads a **local** `.bin`
   with a progress bar (the offline floor). What's missing is the **pull-from-server**
   trigger and version pinning.
+- Display side (2026-07-27): the **service menu exists** — gear on the home
+  screen, `ui.pin` gate (default `0000`), and a **disabled "Firmware" row** waiting
+  for this screen. Adding one is: a `Screen` subclass, a `ScreenId`, a member on
+  `DisplayManager`, and enabling the row. Reasoning:
+  `docs/reasoning/0001-display-service-menu-shell.md`.
 
 ## Likely scope
 

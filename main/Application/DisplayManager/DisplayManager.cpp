@@ -1,12 +1,8 @@
 #include "DisplayManager.h"
-#include "ClimateManager/ClimateManager.h"
-#include "RoomTemperatureManager/RoomTemperatureManager.h"
+#include "SettingsManager/SettingsManager.h"
 #include "Board.h"
 #include "esp_lvgl_port.h"
 #include "esp_log.h"
-#include <cstdio>
-
-extern "C" const lv_font_t font_temp_96;
 
 DisplayManager::DisplayManager(ServiceProvider &serviceProvider)
     : serviceProvider_(serviceProvider)
@@ -21,6 +17,10 @@ void DisplayManager::Init()
         ESP_LOGW(TAG, "Already initialized or initializing");
         return;
     }
+
+    // Registered even when headless: the PIN is also editable over the web
+    // settings UI, and that must not depend on a panel being present.
+    pinGate_.Register(serviceProvider_.getSettingsManager());
 
     if (serviceProvider_.getBoard().GetPanel() == nullptr)
     {
@@ -39,7 +39,14 @@ void DisplayManager::Init()
             ESP_LOGW(TAG, "lvgl_port_add_touch failed — touch disabled");
     }
 
-    BuildUi();
+    Go(ScreenId::Home);
+
+    if (lvgl_port_lock(0))
+    {
+        lv_timer_create(IdleTimerCb, kIdleTickMs, this);
+        lvgl_port_unlock();
+    }
+
     serviceProvider_.getBoard().SetBacklight(true);
 
     init.SetReady();
@@ -86,101 +93,44 @@ bool DisplayManager::InitLvgl()
     return true;
 }
 
-void DisplayManager::BuildUi()
+Screen* DisplayManager::Resolve(ScreenId id)
 {
-    if (!lvgl_port_lock(0)) return;
-
-    lv_obj_t *scr = lv_screen_active();
-    lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
-
-    stateLabel_ = lv_label_create(scr);
-    lv_obj_set_style_text_color(stateLabel_, lv_color_hex(0x888888), 0);
-    lv_obj_set_style_text_font(stateLabel_, &lv_font_montserrat_28, 0);
-    lv_label_set_text(stateLabel_, "");
-    lv_obj_align(stateLabel_, LV_ALIGN_TOP_MID, 0, 60);
-
-    bigLabel_ = lv_label_create(scr);
-    lv_obj_set_style_text_color(bigLabel_, lv_color_white(), 0);
-    lv_obj_set_style_text_font(bigLabel_, &font_temp_96, 0);
-    lv_obj_align(bigLabel_, LV_ALIGN_CENTER, 0, -20);
-
-    lv_obj_t *minus = lv_button_create(scr);
-    lv_obj_set_size(minus, 200, 130);
-    lv_obj_align(minus, LV_ALIGN_BOTTOM_LEFT, 20, -20);
-    lv_obj_add_event_cb(minus, MinusCb, LV_EVENT_CLICKED, this);
-    lv_obj_t *ml = lv_label_create(minus);
-    lv_obj_set_style_text_font(ml, &lv_font_montserrat_48, 0);
-    lv_label_set_text(ml, "-");
-    lv_obj_center(ml);
-
-    lv_obj_t *plus = lv_button_create(scr);
-    lv_obj_set_size(plus, 200, 130);
-    lv_obj_align(plus, LV_ALIGN_BOTTOM_RIGHT, -20, -20);
-    lv_obj_add_event_cb(plus, PlusCb, LV_EVENT_CLICKED, this);
-    lv_obj_t *pl = lv_label_create(plus);
-    lv_obj_set_style_text_font(pl, &lv_font_montserrat_48, 0);
-    lv_label_set_text(pl, "+");
-    lv_obj_center(pl);
-
-    lvgl_port_unlock();
-
-    ShowRoomTemp();
-    lv_timer_create(RefreshTimerCb, kRefreshMs, this);
-}
-
-void DisplayManager::ShowRoomTemp()
-{
-    float t = 0;
-    bool valid = serviceProvider_.getRoomTemperatureManager().GetRoomTemperature(t);
-    char buf[16];
-    if (valid) snprintf(buf, sizeof(buf), "%.1f\xC2\xB0", t);   // UTF-8 degree
-    else       snprintf(buf, sizeof(buf), "--.-\xC2\xB0");
-
-    if (!lvgl_port_lock(0)) return;
-    lv_label_set_text(stateLabel_, "");
-    lv_label_set_text(bigLabel_, buf);
-    lvgl_port_unlock();
-    showingSetpoint_ = false;
-}
-
-void DisplayManager::OnNudge(float deltaC)
-{
-    serviceProvider_.getClimateManager().NudgeSetpoint(deltaC);
-    float sp = serviceProvider_.getClimateManager().GetUserSetpoint();
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%.1f\xC2\xB0", sp);
-
-    if (lvgl_port_lock(0))
+    switch (id)
     {
-        lv_label_set_text(stateLabel_, "SET");
-        lv_label_set_text(bigLabel_, buf);
-        if (revertTimer_) lv_timer_reset(revertTimer_);
-        else revertTimer_ = lv_timer_create(RevertTimerCb, kRevertMs, this);
-        lvgl_port_unlock();
+        case ScreenId::Home:     return &homeScreen_;
+        case ScreenId::Pin:      return &pinScreen_;
+        case ScreenId::Settings: return &settingsScreen_;
+        case ScreenId::Info:     return &infoScreen_;
     }
-    showingSetpoint_ = true;
+    return &homeScreen_;
 }
 
-void DisplayManager::RefreshTimerCb(lv_timer_t *t)
+void DisplayManager::Go(ScreenId id)
+{
+    if (lvDisplay_ == nullptr) return;   // headless
+
+    if (id == ScreenId::Pin && !pinGate_.Required())
+        id = ScreenId::Settings;
+
+    if (!lvgl_port_lock(0))
+    {
+        ESP_LOGW(TAG, "Could not take the LVGL lock — navigation skipped");
+        return;
+    }
+    Resolve(id)->Load();
+    current_ = id;
+    lvgl_port_unlock();
+}
+
+void DisplayManager::IdleTimerCb(lv_timer_t *t)
 {
     auto *self = static_cast<DisplayManager *>(lv_timer_get_user_data(t));
-    if (!self->showingSetpoint_) self->ShowRoomTemp();   // don't clobber the setpoint view
-}
+    if (self->current_ == ScreenId::Home) return;
+    if (lv_display_get_inactive_time(self->lvDisplay_) < kIdleTimeoutMs) return;
 
-void DisplayManager::RevertTimerCb(lv_timer_t *t)
-{
-    auto *self = static_cast<DisplayManager *>(lv_timer_get_user_data(t));
-    lv_timer_delete(t);
-    self->revertTimer_ = nullptr;
-    self->ShowRoomTemp();
-}
-
-void DisplayManager::MinusCb(lv_event_t *e)
-{
-    static_cast<DisplayManager *>(lv_event_get_user_data(e))->OnNudge(-0.5f);
-}
-
-void DisplayManager::PlusCb(lv_event_t *e)
-{
-    static_cast<DisplayManager *>(lv_event_get_user_data(e))->OnNudge(+0.5f);
+    // Never leave a unit sitting in the service menu, unlocked, in someone's
+    // hallway. Already inside the LVGL task, so load directly.
+    ESP_LOGI(TAG, "Idle — returning to home screen");
+    self->homeScreen_.Load();
+    self->current_ = ScreenId::Home;
 }
