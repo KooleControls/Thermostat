@@ -38,8 +38,8 @@ changing this), not throwaway.
 ## Relations
 
 - The "needs the unit on a network" prerequisite is **met** — the display WiFi
-  connect flow ships (`2026-07-27-wifi-connect-ui.md` now holds only its leftovers) and
-  shares the display service-menu shell with it.
+  connect flow ships (Settings → WiFi: scan, pick, passphrase, connect) and this
+  screen plugs into the same service menu.
 - Tracked under **RA2-437**; the generic command surface keeps the boundary rule
   (KC meaning stays on the gateway).
 - Later remote triggers (OT version-register token, BLE) reuse this verbatim.
