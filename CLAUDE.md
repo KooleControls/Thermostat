@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-The **KC Thermostat** — an OpenTherm room thermostat (OT master) that pairs with the KC1245 Gateway as a drop-in replacement for the third-party unit. Built on the Strux template (ESP-IDF v6.0, C++, FreeRTOS, React web UI); Strux is a local git remote (`strux`) and template improvements flow both ways. Roadmap and backlog: `docs/roadmap.md`.
+The **KC Thermostat** — an OpenTherm room thermostat (OT master) that pairs with the KC1245 Gateway as a drop-in replacement for the third-party unit. Built on the Strux template (ESP-IDF v6.0, C++, FreeRTOS, React web UI); Strux is a local git remote (`strux`) and template improvements flow both ways. Backlog: `docs/backlog/` (deliverables tracked in Jira: RA2-395, RA2-437, RA2-435).
 
 Deviations from stock Strux: **no MQTT / Home Assistant managers** (the gateway owns smart-home integration).
+
+**Open-source (approved 2026-07-27).** This repo will be released open-source, so it's a firm rule: **no KC-proprietary code here** — the connection-server protocol, keys, and fleet semantics live on the *gateway*, and the thermostat exposes only a generic, transport-agnostic command surface (`CommandManager`). The gateway translates KC intent into plain commands; the thermostat never knows it's "KC". Keep it that way.
 
 ## Build commands
 
@@ -27,7 +29,7 @@ pnpm build        # tsc -b && vite build && gzip into ../www (embedded in flash 
 pnpm typecheck    # tsc --noEmit
 ```
 
-There are no automated tests; verification is building and flashing a device. `docs/backlog/` holds things actually planned to be done; `docs/ideas/` holds set-aside sketches of how something *could* be solved someday — suggestions, not commitments.
+There are no automated tests; verification is building and flashing a device. `docs/backlog/` holds concrete software work planned to be done — that's the only tracking layer in this repo (no set-aside "ideas" layer; deliverables and undecided/maybe-someday items live in Jira).
 
 ## Architecture
 

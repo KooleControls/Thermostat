@@ -3,8 +3,8 @@
 **Closed — dropped (2026-07-27).** The thermostat is an open-source, standalone
 product (as if bought from a third party), so it carries **no KC software ID**.
 
-Decision: with open-source approved (`2026-07-27-open-source-public-repo.md`), we
-stop treating the thermostat as part of KC's internal firmware-identity scheme.
+Decision: with open-source approved (2026-07-27, Jira RA2-395), we stop treating
+the thermostat as part of KC's internal firmware-identity scheme.
 
 - The SID was **never embedded** in the firmware, so nothing has to be removed
   there — version/system-info reports the git-tag-derived firmware version and

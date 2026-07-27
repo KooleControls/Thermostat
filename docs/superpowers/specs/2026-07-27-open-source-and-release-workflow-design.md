@@ -3,7 +3,8 @@
 **Date:** 2026-07-27
 **Status:** approved (brainstorm + audit complete)
 **Jira:** RA2-395 (parent), decisions cross-linked on RA2-437 and RA2-442
-**Backlog:** `docs/backlog/2026-07-27-open-source-public-repo.md`
+**Status note:** the originating backlog item (`2026-07-27-open-source-public-repo.md`)
+was removed once the repo went public — this spec + RA2-395 are the record.
 
 > **Audit finding (2026-07-27): most of this step is already built.** The merged
 > 2026-07-13 release-workflow + branding work (`docs/superpowers/specs/2026-07-13-release-workflow-and-branding-design.md`)
