@@ -1,9 +1,15 @@
 # Open-source the thermostat + release workflow — design
 
 **Date:** 2026-07-27
-**Status:** approved (brainstorm complete)
+**Status:** approved (brainstorm + audit complete)
 **Jira:** RA2-395 (parent), decisions cross-linked on RA2-437 and RA2-442
 **Backlog:** `docs/backlog/2026-07-27-open-source-public-repo.md`
+
+> **Audit finding (2026-07-27): most of this step is already built.** The merged
+> 2026-07-13 release-workflow + branding work (`docs/superpowers/specs/2026-07-13-release-workflow-and-branding-design.md`)
+> already provides the tag-driven `release.yml`, full KC-Thermostat branding, and
+> the CMake project rename. The remaining step-1 work is therefore small and
+> mechanical (see *Work breakdown* below), not a from-scratch build.
 
 ## Goal
 
@@ -44,84 +50,97 @@ These were settled during the brainstorm and are recorded on RA2-395:
   easy direction, and the control-loop item owns that trigger. If outside
   contributions land before any such migration, contributor consent is required —
   note this if it becomes relevant.
-- **Publish strategy: audit first.** The secret/history + boundary audit runs
-  before choosing how to publish. Its result decides between (a) flipping the
-  existing `KooleControls/Thermostat` repo public with history intact, and
-  (b) pushing a clean tree to a fresh public repo with squashed history. Do not
-  pre-commit to either — the audit is the input.
+- **Publish strategy: flip the existing repo, keep history.** The audit found no
+  secrets or KC-proprietary code anywhere in the working tree or the 313-commit
+  history, so `KooleControls/Thermostat` is made public **with history intact** —
+  preserving Strux attribution and provenance. A fresh squashed repo was
+  considered and rejected: it adds work with no security benefit here.
 - **Software ID: dropped.** The thermostat is treated as a standalone product, as
   if bought from a third party, so no KC software ID (SID 28) is embedded. This
   closes the open piece of `docs/backlog/2026-07-06-software-id.md`. Version and
   system-info reporting keep the git-tag-derived firmware version and simply carry
-  no KC identifier.
+  no KC identifier. **Consequence for artifact naming:** the existing `release.yml`
+  bakes `SID 28` and a `KC` prefix into the artifact filenames
+  (`01_00_00_28_KC_Thermostat-…`); both are dropped in favour of standalone
+  naming (`Thermostat-<version>-…`) so no KC identifiers appear anywhere.
 - **Update host: GitHub Releases.** Pinned per-tag assets with stable,
   anonymously downloadable URLs. GitHub Actions *artifacts* are CI-internal only
   (ephemeral, auth-gated even on public repos) and are never the public pull
-  target.
+  target. Note: the frontend's GitHub "newer release available" check was removed
+  earlier *because the repo was private*; open-source reverses that premise, but
+  re-introducing a version check is **deferred to step 2** (self-update), where it
+  belongs — out of scope here.
 - **Internal docs: kept, links stripped.** `CLAUDE.md` and `docs/backlog/` stay
   in the public repo as useful development context, but private
   `koolecontrolsdevelopment.atlassian.net` links and bare `RA2-*` Jira keys are
   removed or neutralised as part of the audit step. They are not secrets, but
   they need not be exposed.
 
-## Work breakdown
+## Audit outcome (2026-07-27)
 
-The step is a sequence with one hard gate (the audit) that determines how the
-later publish is done.
+The pre-publish audit is **complete** and is the reason the publish strategy is
+already resolved above.
 
-### 1. Audit (gate)
+- **Secrets/keys — clean.** No private keys, certs, or cloud tokens in the working
+  tree or the 313-commit history; no `.pem`/`.key`/`.env` files. `web.password`
+  defaults to empty; all "password/token" matches are legitimate runtime auth
+  code, not hardcoded credentials. One placeholder (`PASSWORD="admin"`,
+  `HOST="DEVICE_IP"`) in a plan doc is an example snippet, not a real secret.
+- **KC-proprietary / boundary — clean.** No connection-server protocol, RC4/AES
+  keys, or fleet semantics. MQTT/HA references are doc-comment examples only; no
+  managers. The `CommandManager` surface is generic.
+- **Already built.** `release.yml`, branding, and the CMake rename are merged
+  (2026-07-13 work).
+- **Strip-list (non-secret internal references).** Private
+  `koolecontrolsdevelopment.atlassian.net` links and bare `RA2-*` keys appear in
+  `CLAUDE.md`, `docs/backlog/*.md`, `docs/superpowers/**`, and two comments in
+  `main/hardware/drivers/Stm32OpenThermLink.h`. `README.md` is clean. These are
+  cosmetic, not sensitive.
 
-Scan the **working tree and the full git history** for anything that must not go
-public: secrets, keys, private endpoints, and any KC-proprietary code (the
-connection-server protocol, fleet semantics, encryption keys). Confirm the
-`CommandManager` surface is genuinely generic — no KC meaning has leaked into the
-thermostat. In parallel, inventory the internal references
-(`koolecontrolsdevelopment.atlassian.net` links, `RA2-*` keys) that the
-docs-cleanup task will strip.
+## Work breakdown (remaining)
 
-The audit's outcome is the deciding input for the publish strategy: a clean
-history supports flipping the existing repo public; a dirty history that cannot
-be cheaply rewritten pushes toward a fresh, squashed public repo. Record the
-finding and the resulting choice.
+Because the release workflow and branding already exist, what remains is small
+and mechanical.
 
-### 2. Remove the software-ID concept
+### 1. Standalone artifact naming
 
-Follow the standalone-product framing: remove any KC software-ID scaffolding so
-none is embedded, and verify version/system-info still reports a sane
-git-tag-derived firmware version with no KC identifier. Update
-`docs/backlog/2026-07-06-software-id.md` to reflect that the item is closed as
-"dropped", not "embedded".
+Edit `.github/workflows/release.yml` to drop the `SOFTWARE_ID` and
+`ARTIFACT_PREFIX` env constants and rebuild the artifact base as
+`<PROJECT_NAME>-<version>` (e.g. `Thermostat-1.0.0-factory.bin`,
+`Thermostat-1.0.0.bin`, `Thermostat-1.0.0-www.bin`), updating the release-body
+text to match. No KC identifiers in any filename.
 
-### 3. Licence + repo hygiene
+### 2. Close out the software-ID item
 
-Add an MIT `LICENSE` file at the repo root (no per-file headers). Write an
-outward-facing `README` covering what the device is, the board target (DIYLESS
-Thermostat 3), and the build (`pnpm build` for the frontend, then
-`idf.py set-target esp32s3 && idf.py build`). Preserve the Strux upstream
-attribution and the `strux` remote relationship. Strip the private Jira/Confluence
-links identified in the audit from `CLAUDE.md` and `docs/backlog/`.
+Update `docs/backlog/2026-07-06-software-id.md` to record the item as closed
+"dropped" (standalone product), not "embedded". No firmware change is needed —
+the SID was never embedded, only present in the old artifact name (removed in
+task 1).
 
-### 4. Publish
+### 3. MIT licence
 
-Execute the strategy chosen from the audit (flip existing repo, or push scrubbed
-tree to a fresh public repo). If a fresh repo is used, re-establish the Strux
-upstream link and attribution.
+Add a single MIT `LICENSE` file at the repo root — no per-file headers. Copyright
+holder to be confirmed with the user (Koole Controls vs. individual).
 
-### 5. Release workflow
+### 4. Repo hygiene for outside eyes
 
-A GitHub Actions workflow triggered on a `V*` tag push:
+Strip/neutralise the private Jira/Confluence references identified by the audit
+from the tracked docs and the two `Stm32OpenThermLink.h` comments. Confirm
+`README.md` reads as outward-facing (what the device is, DIYLESS T3 board, the
+`pnpm build` + `idf.py set-target esp32s3 && idf.py build` flow) and preserves
+Strux upstream attribution.
 
-1. Build the frontend (`pnpm build`), which gzips into the `www` FAT image.
-2. Inject the version from the tag into the build
-   (`-DSOFTWARE_VERSION_MAJOR/MINOR/PATCH`), matching the existing tag-derived
-   versioning in the root `CMakeLists.txt`.
-3. `idf.py build` for the ESP32-S3 / DIYLESS T3 target.
-4. Attach the versioned `.bin` to a GitHub Release for that tag.
+### 5. Publish (user action)
 
-The build `.bin` may move between jobs as an Actions artifact internally, but the
-**public** deliverable is the Release asset. Naming carries the version so a
-consumer can pin a specific build (the RA2-437 hard requirement: never "just
-latest").
+Flip `KooleControls/Thermostat` to public with history intact. This is a
+GitHub-side action the user performs; keep the `strux` upstream relationship
+intact.
+
+### 6. Verify the release path
+
+Push a `V*` tag (or `workflow_dispatch`) and confirm a GitHub Release appears with
+the three correctly-named standalone artifacts and the right prerelease flag — the
+host step 2 will pull pinned builds from.
 
 ## Interfaces and boundaries
 
