@@ -159,9 +159,16 @@ void WiFiInterface::OnWifiEvent(esp_event_base_t event_base, int32_t event_id, v
             break;
 
         case WIFI_EVENT_STA_DISCONNECTED:
-            ESP_LOGW(TAG, "STA disconnected");
+        {
+            // The reason code is the difference between "wrong password" and "no
+            // such network" — without it a failed join is a silent 30-second wait.
+            // 15 = 4-way handshake timeout (bad PSK), 201 = AP not found,
+            // 2/205 = auth expired / connection failed.
+            auto* disc = static_cast<wifi_event_sta_disconnected_t*>(event_data);
+            ESP_LOGW(TAG, "STA disconnected, reason=%d", disc ? disc->reason : -1);
             RaiseEvent(NetworkEventType::LinkDown);
             break;
+        }
 
         case WIFI_EVENT_AP_START:
             ESP_LOGI(TAG, "AP started");

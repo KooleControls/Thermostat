@@ -1,4 +1,5 @@
 #include "NetworkManager.h"
+#include <cstring>
 #include "SettingsManager.h"
 #include "SystemManager.h"
 #include "CommandManager.h"
@@ -148,7 +149,11 @@ void NetworkManager::ConnectToStation(const char* ssid, const char* password)
     wifiPassword_.Set(staPassword_);
     serviceProvider_.getSettingsManager().Save();
 
-    ESP_LOGI(TAG, "New credentials for '%s' stored — connecting", staSsid_);
+    // Length, never the value: an empty passphrase makes a WPA2 AP look like
+    // "incompatible security" (reason 210) rather than a wrong password, which is
+    // otherwise indistinguishable from the AP being misconfigured.
+    ESP_LOGI(TAG, "New credentials for '%s' stored (passphrase %u chars) — connecting",
+             staSsid_, (unsigned)strlen(staPassword_));
     staRetryCount_ = 0;
     AttemptStaConnect();
 }
