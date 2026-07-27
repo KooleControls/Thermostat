@@ -37,7 +37,8 @@ changing this), not throwaway.
 
 ## Relations
 
-- Depends on `2026-07-27-wifi-connect-ui.md` (needs the unit on a network) and
+- The "needs the unit on a network" prerequisite is **met** — the display WiFi
+  connect flow ships (`2026-07-27-wifi-connect-ui.md` now holds only its leftovers) and
   shares the display service-menu shell with it.
 - Tracked under **RA2-437**; the generic command surface keeps the boundary rule
   (KC meaning stays on the gateway).
