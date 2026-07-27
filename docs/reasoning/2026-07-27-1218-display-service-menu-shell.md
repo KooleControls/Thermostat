@@ -1,6 +1,7 @@
 ---
-id: 1
+id: 2026-07-27-1218
 date: 2026-07-27
+time: "12:18"
 title: Display service-menu shell, gated by a PIN
 supersedes:
 ---
