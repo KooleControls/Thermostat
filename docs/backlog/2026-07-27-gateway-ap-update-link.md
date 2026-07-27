@@ -61,8 +61,8 @@ again; "has internet" and "is trusted to fetch firmware" stay separate decisions
 - Tracked under **RA2-437**. Most of the work is **gateway-side** (APSTA, NAPT,
   fetch from KC servers, WS client speaking the session-mux framing) and belongs in
   `esp_gateway`.
-- The parked branch `feature/firmware-update-screen` holds the GitHub-pull
-  implementation (async pull job + progress, redirect following, 2048-byte HTTP
-  buffers) if a standalone pull path is ever wanted. Not merged.
-- Local `.bin` upload via `FirmwarePage` remains the offline floor and depends on
-  nothing here.
+- **No firmware screen on the display.** The update is triggered by the gateway,
+  so there is nothing for someone at the unit to do. The GitHub-pull branch was
+  deleted rather than parked; what was learned from it is in the reasoning note.
+- Local `.bin` upload via `FirmwarePage` remains the offline floor for a standalone
+  unit and depends on nothing here.
