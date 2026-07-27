@@ -21,7 +21,7 @@ changing this), not throwaway.
   screen, `ui.pin` gate (default `0000`), and a **disabled "Firmware" row** waiting
   for this screen. Adding one is: a `Screen` subclass, a `ScreenId`, a member on
   `DisplayManager`, and enabling the row. Reasoning:
-  `docs/reasoning/2026-07-27-1218-display-service-menu-shell.md`.
+  `docs/reasoning/2026-07-27-12h18-display-service-menu-shell.md`.
 
 ## Likely scope
 

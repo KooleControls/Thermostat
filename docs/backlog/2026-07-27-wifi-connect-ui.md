@@ -19,7 +19,7 @@ shell (screens + a `Navigator` interface), the home screen has a gear that leads
 into a service menu, and that menu is gated by a `ui.pin` setting (default
 `0000`). The menu already carries a **disabled "WiFi" row** — this item enables
 it and fills in the screen behind it. Reasoning:
-`docs/reasoning/2026-07-27-1218-display-service-menu-shell.md`.
+`docs/reasoning/2026-07-27-12h18-display-service-menu-shell.md`.
 
 ## Likely scope
 
