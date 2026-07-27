@@ -1,6 +1,6 @@
 # UI for connecting to WiFi
 
-**Status: built on the display, awaiting a hands-on check.** (updated 2026-07-27)
+**Status: done on the display, confirmed working on the unit.** (updated 2026-07-27)
 A way for someone standing at the unit to put the thermostat onto a WiFi network —
 scan/select an access point and enter its password — so it can reach the internet
 (or a firmware host).
@@ -29,12 +29,12 @@ Two things had to change underneath:
   because it writes the same settings boot already reads.
 
 Reasoning: `docs/reasoning/2026-07-27-12h18-display-service-menu-shell.md` for the
-menu shell this sits in.
+menu shell this sits in, `2026-07-27-13h06-navigator-carries-no-payload.md` for why
+the passphrase pad is a view inside this screen, and
+`2026-07-27-13h06-2-runtime-wifi-credentials.md` for the connect path.
 
 ## Still open
 
-- **Not yet verified by hand** — built, flashed and boots clean, but nobody has
-  tapped through scan → pick → passphrase → connect on the panel yet.
 - **Wrong-password feedback is indirect.** A bad passphrase shows as three
   connect attempts and then "own access point" rather than "wrong password" —
   `WIFI_EVENT_STA_DISCONNECTED` carries a reason code that `NetworkManager`
