@@ -49,16 +49,6 @@ public:
     /// is picked again or the unit reboots.
     void StartAccessPoint();
 
-    /// Stop the radio outright — no STA, no AP, no retries. The device becomes
-    /// unreachable, so only a caller that will bring it back has any business
-    /// calling this (the self-heating rig's sleep soak, which needs the WiFi
-    /// power gone to measure the floor).
-    void StopRadio();
-
-    /// Undo StopRadio: reconnect with the stored credentials, or host the AP
-    /// when there are none — the same choice Init makes at boot.
-    void RestartRadio();
-
     bool IsStaConnected() const { return staConnected_; }
     bool IsStaConnecting() const { return staConnecting_; }
 

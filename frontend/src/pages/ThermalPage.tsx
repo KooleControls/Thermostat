@@ -1,8 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react"
-import { FlameIcon, SnowflakeIcon } from "lucide-react"
+import type { ReactNode } from "react"
+import { FlameIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import {
   AlertDialog,
@@ -19,24 +17,16 @@ import { StateBadge } from "@/components/StateBadge"
 import { useThermal } from "@/hooks/use-thermal"
 import type { ThermalModeName } from "@/lib/backend"
 
-// The four defined states of the rig, coarsest lever first. "custom" is not
-// offered as a button — it is what the device reports when a single lever was
-// set directly (over the command surface or the brightness row below).
+// Power states, coarsest lever first. Everything here keeps OpenTherm alive, so
+// the gateway keeps logging room temperature throughout — that log is the
+// measurement, not this page. "custom" is what the device reports when only the
+// brightness was set.
 const MODES: Array<{ key: ThermalModeName; label: string; detail: string }> = [
   { key: "baseline", label: "Baseline", detail: "As shipped — backlight 100 %, full refresh, 240 MHz" },
   { key: "dark", label: "Dark screen", detail: "Backlight fully off" },
   { key: "panelidle", label: "Panel idle", detail: "Backlight off, refresh clock slowed to a crawl" },
-  { key: "lowpower", label: "Low power", detail: "Backlight off, slow refresh, CPU at 80 MHz" },
+  { key: "paneloff", label: "Panel off", detail: "Backlight off, panel held in reset, CPU at 80 MHz" },
 ]
-
-const MODE_LABEL: Record<ThermalModeName, string> = {
-  baseline: "Baseline",
-  dark: "Dark screen",
-  panelidle: "Panel idle",
-  lowpower: "Low power",
-  floor: "Floor",
-  custom: "Custom",
-}
 
 const BRIGHTNESS_STEPS = [0, 25, 50, 100]
 
@@ -46,20 +36,8 @@ const duration = (seconds: number) => {
   return h > 0 ? `${h} h ${m} m` : `${m} m`
 }
 
-const signed = (v: number, digits = 2) => `${v > 0 ? "+" : ""}${v.toFixed(digits)}`
-
 export default function ThermalPage() {
-  const {
-    status,
-    setMode,
-    setCycle,
-    setCyclePair,
-    setDwell,
-    setSampleSec,
-    setBacklight,
-    setFloorMin,
-    startFloor,
-  } = useThermal()
+  const { status, setMode, setBacklight } = useThermal()
 
   if (!status) {
     return (
@@ -70,15 +48,13 @@ export default function ThermalPage() {
   }
 
   const active = MODES.find((m) => m.key === status.mode)
-  const windowLabel = `${Math.round(status.deltaWindowS / 60)} min`
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Self-heating test</h1>
+        <h1 className="text-2xl font-bold">Self-heating</h1>
         <div className="flex items-center gap-2">
           {status.panelDead && <Badge variant="destructive">Panel dead</Badge>}
-          <StateBadge label="Cycle" on={status.cycle} />
           <StateBadge
             label="OT"
             on={status.otLinked}
@@ -89,165 +65,78 @@ export default function ThermalPage() {
         </div>
       </div>
 
-      <Card title="Mode">
-        <div className="grid grid-cols-2 gap-2">
-          {MODES.map((m) => (
-            <Button
-              key={m.key}
-              variant={status.mode === m.key ? "default" : "outline"}
-              className="h-12"
-              onClick={() => setMode(m.key)}
-            >
-              {m.label}
-            </Button>
-          ))}
+      <Card title="Power state">
+        <div className="col-span-2 grid grid-cols-2 gap-2">
+          {MODES.map((m) =>
+            // Holding the panel in reset cannot be undone without a reboot, so
+            // that one asks first.
+            m.key === "paneloff" ? (
+              <AlertDialog key={m.key}>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant={status.mode === m.key ? "default" : "outline"}
+                    className="h-12"
+                  >
+                    {m.label}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Hold the panel in reset?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This is one-way: only a reboot brings the display back,
+                      because the panel's command pins are the OpenTherm UART
+                      now. WiFi and OpenTherm keep running, so the gateway goes
+                      on logging.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => setMode(m.key)}>
+                      Turn the panel off
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            ) : (
+              <Button
+                key={m.key}
+                variant={status.mode === m.key ? "default" : "outline"}
+                className="h-12"
+                onClick={() => setMode(m.key)}
+              >
+                {m.label}
+              </Button>
+            ),
+          )}
         </div>
-        <p className="mt-4 text-sm text-muted-foreground">
-          {status.mode === "custom"
-            ? "Custom — levers set individually."
-            : (active?.detail ?? "")}
+
+        <p className="col-span-2 mt-4 text-sm text-muted-foreground">
+          {status.mode === "custom" ? "Brightness set by hand." : (active?.detail ?? "")}
         </p>
-        <div className="mt-3 flex flex-wrap gap-2">
+
+        <div className="col-span-2 mt-3 flex flex-wrap gap-2">
           <Badge variant="secondary">Backlight {status.backlight}%</Badge>
-          <Badge variant="secondary">
-            pclk {(status.pclkHz / 1_000_000).toFixed(1)} MHz
-          </Badge>
+          <Badge variant="secondary">pclk {(status.pclkHz / 1_000_000).toFixed(1)} MHz</Badge>
           <Badge variant="secondary">
             CPU {status.cpuMhz} MHz{status.cpuControl ? "" : " (fixed)"}
           </Badge>
           <Badge variant="secondary">In state {duration(status.secondsInState)}</Badge>
         </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          The panel stays dark until you change the mode here — a touch
-          deliberately does not wake it, so a running measurement can't be
-          disturbed by a passing hand.
-        </p>
       </Card>
 
-      <Card title={`Now (change over the last ${windowLabel})`}>
-        <Row
-          label="Room sensor"
-          value={status.roomValid ? `${status.room.toFixed(2)} °C` : "—"}
-          delta={status.roomDelta}
-        />
+      <Card title="Now">
+        <Row label="Room sensor" value={status.roomValid ? `${status.room.toFixed(2)} °C` : "—"} />
         <Row
           label="Humidity"
           value={status.humidityValid ? `${status.humidity.toFixed(1)} %` : "—"}
         />
-        <Row
-          label="Die temperature"
-          value={status.dieValid ? `${status.die.toFixed(1)} °C` : "—"}
-          delta={status.dieDelta}
-        />
-        <Row label="Samples held" value={`${status.samples}`} />
+        <Row label="Die temperature" value={status.dieValid ? `${status.die.toFixed(1)} °C` : "—"} />
         <p className="col-span-2 mt-1 text-xs text-muted-foreground">
-          Every sample is also one CSV line on the Console page, prefixed
-          THERMAL — that, or tools/thermal_log.py, is the record to keep for a
-          long run.
+          The room figure is what goes out over OpenTherm, so the gateway's log
+          is the record. Die temperature is here to show whether a mode actually
+          removed heat.
         </p>
-      </Card>
-
-      <Card title="A/B cycle">
-        <div className="col-span-2 flex items-center justify-between">
-          <div>
-            <div className="font-medium text-foreground">Alternate two modes</div>
-            <div className="text-xs text-muted-foreground">
-              Ambient drift over an afternoon is bigger than the effect being
-              measured, so a single before/after run proves nothing. Cycling
-              lets the analysis compare like with like.
-            </div>
-          </div>
-          <Switch checked={status.cycle} onCheckedChange={setCycle} />
-        </div>
-
-        <div className="col-span-2 mt-4 grid grid-cols-2 gap-4">
-          <ModePicker
-            label="State A"
-            value={status.cycleA}
-            onChange={(v) => setCyclePair(v, status.cycleB)}
-          />
-          <ModePicker
-            label="State B"
-            value={status.cycleB}
-            onChange={(v) => setCyclePair(status.cycleA, v)}
-          />
-        </div>
-
-        <div className="col-span-2 mt-4 grid grid-cols-2 gap-4">
-          <NumberField
-            label="Dwell (minutes)"
-            hint="≥ 60 keeps only settled data"
-            value={status.dwellMin}
-            min={1}
-            max={720}
-            onCommit={setDwell}
-          />
-          <NumberField
-            label="Sample interval (s)"
-            value={status.sampleSec}
-            min={5}
-            max={600}
-            onCommit={setSampleSec}
-          />
-        </div>
-      </Card>
-
-      <Card title="Floor — what's physically possible" icon={SnowflakeIcon}>
-        <p className="col-span-2 text-sm text-muted-foreground">
-          Answers a different question from the modes above: not what each part
-          costs, but how cold this sensor can <em>ever</em> read. Everything that
-          can be turned off is — and the product is deliberately broken for the
-          duration.
-        </p>
-        <ul className="col-span-2 mt-1 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-          <li>WiFi radio stopped — this page goes dead until the run ends.</li>
-          <li>
-            Panel held in hardware reset. <strong>One-way: only a reboot brings
-            the display back</strong> (its command pins are the OpenTherm UART
-            now).
-          </li>
-          <li>CPU duty-cycled through light sleep, so OpenTherm stops being serviced.</li>
-          <li>
-            The device brings WiFi back on its own when the clock runs out, and
-            the whole soak is in the sample buffer.
-          </li>
-        </ul>
-
-        <div className="col-span-2 mt-4 flex items-end gap-4">
-          <div className="w-40">
-            <NumberField
-              label="Duration (minutes)"
-              value={status.floorMin}
-              min={1}
-              max={240}
-              onCommit={setFloorMin}
-            />
-          </div>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="outline" className="text-destructive hover:text-destructive">
-                Start floor run
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  Take the device off the air for {status.floorMin} minutes?
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  WiFi stops, the panel is held in reset and the CPU sleeps in
-                  bursts. You lose this page and the OpenTherm link for the
-                  duration; the display needs a reboot afterwards. WiFi returns
-                  by itself when the timer expires.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={startFloor}>Start</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
       </Card>
 
       <Card title="Brightness">
@@ -264,27 +153,18 @@ export default function ThermalPage() {
           ))}
         </div>
         <p className="col-span-2 mt-3 text-xs text-muted-foreground">
-          Sets the backlight on its own, which puts the rig in Custom — useful
-          for finding the dimmest setting that is still readable on a wall.
+          For finding the dimmest setting that is still readable on a wall.
         </p>
       </Card>
     </div>
   )
 }
 
-function Card({
-  title,
-  icon: Icon = FlameIcon,
-  children,
-}: {
-  title: string
-  icon?: typeof FlameIcon
-  children: ReactNode
-}) {
+function Card({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="rounded-xl border bg-card p-6 text-card-foreground shadow-sm">
       <div className="mb-4 flex items-center gap-2">
-        <Icon className="size-5 text-muted-foreground" />
+        <FlameIcon className="size-5 text-muted-foreground" />
         <h2 className="text-lg font-semibold">{title}</h2>
       </div>
       <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">{children}</div>
@@ -292,100 +172,11 @@ function Card({
   )
 }
 
-function Row({
-  label,
-  value,
-  delta,
-}: {
-  label: string
-  value: string
-  delta?: number
-}) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between">
       <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono">
-        {value}
-        {delta !== undefined && (
-          <span className="ml-2 text-muted-foreground">{signed(delta)}</span>
-        )}
-      </span>
+      <span className="font-mono">{value}</span>
     </div>
-  )
-}
-
-function ModePicker({
-  label,
-  value,
-  onChange,
-}: {
-  label: string
-  value: ThermalModeName
-  onChange: (v: ThermalModeName) => void
-}) {
-  return (
-    <label className="block">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <select
-        className="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm"
-        value={value}
-        onChange={(e) => onChange(e.target.value as ThermalModeName)}
-      >
-        {MODES.map((m) => (
-          <option key={m.key} value={m.key}>
-            {MODE_LABEL[m.key]}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
-}
-
-// Committed on blur or Enter, not on every keystroke: each commit is a device
-// round trip that also writes NVS.
-function NumberField({
-  label,
-  hint,
-  value,
-  min,
-  max,
-  onCommit,
-}: {
-  label: string
-  hint?: string
-  value: number
-  min: number
-  max: number
-  onCommit: (v: number) => void
-}) {
-  const [draft, setDraft] = useState(String(value))
-  useEffect(() => setDraft(String(value)), [value])
-
-  const commit = () => {
-    const parsed = Number(draft)
-    if (!Number.isFinite(parsed)) {
-      setDraft(String(value))
-      return
-    }
-    const clamped = Math.min(max, Math.max(min, Math.round(parsed)))
-    setDraft(String(clamped))
-    if (clamped !== value) onCommit(clamped)
-  }
-
-  return (
-    <label className="block">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <Input
-        className="mt-1 h-9"
-        inputMode="numeric"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit()
-        }}
-      />
-      {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
-    </label>
   )
 }

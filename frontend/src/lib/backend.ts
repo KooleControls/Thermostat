@@ -504,28 +504,13 @@ class BackendService {
     return this.send<ThermalStatus>("thermalStatus")
   }
 
-  /** Any subset; a named `mode` sets all three levers at once, while an
-   *  individual lever (backlight/pclkHz/cpuMhz) switches the rig to "custom".
-   *  Reply is the full fresh status. */
+  /** A named `mode` sets every lever at once; `backlight` on its own switches
+   *  the device to "custom". Reply is the full fresh status. */
   async setThermal(params: {
     mode?: ThermalModeName
-    cycle?: boolean
-    cycleA?: ThermalModeName
-    cycleB?: ThermalModeName
-    dwellMin?: number
-    sampleSec?: number
-    floorMin?: number
     backlight?: number
-    pclkHz?: number
-    cpuMhz?: number
   }): Promise<ThermalStatus> {
-    const payload: Record<string, unknown> = { ...params }
-    if (params.cycle !== undefined) payload.cycle = params.cycle ? 1 : 0
-    return this.send<ThermalStatus>("thermalSet", payload)
-  }
-
-  async getThermalLog(): Promise<ThermalLogResponse> {
-    return this.send<ThermalLogResponse>("thermalLog")
+    return this.send<ThermalStatus>("thermalSet", params)
   }
 
   /** Returns false on wrong password; throws on connection failure. On success
@@ -755,24 +740,16 @@ export type ThermalModeName =
   | "baseline"
   | "dark"
   | "panelidle"
-  | "lowpower"
-  | "floor"
+  | "paneloff"
   | "custom"
 
 export interface ThermalStatus {
   mode: ThermalModeName
   backlight: number
   pclkHz: number
-  pclkDefaultHz: number
   cpuMhz: number
   /** false when the firmware was built without CONFIG_PM_ENABLE. */
   cpuControl: boolean
-  cycle: boolean
-  cycleA: ThermalModeName
-  cycleB: ThermalModeName
-  dwellMin: number
-  sampleSec: number
-  floorMin: number
   /** True once the panel has been held in reset — only a reboot brings it back. */
   panelDead: boolean
   secondsInState: number
@@ -782,26 +759,7 @@ export interface ThermalStatus {
   humidityValid: boolean
   die: number
   dieValid: boolean
-  /** Absent until there are two valid samples to compare. */
-  roomDelta?: number
-  dieDelta?: number
-  deltaWindowS: number
-  samples: number
   otLinked: boolean
-}
-
-export interface ThermalSample {
-  t: number
-  mode: ThermalModeName
-  backlight: number
-  room?: number
-  humidity?: number
-  die?: number
-}
-
-export interface ThermalLogResponse {
-  deltaWindowS: number
-  samples: ThermalSample[]
 }
 
 export interface OtStatus {

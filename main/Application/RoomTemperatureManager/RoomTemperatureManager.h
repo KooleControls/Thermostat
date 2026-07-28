@@ -32,15 +32,6 @@ public:
     // false = no valid recent measurement (never read, or stale > 30 s).
     bool GetRoomTemperature(float &celsius) const;
 
-    /// Read the sensor right now, refreshing the cache, and report what came
-    /// back. The one way to reach the AHT20 from outside this manager: the part
-    /// that matters is that every access goes through mutex_, because the sensor
-    /// is trigger-then-latch and two unsynchronized readers corrupt each other.
-    /// For callers whose own timing has come loose from the RTOS tick — the
-    /// self-heating rig's sleep soak — where the cache would only ever look
-    /// stale.
-    bool SampleNow(float &celsius, float &percent);
-
     /// Relative humidity from the same sensor, same cadence and validity rule.
     /// Cached here rather than read at the call site because the AHT20 has one
     /// sampler by design (see Loop()); it is also a second, independent witness
