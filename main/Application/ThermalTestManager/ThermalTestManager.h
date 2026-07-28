@@ -41,6 +41,14 @@
 //
 // Every sample is one CSV line on the console, prefixed THERMAL, and is kept in
 // a ring buffer for the web UI and for backfilling a poller that missed some.
+//
+// Floor mode answers a different question from the graded modes: not "what does
+// each part cost" but "how cold can this sensor ever read" — the physical floor,
+// with every part of the product deliberately broken. It stops the radio, holds
+// the panel in reset and duty-cycles the CPU through light sleep for a set
+// number of minutes, then brings WiFi back and reports. Nothing about it is
+// shippable behaviour; it exists so we know whether the sensor position can
+// work at all before spending effort on offsets.
 // ──────────────────────────────────────────────────────────────
 
 enum class ThermalMode : uint8_t
@@ -49,6 +57,7 @@ enum class ThermalMode : uint8_t
     DarkScreen,     // backlight fully off
     PanelIdle,      // + refresh clock slowed to a crawl
     LowPower,       // + CPU at 80 MHz
+    Floor,          // everything off that can be: see RunFloor()
     Custom,         // levers set individually over the command surface
 };
 
@@ -67,6 +76,12 @@ class ThermalTestManager
     static constexpr uint32_t MaxDwellMin = 720;
     static constexpr uint32_t MinSampleSec = 5;
     static constexpr uint32_t MaxSampleSec = 600;
+
+    // Floor mode is time-boxed because it is also unreachable: with the radio
+    // stopped, the only way out is the clock running out.
+    static constexpr uint32_t MinFloorMin = 1;
+    static constexpr uint32_t MaxFloorMin = 240;
+    static constexpr uint32_t FloorPclkHz = 100000;   // ~0.4 fps, near-zero DMA
 
 public:
     explicit ThermalTestManager(ServiceProvider &serviceProvider);
@@ -111,8 +126,17 @@ private:
     void PersistConfig();
 
     void Loop();
-    void TakeSample();
+    /// `direct` reads the sensor itself instead of the cached value — needed
+    /// during the sleep soak, where the RTOS tick has come loose from wall clock
+    /// and every cached reading looks stale.
+    void TakeSample(bool direct = false);
     void LogSample(const Sample &s);
+
+    /// The floor run: radio off, panel in reset, CPU duty-cycled through light
+    /// sleep for floorMin_ minutes, then WiFi back. Runs on the manager's own
+    /// task (never on a command's task — the reply has to get out before the
+    /// radio dies).
+    void RunFloor();
 
     /// Change in `value` over the last `windowS` seconds, using the oldest
     /// sample still inside the window. Call under mutex_.
@@ -132,13 +156,14 @@ private:
 
     // Persisted so an unattended multi-hour run survives a reboot. Custom is
     // never restored (its lever positions aren't stored) — it falls back to
-    // Baseline.
-    inline static UInt32Setting modeSetting_   { "thermal.mode",      "Thermal mode (0-3)",     0 };
-    inline static BoolSetting   cycleSetting_  { "thermal.cycle",     "Thermal cycle A/B",      false };
-    inline static UInt32Setting cycleASetting_ { "thermal.cycleA",    "Thermal cycle A mode",   0 };
-    inline static UInt32Setting cycleBSetting_ { "thermal.cycleB",    "Thermal cycle B mode",   1 };
-    inline static UInt32Setting dwellSetting_  { "thermal.dwellMin",  "Thermal dwell (min)",    90 };
-    inline static UInt32Setting sampleSetting_ { "thermal.sampleSec", "Thermal sample (s)",     30 };
+    // Baseline. Keys stay within NVS's 15-character limit.
+    inline static UInt32Setting modeSetting_   { "thermal.mode",   "Thermal mode (0-3)",   0 };
+    inline static BoolSetting   cycleSetting_  { "thermal.cycle",  "Thermal cycle A/B",    false };
+    inline static UInt32Setting cycleASetting_ { "thermal.cycleA", "Thermal cycle A mode", 0 };
+    inline static UInt32Setting cycleBSetting_ { "thermal.cycleB", "Thermal cycle B mode", 1 };
+    inline static UInt32Setting dwellSetting_  { "thermal.dwell",  "Thermal dwell (min)",  90 };
+    inline static UInt32Setting sampleSetting_ { "thermal.sample", "Thermal sample (s)",   30 };
+    inline static UInt32Setting floorSetting_  { "thermal.floor",  "Thermal floor (min)",  30 };
 
     ServiceProvider &serviceProvider_;
     InitState initState_;
@@ -155,6 +180,11 @@ private:
     ThermalMode cycleB_ = ThermalMode::DarkScreen;
     uint32_t    dwellMin_ = 90;
     uint32_t    sampleSec_ = 30;
+    uint32_t    floorMin_ = 30;
+
+    // Set by the command, acted on by the task: a floor run takes the radio down
+    // with it, so the reply must be on the wire before it starts.
+    bool floorRequested_ = false;
 
     int64_t stateEnteredUs_ = 0;
     int64_t lastSampleUs_ = 0;

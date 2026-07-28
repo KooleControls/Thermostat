@@ -52,6 +52,13 @@ void WiFiInterface::ConnectSta(const char* ssid, const char* password)
 
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &config));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    // Modem sleep (the WIFI_PS_MIN_MODEM default) parks the radio between beacons,
+    // so every request/response waits for the next one — ~100 ms per round trip.
+    // This unit is mains-powered and the gateway talks to it over short synchronous
+    // exchanges, so latency is worth more than the milliamps.
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
     esp_wifi_connect();
 }
 

@@ -171,6 +171,23 @@ void NetworkManager::StartAccessPoint()
     FallbackToAP();
 }
 
+void NetworkManager::StopRadio()
+{
+    ESP_LOGW(TAG, "Stopping the radio — the device is unreachable until it comes back");
+    connectTimer_.Stop();   // nothing may resurrect the link behind our back
+    wifi_interface_.Stop();
+    staConnected_ = false;
+    staConnecting_ = false;
+}
+
+void NetworkManager::RestartRadio()
+{
+    ESP_LOGI(TAG, "Restarting the radio");
+    staRetryCount_ = 0;
+    if (staSsid_[0] != '\0') AttemptStaConnect();
+    else                     FallbackToAP();
+}
+
 void NetworkManager::GetStaSsid(char* out, size_t maxLen) const
 {
     snprintf(out, maxLen, "%s", staSsid_);

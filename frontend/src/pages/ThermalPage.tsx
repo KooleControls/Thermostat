@@ -1,9 +1,20 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { FlameIcon } from "lucide-react"
+import { FlameIcon, SnowflakeIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { StateBadge } from "@/components/StateBadge"
 import { useThermal } from "@/hooks/use-thermal"
 import type { ThermalModeName } from "@/lib/backend"
@@ -23,6 +34,7 @@ const MODE_LABEL: Record<ThermalModeName, string> = {
   dark: "Dark screen",
   panelidle: "Panel idle",
   lowpower: "Low power",
+  floor: "Floor",
   custom: "Custom",
 }
 
@@ -37,8 +49,17 @@ const duration = (seconds: number) => {
 const signed = (v: number, digits = 2) => `${v > 0 ? "+" : ""}${v.toFixed(digits)}`
 
 export default function ThermalPage() {
-  const { status, setMode, setCycle, setCyclePair, setDwell, setSampleSec, setBacklight } =
-    useThermal()
+  const {
+    status,
+    setMode,
+    setCycle,
+    setCyclePair,
+    setDwell,
+    setSampleSec,
+    setBacklight,
+    setFloorMin,
+    startFloor,
+  } = useThermal()
 
   if (!status) {
     return (
@@ -56,6 +77,7 @@ export default function ThermalPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Self-heating test</h1>
         <div className="flex items-center gap-2">
+          {status.panelDead && <Badge variant="destructive">Panel dead</Badge>}
           <StateBadge label="Cycle" on={status.cycle} />
           <StateBadge
             label="OT"
@@ -170,6 +192,64 @@ export default function ThermalPage() {
         </div>
       </Card>
 
+      <Card title="Floor — what's physically possible" icon={SnowflakeIcon}>
+        <p className="col-span-2 text-sm text-muted-foreground">
+          Answers a different question from the modes above: not what each part
+          costs, but how cold this sensor can <em>ever</em> read. Everything that
+          can be turned off is — and the product is deliberately broken for the
+          duration.
+        </p>
+        <ul className="col-span-2 mt-1 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+          <li>WiFi radio stopped — this page goes dead until the run ends.</li>
+          <li>
+            Panel held in hardware reset. <strong>One-way: only a reboot brings
+            the display back</strong> (its command pins are the OpenTherm UART
+            now).
+          </li>
+          <li>CPU duty-cycled through light sleep, so OpenTherm stops being serviced.</li>
+          <li>
+            The device brings WiFi back on its own when the clock runs out, and
+            the whole soak is in the sample buffer.
+          </li>
+        </ul>
+
+        <div className="col-span-2 mt-4 flex items-end gap-4">
+          <div className="w-40">
+            <NumberField
+              label="Duration (minutes)"
+              value={status.floorMin}
+              min={1}
+              max={240}
+              onCommit={setFloorMin}
+            />
+          </div>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" className="text-destructive hover:text-destructive">
+                Start floor run
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  Take the device off the air for {status.floorMin} minutes?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  WiFi stops, the panel is held in reset and the CPU sleeps in
+                  bursts. You lose this page and the OpenTherm link for the
+                  duration; the display needs a reboot afterwards. WiFi returns
+                  by itself when the timer expires.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={startFloor}>Start</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </Card>
+
       <Card title="Brightness">
         <div className="col-span-2 flex flex-wrap gap-2">
           {BRIGHTNESS_STEPS.map((p) => (
@@ -192,11 +272,19 @@ export default function ThermalPage() {
   )
 }
 
-function Card({ title, children }: { title: string; children: ReactNode }) {
+function Card({
+  title,
+  icon: Icon = FlameIcon,
+  children,
+}: {
+  title: string
+  icon?: typeof FlameIcon
+  children: ReactNode
+}) {
   return (
     <div className="rounded-xl border bg-card p-6 text-card-foreground shadow-sm">
       <div className="mb-4 flex items-center gap-2">
-        <FlameIcon className="size-5 text-muted-foreground" />
+        <Icon className="size-5 text-muted-foreground" />
         <h2 className="text-lg font-semibold">{title}</h2>
       </div>
       <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">{children}</div>

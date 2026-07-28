@@ -43,40 +43,49 @@ bool RoomTemperatureManager::GetRoomTemperature(float &celsius) const
     return true;
 }
 
+bool RoomTemperatureManager::SampleNow(float &celsius, float &percent)
+{
+    // Every sensor touch in the firmware funnels through here, under the lock:
+    // the AHT20 is trigger-then-latch, so two unsynchronized readers would
+    // trample each other's measurement.
+    LOCK(mutex_);
+
+    bool haveTemp = serviceProvider_.getBoard().GetTemperatureSensor().ReadTemperature(celsius);
+    if (haveTemp)
+    {
+        lastTemp_ = celsius;
+        lastReadUs_ = esp_timer_get_time();
+    }
+
+    // Humidity rides along on the same cadence deliberately — one sampler, and
+    // it is a second witness of local heating (a warmed sensor reads RH low).
+    bool haveHumidity = serviceProvider_.getBoard().GetHumiditySensor().ReadHumidity(percent);
+    if (haveHumidity)
+    {
+        lastHumidity_ = percent;
+        lastHumidityUs_ = esp_timer_get_time();
+    }
+
+    return haveTemp;
+}
+
 void RoomTemperatureManager::Loop()
 {
-    TemperatureSensor &sensor = serviceProvider_.getBoard().GetTemperatureSensor();
-    HumiditySensor &humidity = serviceProvider_.getBoard().GetHumiditySensor();
-
     while (true)
     {
         float t = 0;
-        if (sensor.ReadTemperature(t))
-        {
-            LOCK(mutex_);
-            lastTemp_ = t;
-            lastReadUs_ = esp_timer_get_time();
-        }
-
-        // Humidity rides along on the same cadence deliberately: the AHT20 is a
-        // trigger-then-latch device with internal state, so it must have exactly
-        // one sampler. Consumers read the cached value instead of the sensor.
         float rh = 0;
-        if (humidity.ReadHumidity(rh))
-        {
-            LOCK(mutex_);
-            lastHumidity_ = rh;
-            lastHumidityUs_ = esp_timer_get_time();
-        }
+        SampleNow(t, rh);
 
         // Log valid<->invalid transitions once (edge-detected, like the OT
-        // manager's link logging). lastValid_/lastTemp_ race-free here: this
-        // task is the only writer.
-        float unused;
-        bool valid = GetRoomTemperature(unused);
+        // manager's link logging). lastValid_ is this task's own detector, but
+        // the cached reading is no longer ours alone — SampleNow can be called
+        // from elsewhere — so read it back through the accessor.
+        float latest = 0;
+        bool valid = GetRoomTemperature(latest);
         if (valid != lastValid_)
         {
-            if (valid) ESP_LOGI(TAG, "Room temp source restored (%.1f C)", lastTemp_);
+            if (valid) ESP_LOGI(TAG, "Room temp source restored (%.1f C)", latest);
             else       ESP_LOGW(TAG, "Room temp source lost (no valid sample for 30 s)");
             lastValid_ = valid;
         }

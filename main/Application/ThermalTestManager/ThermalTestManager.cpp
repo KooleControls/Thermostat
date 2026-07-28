@@ -2,12 +2,14 @@
 #include "CommandManager/CommandManager.h"
 #include "RoomTemperatureManager/RoomTemperatureManager.h"
 #include "OpenThermManager/OpenThermManager.h"
+#include "NetworkManager/NetworkManager.h"
 #include "SettingsManager/SettingsManager.h"
 #include "Board.h"
 #include "JsonScope.h"
 #include "JsonReader.h"
 #include "esp_log.h"
 #include "esp_pm.h"
+#include "esp_sleep.h"
 #include "esp_timer.h"
 #include <cstdio>
 #include <cstring>
@@ -29,13 +31,14 @@ void ThermalTestManager::Init()
     serviceProvider_.getCommandManager().Register(this, commands_);
     serviceProvider_.getSettingsManager().Register({
         &modeSetting_, &cycleSetting_, &cycleASetting_, &cycleBSetting_,
-        &dwellSetting_, &sampleSetting_,
+        &dwellSetting_, &sampleSetting_, &floorSetting_,
     });
 
-    // Restore the run configuration. Custom has no stored lever positions, so a
-    // reboot lands on Baseline rather than on something unreproducible.
+    // Only the four graded modes are restorable. Custom has no stored lever
+    // positions, and Floor must never re-arm itself on boot — a mode that takes
+    // the radio down is not something to wake up already committed to.
     auto restoreMode = [](uint32_t stored) {
-        return stored < static_cast<uint32_t>(ThermalMode::Custom)
+        return stored <= static_cast<uint32_t>(ThermalMode::LowPower)
                    ? static_cast<ThermalMode>(stored)
                    : ThermalMode::Baseline;
     };
@@ -44,10 +47,13 @@ void ThermalTestManager::Init()
     cycleB_ = restoreMode(cycleBSetting_.Get());
     dwellMin_ = dwellSetting_.Get();
     sampleSec_ = sampleSetting_.Get();
+    floorMin_ = floorSetting_.Get();
     if (dwellMin_ < MinDwellMin) dwellMin_ = MinDwellMin;
     if (dwellMin_ > MaxDwellMin) dwellMin_ = MaxDwellMin;
     if (sampleSec_ < MinSampleSec) sampleSec_ = MinSampleSec;
     if (sampleSec_ > MaxSampleSec) sampleSec_ = MaxSampleSec;
+    if (floorMin_ < MinFloorMin) floorMin_ = MinFloorMin;
+    if (floorMin_ > MaxFloorMin) floorMin_ = MaxFloorMin;
 
     // Does this build let us move the CPU clock at all? Pinning max == min at
     // the default frequency is a no-op on a PM-enabled build and tells us
@@ -85,6 +91,7 @@ const char *ThermalTestManager::ModeName(ThermalMode mode)
         case ThermalMode::DarkScreen: return "dark";
         case ThermalMode::PanelIdle:  return "panelidle";
         case ThermalMode::LowPower:   return "lowpower";
+        case ThermalMode::Floor:      return "floor";
         case ThermalMode::Custom:     return "custom";
     }
     return "baseline";
@@ -113,6 +120,7 @@ ThermalTestManager::Levers ThermalTestManager::LeversFor(ThermalMode mode)
         case ThermalMode::DarkScreen: return { 0,   0,          FullCpuMhz };
         case ThermalMode::PanelIdle:  return { 0,   IdlePclkHz, FullCpuMhz };
         case ThermalMode::LowPower:   return { 0,   IdlePclkHz, LowPowerCpuMhz };
+        case ThermalMode::Floor:      return { 0,   FloorPclkHz, LowPowerCpuMhz };
         case ThermalMode::Custom:     return { 0,   IdlePclkHz, FullCpuMhz };
     }
     return { 100, 0, FullCpuMhz };
@@ -175,6 +183,7 @@ void ThermalTestManager::PersistConfig()
     cycleBSetting_.Set(static_cast<uint32_t>(cycleB_));
     dwellSetting_.Set(dwellMin_);
     sampleSetting_.Set(sampleSec_);
+    floorSetting_.Set(floorMin_);
     serviceProvider_.getSettingsManager().Save();
 }
 
@@ -187,6 +196,18 @@ void ThermalTestManager::Loop()
     while (true)
     {
         int64_t now = esp_timer_get_time();
+
+        bool startFloor = false;
+        {
+            LOCK(mutex_);
+            startFloor = floorRequested_;
+            floorRequested_ = false;
+        }
+        if (startFloor)
+        {
+            RunFloor();
+            continue;   // the soak swallowed hours; re-read the clock
+        }
 
         {
             LOCK(mutex_);
@@ -206,14 +227,24 @@ void ThermalTestManager::Loop()
     }
 }
 
-void ThermalTestManager::TakeSample()
+void ThermalTestManager::TakeSample(bool direct)
 {
     // Read every source before taking the lock: these calls reach into other
     // managers and the I2C cache, and none of them needs our state.
     Sample s;
     s.uptimeS = static_cast<uint32_t>(esp_timer_get_time() / 1000000);
-    s.roomValid = serviceProvider_.getRoomTemperatureManager().GetRoomTemperature(s.room);
-    s.humidityValid = serviceProvider_.getRoomTemperatureManager().GetRoomHumidity(s.humidity);
+    if (direct)
+    {
+        // Sleep soak: the sampling task is the only thing running often enough
+        // to reach the sensor, and the cache would always look stale.
+        s.roomValid = serviceProvider_.getRoomTemperatureManager().SampleNow(s.room, s.humidity);
+        s.humidityValid = s.roomValid;
+    }
+    else
+    {
+        s.roomValid = serviceProvider_.getRoomTemperatureManager().GetRoomTemperature(s.room);
+        s.humidityValid = serviceProvider_.getRoomTemperatureManager().GetRoomHumidity(s.humidity);
+    }
     s.dieValid = serviceProvider_.getBoard().GetSocTemperature().ReadCelsius(s.die);
 
     {
@@ -252,6 +283,80 @@ void ThermalTestManager::LogSample(const Sample &s)
              (unsigned long)(serviceProvider_.getBoard().GetPanelPclk() / 1000),
              cpuMhzActual_, room, rh, die, (unsigned long)stateS,
              serviceProvider_.getOpenThermManager().GetState().linked ? 1 : 0);
+}
+
+void ThermalTestManager::RunFloor()
+{
+    uint32_t minutes;
+    uint32_t sampleSec;
+    {
+        LOCK(mutex_);
+        minutes = floorMin_;
+        sampleSec = sampleSec_;
+        mode_ = ThermalMode::Floor;
+        stateEnteredUs_ = esp_timer_get_time();
+    }
+
+    float room = 0, rh = 0, die = 0;
+    bool haveStart = serviceProvider_.getRoomTemperatureManager().GetRoomTemperature(room);
+    serviceProvider_.getBoard().GetSocTemperature().ReadCelsius(die);
+
+    ESP_LOGW(TAG, "FLOOR start: %lu min, sampling every %lu s. Radio off, panel in "
+                  "reset, CPU duty-cycled. Room %.2f C, die %.1f C at entry.",
+             (unsigned long)minutes, (unsigned long)sampleSec,
+             haveStart ? room : 0.0f, die);
+    ESP_LOGW(TAG, "FLOOR: the display will NOT come back without a reboot, and the "
+                  "OpenTherm master stops being serviced for the duration.");
+
+    Board &board = serviceProvider_.getBoard();
+    board.SetBacklightPercent(0);
+    board.SetPanelPclk(FloorPclkHz);
+    board.HoldPanelInReset();
+    SetCpuMhz(LowPowerCpuMhz);
+
+    // Last thing before going dark: everything above still needed a working log
+    // path, and this takes the network away.
+    serviceProvider_.getNetworkManager().StopRadio();
+
+    int64_t endUs = esp_timer_get_time() + (int64_t)minutes * 60 * 1000000LL;
+    uint32_t slept = 0;
+    uint32_t rejected = 0;
+    while (esp_timer_get_time() < endUs)
+    {
+        esp_sleep_enable_timer_wakeup((uint64_t)sampleSec * 1000000ULL);
+        esp_err_t err = esp_light_sleep_start();
+        if (err == ESP_OK)
+        {
+            slept++;
+        }
+        else
+        {
+            // A rejected sleep still has to pass the time, or this becomes a
+            // busy loop that heats the very thing we are measuring.
+            rejected++;
+            vTaskDelay(pdMS_TO_TICKS(sampleSec * 1000));
+        }
+        TakeSample(true);
+    }
+
+    serviceProvider_.getNetworkManager().RestartRadio();
+    SetCpuMhz(FullCpuMhz);
+
+    bool haveEnd = serviceProvider_.getRoomTemperatureManager().SampleNow(room, rh);
+    serviceProvider_.getBoard().GetSocTemperature().ReadCelsius(die);
+    ESP_LOGW(TAG, "FLOOR done after %lu min (%lu sleeps, %lu rejected). "
+                  "Room %.2f C, RH %.1f %%, die %.1f C. Radio back; reboot for the display.",
+             (unsigned long)minutes, (unsigned long)slept, (unsigned long)rejected,
+             haveEnd ? room : 0.0f, rh, die);
+
+    // Land somewhere honest: the panel is dead, so Dark is what the hardware is
+    // actually doing, and a persisted Floor must never re-arm itself on boot.
+    {
+        LOCK(mutex_);
+        mode_ = ThermalMode::DarkScreen;
+        stateEnteredUs_ = esp_timer_get_time();
+    }
+    PersistConfig();
 }
 
 bool ThermalTestManager::DeltaOver(uint32_t windowS, float Sample::*value,
@@ -301,6 +406,8 @@ void ThermalTestManager::WriteStatus(Stream &out)
     resp.field("cycleB", ModeName(cycleB_));
     resp.field("dwellMin", static_cast<uint32_t>(dwellMin_));
     resp.field("sampleSec", static_cast<uint32_t>(sampleSec_));
+    resp.field("floorMin", static_cast<uint32_t>(floorMin_));
+    resp.field("panelDead", serviceProvider_.getBoard().IsPanelInReset());
     resp.field("secondsInState",
                static_cast<uint32_t>((esp_timer_get_time() - stateEnteredUs_) / 1000000));
 
@@ -356,6 +463,7 @@ void ThermalTestManager::Cmd_ThermalSet(Stream &in, Stream &out)
     int32_t cycle = json.GetInt("cycle", -1);
     int32_t dwell = json.GetInt("dwellMin", -1);
     int32_t sample = json.GetInt("sampleSec", -1);
+    int32_t floorMin = json.GetInt("floorMin", -1);
 
     // Individual lever fields are the escape hatch; using any of them puts the
     // rig in Custom, because the state no longer matches a named mode.
@@ -373,6 +481,8 @@ void ThermalTestManager::Cmd_ThermalSet(Stream &in, Stream &out)
             dwellMin_ = static_cast<uint32_t>(dwell);
         if (sample >= (int32_t)MinSampleSec && sample <= (int32_t)MaxSampleSec)
             sampleSec_ = static_cast<uint32_t>(sample);
+        if (floorMin >= (int32_t)MinFloorMin && floorMin <= (int32_t)MaxFloorMin)
+            floorMin_ = static_cast<uint32_t>(floorMin);
 
         if (cycle >= 0)
         {
@@ -386,7 +496,16 @@ void ThermalTestManager::Cmd_ThermalSet(Stream &in, Stream &out)
             }
         }
 
-        if (haveMode)
+        if (haveMode && parsed == ThermalMode::Floor)
+        {
+            // Handed to the task rather than done here: the soak stops the radio,
+            // so this reply has to be on the wire first.
+            floorRequested_ = true;
+            cycle_ = false;
+            ESP_LOGW(TAG, "Floor run requested (%lu min) — the web UI will drop",
+                     (unsigned long)floorMin_);
+        }
+        else if (haveMode)
         {
             ApplyMode(parsed);
             // A hand-picked mode during a cycle would be rotated away at the

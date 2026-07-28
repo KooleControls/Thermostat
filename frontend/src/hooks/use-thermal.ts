@@ -60,6 +60,26 @@ export function useThermal() {
     (backlight: number) => apply({ backlight }, "Brightness change"),
     [apply],
   )
+  const setFloorMin = useCallback(
+    (floorMin: number) => apply({ floorMin }, "Floor duration change"),
+    [apply],
+  )
+
+  // The device replies before it stops the radio, so this resolves and *then*
+  // the connection drops — expected, and worth saying out loud since the UI is
+  // about to look broken.
+  const startFloor = useCallback(() => {
+    backend
+      .setThermal({ mode: "floor" })
+      .then((s) => {
+        setStatus(s)
+        toast.info(
+          `Floor run started — the device goes off the air for ${s.floorMin} min, ` +
+            `then reconnects. The screen needs a reboot afterwards.`,
+        )
+      })
+      .catch((e: Error) => toast.error(`Floor run failed to start: ${e.message}`))
+  }, [])
 
   return {
     status,
@@ -70,5 +90,7 @@ export function useThermal() {
     setDwell,
     setSampleSec,
     setBacklight,
+    setFloorMin,
+    startFloor,
   }
 }

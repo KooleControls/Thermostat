@@ -28,20 +28,33 @@ Ranked by expected effect:
 | `dark` | backlight 0 % | expected to be most of the win |
 | `panelidle` | + pclk 1 MHz | cuts the DMA/PSRAM traffic scanning the framebuffer |
 | `lowpower` | + CPU 80 MHz | smallest lever; watch whether OT survives it |
+| `floor` | + radio off, panel in reset, CPU duty-cycled through light sleep | the physical floor; breaks the product on purpose |
 
-**Light sleep is not on the table.** The RGB panel needs a continuously
-scanning DMA, the OT master needs its UART timing, and the unit must stay
-reachable over WiFi — so `CONFIG_FREERTOS_USE_TICKLESS_IDLE` stays off.
-`CONFIG_PM_ENABLE` is on solely so `esp_pm_configure` can pin the CPU clock; the
-rig always sets `max == min`, so DFS never runs either.
+**Light sleep is not shippable behaviour, but it is measurable.** As a *product*
+the ESP cannot sleep: the RGB panel needs a continuously scanning DMA, the OT
+master needs its UART timing, and the unit must stay reachable — which is why
+`CONFIG_FREERTOS_USE_TICKLESS_IDLE` stays off and `CONFIG_PM_ENABLE` is on solely
+so `esp_pm_configure` can pin the CPU clock. Floor mode sidesteps all of that by
+calling `esp_light_sleep_start()` explicitly in a loop, accepting every
+consequence: the RTOS tick stops advancing (so every other manager's timing comes
+loose from wall clock — `esp_timer` stays correct, which is what the samples use),
+OpenTherm goes unserviced, and the web UI is gone because the radio is stopped.
+It is time-boxed for exactly that reason: with the radio down, the only way out
+is the clock running out.
 
-**The panel cannot be switched off.** On this board the ST7701's 3-wire SPI
-lines are reused as the STM32 OpenTherm UART, and with no `disp_gpio` wired the
-esp_lcd_st7701 driver implements `esp_lcd_panel_disp_on_off()` by sending
-DISPOFF over exactly those pins — it would corrupt the OT link. Slowing the
-refresh clock is the available proxy. Caveat: a large pclk change can leave the
-panel out of sync until a reboot; harmless while the backlight is off, but it is
-why `panelidle`/`lowpower` are manual choices rather than the default cycle.
+**The panel can only be silenced, not powered down.** On this board the ST7701's
+3-wire SPI lines are reused as the STM32 OpenTherm UART, and with no `disp_gpio`
+wired the esp_lcd_st7701 driver implements `esp_lcd_panel_disp_on_off()` by
+sending DISPOFF over exactly those pins — it would corrupt the OT link. So:
+`panelidle` slows the refresh clock (proportionally less DMA/PSRAM traffic), and
+`floor` additionally holds the ST7701 in **hardware reset** via GPIO43, which
+stops its internal drivers. There is no panel power-enable line to pull.
+
+Two one-way doors to know about: a large pclk change can leave the panel out of
+sync until a reboot, and the reset hold is unrecoverable without one (re-init
+needs the SPI pins we no longer have). Both are invisible with the backlight off,
+and both are why `panelidle`/`lowpower`/`floor` are deliberate choices rather
+than part of the default cycle.
 
 ## Protocol
 
@@ -65,6 +78,25 @@ Optional, and worth doing once the dim state is characterised: the logger's
 `--wake-every 15 --wake-for 30` pulses the backlight briefly. If a 30 s
 interaction barely moves the settled reading, calibrating for the dimmed state
 is sound.
+
+## The floor run — ask this first
+
+Before pricing individual levers, establish whether the sensor position can work
+*at all*. Thermal page → **Floor**, 30–60 min, Start. The unit goes off the air,
+holds the panel in reset, and duty-cycles the CPU through light sleep; WiFi comes
+back on its own when the timer expires and the whole soak is in the sample
+buffer (the display needs a reboot). Compare the settled floor reading against
+the reference sensor:
+
+- **Floor lands within a few tenths of the reference** → the sensor position is
+  fine and everything above is a straightforward power-reduction exercise.
+- **Floor is still 2 °C+ high** → no amount of dimming or sleeping will fix it,
+  because that residual is the enclosure and the sensor's placement in it. Stop
+  optimising firmware and move the sensor (vented, thermally decoupled, or
+  external).
+
+That second outcome is the one worth knowing early — it invalidates the whole
+graded-mode exercise, and it is cheap to test.
 
 ## Decision rule
 

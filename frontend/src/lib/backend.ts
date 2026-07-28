@@ -514,6 +514,7 @@ class BackendService {
     cycleB?: ThermalModeName
     dwellMin?: number
     sampleSec?: number
+    floorMin?: number
     backlight?: number
     pclkHz?: number
     cpuMhz?: number
@@ -750,7 +751,13 @@ export interface HotWaterStatus {
   dhwPresent: boolean
 }
 
-export type ThermalModeName = "baseline" | "dark" | "panelidle" | "lowpower" | "custom"
+export type ThermalModeName =
+  | "baseline"
+  | "dark"
+  | "panelidle"
+  | "lowpower"
+  | "floor"
+  | "custom"
 
 export interface ThermalStatus {
   mode: ThermalModeName
@@ -765,6 +772,9 @@ export interface ThermalStatus {
   cycleB: ThermalModeName
   dwellMin: number
   sampleSec: number
+  floorMin: number
+  /** True once the panel has been held in reset — only a reboot brings it back. */
+  panelDead: boolean
   secondsInState: number
   room: number
   roomValid: boolean
