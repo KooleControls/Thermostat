@@ -42,11 +42,23 @@ public:
     /// at the unit's own touchscreen, where that is exactly the intent.
     void ConnectToStation(const char* ssid, const char* password);
 
+    /// Host the fallback AP on request instead of waiting for the STA attempts
+    /// to fail. For someone standing at the unit: it is the way to reach the web
+    /// UI when the house network is unusable, or before any credentials exist.
+    /// Sticky — nothing retries the configured SSID afterwards until a network
+    /// is picked again or the unit reboots.
+    void StartAccessPoint();
+
     bool IsStaConnected() const { return staConnected_; }
     bool IsStaConnecting() const { return staConnecting_; }
 
     /// The SSID we are on, or trying — empty when none is configured.
     void GetStaSsid(char* out, size_t maxLen) const;
+
+    /// The SSID the fallback AP hosts, and whether it is open (no passphrase) —
+    /// the on-screen UI has to tell the user what to join.
+    void GetApSsid(char* out, size_t maxLen) const;
+    static bool IsApOpen() { return DefaultApPassword[0] == '\0'; }
 
 private:
     ServiceProvider& serviceProvider_;

@@ -158,9 +158,27 @@ void NetworkManager::ConnectToStation(const char* ssid, const char* password)
     AttemptStaConnect();
 }
 
+void NetworkManager::StartAccessPoint()
+{
+    if (wifi_interface_.IsAP())
+    {
+        ESP_LOGI(TAG, "Already hosting the AP — nothing to do");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Hosting the AP on request (drops the STA link)");
+    staRetryCount_ = 0;   // a later ConnectToStation starts from a clean slate
+    FallbackToAP();
+}
+
 void NetworkManager::GetStaSsid(char* out, size_t maxLen) const
 {
     snprintf(out, maxLen, "%s", staSsid_);
+}
+
+void NetworkManager::GetApSsid(char* out, size_t maxLen) const
+{
+    snprintf(out, maxLen, "%s", DefaultApSsid);
 }
 
 void NetworkManager::AttemptStaConnect()
