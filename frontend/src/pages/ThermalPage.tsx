@@ -1,6 +1,7 @@
-import type { ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { FlameIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import {
   AlertDialog,
@@ -35,8 +36,6 @@ const PS_MODES: Array<{ key: WifiPowerSave; label: string }> = [
   { key: "min", label: "Min modem" },
   { key: "max", label: "Max modem" },
 ]
-
-const BRIGHTNESS_STEPS = [0, 25, 50, 100]
 
 const duration = (seconds: number) => {
   const h = Math.floor(seconds / 3600)
@@ -236,22 +235,74 @@ export default function ThermalPage() {
       </Card>
 
       <Card title="Brightness">
-        <div className="col-span-2 flex flex-wrap gap-2">
-          {BRIGHTNESS_STEPS.map((p) => (
-            <Button
-              key={p}
-              variant={status.backlight === p ? "default" : "outline"}
-              className="flex-1"
-              onClick={() => setBacklight(p)}
-            >
-              {p}%
-            </Button>
-          ))}
+        <div className="col-span-2">
+          <BrightnessInput value={status.backlight} onCommit={setBacklight} />
         </div>
         <p className="col-span-2 mt-3 text-xs text-muted-foreground">
-          For finding the dimmest setting that is still readable on a wall.
+          Any duty from 0 to 100 %. Kept across a reboot, so a long run does not
+          silently return to full brightness — the console says which value was
+          restored.
         </p>
       </Card>
+    </div>
+  )
+}
+
+// Free entry rather than fixed steps: the test needs whatever duty the last run
+// suggested (30 %, then wherever the knee turns out to be), not a menu. Committed
+// on Enter or the button — every commit is a device round trip that writes NVS.
+function BrightnessInput({
+  value,
+  onCommit,
+}: {
+  value: number
+  onCommit: (v: number) => void
+}) {
+  const [draft, setDraft] = useState(String(value))
+
+  // Follow the device unless the field is mid-edit, so polling can't overwrite
+  // what is being typed.
+  const [editing, setEditing] = useState(false)
+  useEffect(() => {
+    if (!editing) setDraft(String(value))
+  }, [value, editing])
+
+  const commit = () => {
+    setEditing(false)
+    const parsed = Number(draft)
+    if (!Number.isFinite(parsed)) {
+      setDraft(String(value))
+      return
+    }
+    const clamped = Math.min(100, Math.max(0, Math.round(parsed)))
+    setDraft(String(clamped))
+    if (clamped !== value) onCommit(clamped)
+  }
+
+  return (
+    <div className="flex items-end gap-3">
+      <label className="block">
+        <span className="text-xs text-muted-foreground">Duty (%)</span>
+        <Input
+          className="mt-1 h-10 w-28 font-mono"
+          inputMode="numeric"
+          value={draft}
+          onChange={(e) => {
+            setEditing(true)
+            setDraft(e.target.value)
+          }}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit()
+          }}
+        />
+      </label>
+      <Button className="h-10" onClick={commit}>
+        Apply
+      </Button>
+      <span className="pb-2 text-sm text-muted-foreground">
+        now {value}%
+      </span>
     </div>
   )
 }

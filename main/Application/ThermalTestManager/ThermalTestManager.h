@@ -5,6 +5,7 @@
 #include "Mutex.h"
 #include "Task.h"
 #include "CommandManager/CommandEntry.h"
+#include "TypedSettings.h"
 #include <cstdint>
 
 // ──────────────────────────────────────────────────────────────
@@ -40,8 +41,11 @@
 // only as part of the panel ladder: the board vendor's point is that the SoC
 // contributes as well, and attributing that needs each lever moved by itself.
 //
-// Nothing is persisted: a reboot lands in Baseline with a lit screen, which is
-// both the safe state and an obvious step in the gateway's log.
+// Only the brightness is persisted, and only because a multi-hour comparison run
+// must survive a reboot: coming back at 100 % would quietly ruin the run, and the
+// gateway's log cannot tell a reboot from a real temperature rise. The boot log
+// says which value was restored, so a restart is still visible on the console.
+// Everything else lands in Baseline on boot.
 // ──────────────────────────────────────────────────────────────
 
 enum class ThermalMode : uint8_t
@@ -103,6 +107,10 @@ private:
         { "thermalStatus", &InvokeCommand<&ThermalTestManager::Cmd_ThermalStatus> },
         { "thermalSet",    &InvokeCommand<&ThermalTestManager::Cmd_ThermalSet> },
     };
+
+    // The one persisted value — see the note at the top of this file. 100 % is
+    // the default, so a fresh unit behaves exactly as it always did.
+    inline static UInt32Setting backlightSetting_{ "thermal.bl", "Backlight (%)", 100 };
 
     ServiceProvider &serviceProvider_;
     InitState initState_;

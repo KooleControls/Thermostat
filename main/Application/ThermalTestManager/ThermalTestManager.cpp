@@ -3,6 +3,7 @@
 #include "RoomTemperatureManager/RoomTemperatureManager.h"
 #include "OpenThermManager/OpenThermManager.h"
 #include "NetworkManager/NetworkManager.h"
+#include "SettingsManager/SettingsManager.h"
 #include "Board.h"
 #include "JsonScope.h"
 #include "JsonReader.h"
@@ -36,7 +37,24 @@ void ThermalTestManager::Init()
     if (!cpuControl_)
         ESP_LOGW(TAG, "CPU frequency lever unavailable (build has no CONFIG_PM_ENABLE)");
 
+    serviceProvider_.getSettingsManager().Register({ &backlightSetting_ });
+
     ApplyMode(ThermalMode::Baseline);
+
+    // Restore a dimmed backlight from a run in progress. Said loudly, because
+    // a unit that comes up dark should never look like a fault.
+    uint32_t storedBacklight = backlightSetting_.Get();
+    if (storedBacklight > 100) storedBacklight = 100;
+    if (storedBacklight != 100)
+    {
+        Levers levers = levers_;
+        levers.backlight = static_cast<uint8_t>(storedBacklight);
+        mode_ = ThermalMode::Custom;
+        ApplyLevers(levers);
+        ESP_LOGW(TAG, "Restored backlight %lu%% from a run in progress (a reboot "
+                      "happened — the gateway's log cannot show that on its own)",
+                 (unsigned long)storedBacklight);
+    }
 
     // One stable header so a console capture is a complete CSV file. The real
     // record is the gateway's log; this is for sanity-checking on the bench.
@@ -250,6 +268,10 @@ void ThermalTestManager::Cmd_ThermalSet(Stream &in, Stream &out)
     char        psName[8] = {};
     bool        havePs = json.GetString("wifiPs", psName, sizeof(psName));
 
+    // -1 = leave the stored brightness alone; anything else is written to NVS
+    // after the lock is released.
+    int32_t     persistBacklight = -1;
+
     // The two ESP-side levers are independent of the panel ladder: the vendor
     // points out the SoC heats too, and attributing that needs the CPU clock and
     // the radio movable without also killing the display.
@@ -287,6 +309,9 @@ void ThermalTestManager::Cmd_ThermalSet(Stream &in, Stream &out)
         if (haveMode)
         {
             ApplyMode(parsed);
+            // A mode picks a brightness too, so it is equally something a long
+            // run should not lose to a reboot.
+            persistBacklight = levers_.backlight;
         }
         else if (backlight >= 0)
         {
@@ -297,7 +322,16 @@ void ThermalTestManager::Cmd_ThermalSet(Stream &in, Stream &out)
             ApplyLevers(levers);
             stateEnteredUs_ = esp_timer_get_time();
             ESP_LOGI(TAG, "MODE custom (backlight %u%%)", levers_.backlight);
+            persistBacklight = levers_.backlight;
         }
+    }
+
+    // Outside the lock: an NVS commit is slow, and it is the sampling task that
+    // would be kept waiting.
+    if (persistBacklight >= 0)
+    {
+        backlightSetting_.Set(static_cast<uint32_t>(persistBacklight));
+        serviceProvider_.getSettingsManager().Save();
     }
 
     WriteStatus(out);
