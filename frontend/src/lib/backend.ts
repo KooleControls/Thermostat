@@ -510,6 +510,8 @@ class BackendService {
     mode?: ThermalModeName
     backlight?: number
     cpuMhz?: 80 | 160 | 240
+    /** Modem sleep: keeps the connection, costs round-trip latency. Reversible. */
+    wifiPs?: WifiPowerSave
     /** One-way: the reply arrives, then WiFi stops. Reboot to get it back. */
     stopRadio?: boolean
   }): Promise<ThermalStatus> {
@@ -739,6 +741,10 @@ export interface HotWaterStatus {
   dhwPresent: boolean
 }
 
+/** "none" keeps the receiver awake permanently; "min" parks it between beacons,
+ *  "max" for several beacons. All three keep the association. */
+export type WifiPowerSave = "none" | "min" | "max"
+
 export type ThermalModeName =
   | "baseline"
   | "dark"
@@ -757,6 +763,7 @@ export interface ThermalStatus {
   panelDead: boolean
   /** True once WiFi has been stopped — likewise reboot-only. */
   radioStopped: boolean
+  wifiPs: WifiPowerSave
   secondsInState: number
   room: number
   roomValid: boolean

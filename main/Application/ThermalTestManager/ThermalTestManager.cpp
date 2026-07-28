@@ -214,6 +214,12 @@ void ThermalTestManager::WriteStatus(Stream &out)
     resp.field("cpuControl", cpuControl_);
     resp.field("panelDead", serviceProvider_.getBoard().IsPanelInReset());
     resp.field("radioStopped", serviceProvider_.getNetworkManager().IsRadioStopped());
+    switch (serviceProvider_.getNetworkManager().GetPowerSave())
+    {
+        case WIFI_PS_MIN_MODEM: resp.field("wifiPs", "min"); break;
+        case WIFI_PS_MAX_MODEM: resp.field("wifiPs", "max"); break;
+        default:                resp.field("wifiPs", "none"); break;
+    }
     resp.field("secondsInState",
                static_cast<uint32_t>((esp_timer_get_time() - stateEnteredUs_) / 1000000));
 
@@ -241,6 +247,8 @@ void ThermalTestManager::Cmd_ThermalSet(Stream &in, Stream &out)
     int32_t     backlight = json.GetInt("backlight", -1);
     int32_t     cpuMhz = json.GetInt("cpuMhz", 0);
     bool        stopRadio = json.GetBool("stopRadio", false);
+    char        psName[8] = {};
+    bool        havePs = json.GetString("wifiPs", psName, sizeof(psName));
 
     // The two ESP-side levers are independent of the panel ladder: the vendor
     // points out the SoC heats too, and attributing that needs the CPU clock and
@@ -254,6 +262,15 @@ void ThermalTestManager::Cmd_ThermalSet(Stream &in, Stream &out)
         ApplyLevers(levers);
         stateEnteredUs_ = esp_timer_get_time();
         ESP_LOGI(TAG, "MODE custom (cpu %d MHz)", cpuMhzActual_);
+    }
+    else if (havePs)
+    {
+        // Modem sleep keeps the association, so unlike stopping the radio this
+        // one is fully reversible from here — the page just gets slower.
+        wifi_ps_type_t mode = WIFI_PS_NONE;
+        if (std::strcmp(psName, "min") == 0) mode = WIFI_PS_MIN_MODEM;
+        else if (std::strcmp(psName, "max") == 0) mode = WIFI_PS_MAX_MODEM;
+        serviceProvider_.getNetworkManager().SetPowerSave(mode);
     }
     else if (stopRadio)
     {

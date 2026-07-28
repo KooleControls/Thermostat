@@ -53,13 +53,28 @@ void WiFiInterface::ConnectSta(const char* ssid, const char* password)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    // Modem sleep (the WIFI_PS_MIN_MODEM default) parks the radio between beacons,
-    // so every request/response waits for the next one — ~100 ms per round trip.
-    // This unit is mains-powered and the gateway talks to it over short synchronous
-    // exchanges, so latency is worth more than the milliamps.
-    esp_wifi_set_ps(WIFI_PS_NONE);
+    // Re-applied on every (re)connect, because esp_wifi_start resets it. The
+    // default is WIFI_PS_NONE: modem sleep parks the radio between beacons, so
+    // every request/response waits for the next one — ~100 ms per round trip —
+    // and this unit is mains-powered, so latency is worth more than the
+    // milliamps. It is a lever rather than a constant because the radio being
+    // awake continuously also heats the board (see ThermalTestManager).
+    ESP_ERROR_CHECK(esp_wifi_set_ps(powerSave_));
 
     esp_wifi_connect();
+}
+
+void WiFiInterface::SetPowerSave(wifi_ps_type_t mode)
+{
+    powerSave_ = mode;
+
+    // Fails harmlessly when WiFi is not started yet; ConnectSta re-applies it.
+    esp_err_t err = esp_wifi_set_ps(mode);
+    if (err != ESP_OK)
+        ESP_LOGW(TAG, "esp_wifi_set_ps(%d) failed: %s", (int)mode, esp_err_to_name(err));
+    else
+        ESP_LOGI(TAG, "WiFi power save = %s",
+                 mode == WIFI_PS_NONE ? "none" : (mode == WIFI_PS_MIN_MODEM ? "min modem" : "max modem"));
 }
 
 void WiFiInterface::StartAP(const char* ssid, const char* password, uint8_t channel, uint8_t maxConnections)

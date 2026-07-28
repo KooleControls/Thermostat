@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { StateBadge } from "@/components/StateBadge"
 import { useThermal } from "@/hooks/use-thermal"
-import type { ThermalModeName } from "@/lib/backend"
+import type { ThermalModeName, WifiPowerSave } from "@/lib/backend"
 
 // Power states, coarsest lever first. Everything here keeps OpenTherm alive, so
 // the gateway keeps logging room temperature throughout — that log is the
@@ -28,6 +28,14 @@ const MODES: Array<{ key: ThermalModeName; label: string; detail: string }> = [
   { key: "paneloff", label: "Panel off", detail: "Backlight off, panel held in reset, CPU at 80 MHz" },
 ]
 
+// Modem sleep depth. "none" is the shipped default (lowest latency, receiver
+// always awake); the other two park it between beacons and keep the association.
+const PS_MODES: Array<{ key: WifiPowerSave; label: string }> = [
+  { key: "none", label: "No sleep" },
+  { key: "min", label: "Min modem" },
+  { key: "max", label: "Max modem" },
+]
+
 const BRIGHTNESS_STEPS = [0, 25, 50, 100]
 
 const duration = (seconds: number) => {
@@ -37,7 +45,8 @@ const duration = (seconds: number) => {
 }
 
 export default function ThermalPage() {
-  const { status, setMode, setBacklight, setCpuMhz, stopRadio } = useThermal()
+  const { status, setMode, setBacklight, setCpuMhz, setWifiPs, stopRadio } =
+    useThermal()
 
   if (!status) {
     return (
@@ -122,6 +131,9 @@ export default function ThermalPage() {
           <Badge variant="secondary">
             CPU {status.cpuMhz} MHz{status.cpuControl ? "" : " (fixed)"}
           </Badge>
+          <Badge variant="secondary">
+            WiFi {status.radioStopped ? "off" : `PS ${status.wifiPs}`}
+          </Badge>
           <Badge variant="secondary">In state {duration(status.secondsInState)}</Badge>
         </div>
       </Card>
@@ -163,13 +175,33 @@ export default function ThermalPage() {
           </div>
         </div>
 
+        <div className="col-span-2 mt-4">
+          <span className="text-xs text-muted-foreground">
+            WiFi power save — all three keep the connection, so these are
+            reversible; deeper sleep costs round-trip latency
+          </span>
+          <div className="mt-1 flex gap-2">
+            {PS_MODES.map((ps) => (
+              <Button
+                key={ps.key}
+                variant={status.wifiPs === ps.key ? "default" : "outline"}
+                className="flex-1"
+                disabled={status.radioStopped}
+                onClick={() => setWifiPs(ps.key)}
+              >
+                {ps.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+
         <div className="col-span-2 mt-4 flex items-center justify-between">
           <div className="pr-4">
-            <div className="font-medium text-foreground">WiFi radio</div>
+            <div className="font-medium text-foreground">Stop the radio entirely</div>
             <div className="text-xs text-muted-foreground">
-              The receiver is awake continuously (power save is off for latency),
-              so it draws the whole time. Stopping it is reboot-only: with the
-              radio down there is nothing left to ask.
+              The floor for the radio, and the only one that is not reversible:
+              with WiFi down there is nothing left to ask, so it takes a reboot.
+              OpenTherm and the display keep working.
             </div>
           </div>
           {status.radioStopped ? (

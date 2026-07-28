@@ -57,6 +57,13 @@ public:
 
     bool IsRadioStopped() const { return radioStopped_; }
 
+    /// Modem sleep, the middle ground between a permanently awake receiver and
+    /// no radio at all: the connection survives, round trips get slower. Kept
+    /// here rather than in a setting because for now it is something a test
+    /// drives (see ThermalTestManager), not something a product configures.
+    void SetPowerSave(wifi_ps_type_t mode) { wifi_interface_.SetPowerSave(mode); }
+    wifi_ps_type_t GetPowerSave() const { return wifi_interface_.GetPowerSave(); }
+
     bool IsStaConnected() const { return staConnected_; }
     bool IsStaConnecting() const { return staConnecting_; }
 

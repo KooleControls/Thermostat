@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { backend, type ThermalStatus, type ThermalModeName } from "@/lib/backend"
+import {
+  backend,
+  type ThermalStatus,
+  type ThermalModeName,
+  type WifiPowerSave,
+} from "@/lib/backend"
 import { useConnectionStatus } from "@/hooks/use-connection-status"
 
 const POLL_MS = 5000
@@ -46,6 +51,13 @@ export function useThermal() {
       .catch((e: Error) => toast.error(`CPU clock change failed: ${e.message}`))
   }, [])
 
+  const setWifiPs = useCallback((wifiPs: WifiPowerSave) => {
+    backend
+      .setThermal({ wifiPs })
+      .then(setStatus)
+      .catch((e: Error) => toast.error(`Power save change failed: ${e.message}`))
+  }, [])
+
   // The device replies first and stops WiFi a moment later, so this resolves and
   // *then* the connection dies. Expected, and worth saying out loud.
   const stopRadio = useCallback(() => {
@@ -64,5 +76,5 @@ export function useThermal() {
       )
   }, [])
 
-  return { status, refresh, setMode, setBacklight, setCpuMhz, stopRadio }
+  return { status, refresh, setMode, setBacklight, setCpuMhz, setWifiPs, stopRadio }
 }
