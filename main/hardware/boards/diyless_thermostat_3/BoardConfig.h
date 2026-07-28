@@ -58,10 +58,12 @@ namespace BoardConfig
     static constexpr int LCD_PIN_RESET     = 43;
     static constexpr int LCD_PIN_BACKLIGHT = 46;   // active-high, driven by LEDC
 
-    // Backlight PWM. 20 kHz is above hearing, so a whining inductor in the LED
-    // boost path stays inaudible; 10-bit duty is finer than the eye or our
-    // thermal measurements can resolve.
-    static constexpr int LCD_BACKLIGHT_PWM_HZ = 20000;
+    // Backlight PWM. 1 kHz because that is what the board's own vendor config
+    // uses (DIYLESS's ESPHome yaml declares a bare `platform: ledc`, whose
+    // default is 1 kHz) and it demonstrably dims this hardware. Do not raise it:
+    // at 20 kHz the LED driver switched off entirely below full duty instead of
+    // dimming — its enable input cannot follow that fast.
+    static constexpr int LCD_BACKLIGHT_PWM_HZ = 1000;
 
     // 3-wire SPI used only for the ST7701 init sequence (all direct GPIO).
     static constexpr int LCD_SPI_CS  = 1;
