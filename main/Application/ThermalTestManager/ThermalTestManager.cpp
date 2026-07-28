@@ -123,6 +123,8 @@ void ThermalTestManager::ApplyMode(ThermalMode mode)
     ThermalMode previous = mode_;
     mode_ = mode;
     ApplyLevers(LeversFor(mode));
+    // A new thermal state always starts its settle clock, cycling or not.
+    stateEnteredUs_ = esp_timer_get_time();
 
     ESP_LOGI(TAG, "MODE %s -> %s (backlight %u%%, pclk %lu kHz, cpu %d MHz)",
              ModeName(previous), ModeName(mode_), levers_.backlight,
@@ -139,7 +141,11 @@ void ThermalTestManager::ApplyLevers(const Levers &levers)
     SetCpuMhz(levers.cpuMhz);
 
     levers_ = levers;
-    stateEnteredUs_ = esp_timer_get_time();
+
+    // The dwell clock only restarts when nothing is cycling. Otherwise a lever
+    // nudged every quarter of an hour would keep pushing the rotation out and
+    // the cycle would never advance.
+    if (!cycle_) stateEnteredUs_ = esp_timer_get_time();
 }
 
 bool ThermalTestManager::SetCpuMhz(int mhz)
@@ -394,8 +400,11 @@ void ThermalTestManager::Cmd_ThermalSet(Stream &in, Stream &out)
             if (backlight >= 0) levers.backlight = static_cast<uint8_t>(backlight > 100 ? 100 : backlight);
             if (pclkHz > 0) levers.pclkHz = static_cast<uint32_t>(pclkHz);
             if (cpuMhz > 0) levers.cpuMhz = cpuMhz;
+            // Custom, but a running cycle keeps running: a lever nudged
+            // mid-run (a backlight wake pulse, say) must not silently end an
+            // overnight measurement. The next dwell rotation puts a named mode
+            // back. Only picking a mode by hand takes manual control.
             mode_ = ThermalMode::Custom;
-            cycle_ = false;
             ApplyLevers(levers);
             ESP_LOGI(TAG, "MODE custom (backlight %u%%, pclk %lu kHz, cpu %d MHz)",
                      levers_.backlight,
