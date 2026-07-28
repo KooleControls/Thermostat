@@ -16,6 +16,13 @@ CONFIG_SPIRAM_SPEED_80M=y
 # 240 MHz CPU.
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
+# Power management, for the runtime CPU-frequency lever in ThermalTestManager
+# (esp_pm_configure needs it; without it the lever reports itself unavailable).
+# Light sleep stays OFF: this board's RGB panel needs a continuously scanning
+# DMA and the OpenTherm master needs its UART timing, so tickless idle is not
+# an option here — DFS never runs either, since the rig pins max == min.
+CONFIG_PM_ENABLE=y
+
 # Console on USB-Serial/JTAG, NOT UART0. UART0's default pins are repurposed
 # on this board: GPIO43 is the LCD reset and GPIO44 the STM32 boot pin — a
 # UART0 console would bit-bang log traffic onto them.

@@ -56,7 +56,12 @@ namespace BoardConfig
 
     // ST7701 hardware reset and backlight are direct GPIOs (no IO expander).
     static constexpr int LCD_PIN_RESET     = 43;
-    static constexpr int LCD_PIN_BACKLIGHT = 46;   // active-high (LEDC on stock FW; on/off here)
+    static constexpr int LCD_PIN_BACKLIGHT = 46;   // active-high, driven by LEDC
+
+    // Backlight PWM. 20 kHz is above hearing, so a whining inductor in the LED
+    // boost path stays inaudible; 10-bit duty is finer than the eye or our
+    // thermal measurements can resolve.
+    static constexpr int LCD_BACKLIGHT_PWM_HZ = 20000;
 
     // 3-wire SPI used only for the ST7701 init sequence (all direct GPIO).
     static constexpr int LCD_SPI_CS  = 1;

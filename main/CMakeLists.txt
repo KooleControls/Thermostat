@@ -31,6 +31,7 @@ set(SOURCE_FILES_LIST
     "Application/SettingsManager/SettingsManager.cpp"
     "Application/SettingsManager/Setting.cpp"
     "Application/SystemManager/SystemManager.cpp"
+    "Application/ThermalTestManager/ThermalTestManager.cpp"
     "Application/ConsoleManager/ConsoleManager.cpp"
     "Application/TimeManager/TimeManager.cpp"
     "lib/system/DateTime.cpp"
@@ -51,6 +52,7 @@ set(INCLUDE_DIRS_LIST
     "Application/UpdateManager"
     "Application/SettingsManager"
     "Application/SystemManager"
+    "Application/ThermalTestManager"
     "Application/ConsoleManager"
     "Application/TimeManager"
     "hardware"
@@ -76,6 +78,9 @@ set(COMPONENT_REQUIRES
     fatfs
     wear_levelling
     esp_driver_gpio
+    esp_driver_ledc
+    esp_driver_tsens
+    esp_pm
     esp_driver_i2c
     esp_driver_uart
     mdns
