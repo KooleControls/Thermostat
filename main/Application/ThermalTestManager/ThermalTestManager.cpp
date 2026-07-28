@@ -39,7 +39,7 @@ void ThermalTestManager::Init()
 
     // One stable header so a console capture is a complete CSV file. The real
     // record is the gateway's log; this is for sanity-checking on the bench.
-    ESP_LOGI(TAG, "THERMAL,uptime_s,mode,backlight_pct,pclk_khz,cpu_mhz,room_c,rh_pct,die_c,ot_linked");
+    ESP_LOGI(TAG, "THERMAL,uptime_s,mode,backlight_pct,pclk_khz,cpu_mhz,room_c,rh_pct,ot_linked");
 
     task_.Init("thermal", 4, 4096);
     task_.SetHandler([this]() { Loop(); });
@@ -154,29 +154,28 @@ void ThermalTestManager::Loop()
 
 void ThermalTestManager::LogSample()
 {
-    float room = 0, rh = 0, die = 0;
+    // Die temperature is deliberately absent: it is a readout on the web UI and
+    // nothing more — not a data series, not an input to anything.
+    float room = 0, rh = 0;
     bool haveRoom = serviceProvider_.getRoomTemperatureManager().GetRoomTemperature(room);
     bool haveRh = serviceProvider_.getRoomTemperatureManager().GetRoomHumidity(rh);
-    bool haveDie = serviceProvider_.getBoard().GetSocTemperature().ReadCelsius(die);
 
     // Blank fields rather than sentinel values, so the line drops straight into
     // a spreadsheet next to the gateway's own log.
     char roomStr[12] = {};
     char rhStr[12] = {};
-    char dieStr[12] = {};
     if (haveRoom) snprintf(roomStr, sizeof(roomStr), "%.2f", room);
     if (haveRh)   snprintf(rhStr, sizeof(rhStr), "%.1f", rh);
-    if (haveDie)  snprintf(dieStr, sizeof(dieStr), "%.1f", die);
 
     ThermalMode mode;
     uint8_t backlight;
     { LOCK(mutex_); mode = mode_; backlight = levers_.backlight; }
 
-    ESP_LOGI(TAG, "THERMAL,%lu,%s,%u,%lu,%d,%s,%s,%s,%d",
+    ESP_LOGI(TAG, "THERMAL,%lu,%s,%u,%lu,%d,%s,%s,%d",
              (unsigned long)(esp_timer_get_time() / 1000000),
              ModeName(mode), backlight,
              (unsigned long)(serviceProvider_.getBoard().GetPanelPclk() / 1000),
-             cpuMhzActual_, roomStr, rhStr, dieStr,
+             cpuMhzActual_, roomStr, rhStr,
              serviceProvider_.getOpenThermManager().GetState().linked ? 1 : 0);
 }
 

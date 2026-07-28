@@ -134,8 +134,7 @@ export default function ThermalPage() {
         <Row label="Die temperature" value={status.dieValid ? `${status.die.toFixed(1)} °C` : "—"} />
         <p className="col-span-2 mt-1 text-xs text-muted-foreground">
           The room figure is what goes out over OpenTherm, so the gateway's log
-          is the record. Die temperature is here to show whether a mode actually
-          removed heat.
+          is the record. Die temperature is shown here and used for nothing else.
         </p>
       </Card>
 
