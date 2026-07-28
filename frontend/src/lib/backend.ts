@@ -509,6 +509,9 @@ class BackendService {
   async setThermal(params: {
     mode?: ThermalModeName
     backlight?: number
+    cpuMhz?: 80 | 160 | 240
+    /** One-way: the reply arrives, then WiFi stops. Reboot to get it back. */
+    stopRadio?: boolean
   }): Promise<ThermalStatus> {
     return this.send<ThermalStatus>("thermalSet", params)
   }
@@ -752,6 +755,8 @@ export interface ThermalStatus {
   cpuControl: boolean
   /** True once the panel has been held in reset — only a reboot brings it back. */
   panelDead: boolean
+  /** True once WiFi has been stopped — likewise reboot-only. */
+  radioStopped: boolean
   secondsInState: number
   room: number
   roomValid: boolean

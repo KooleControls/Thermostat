@@ -49,6 +49,14 @@ public:
     /// is picked again or the unit reboots.
     void StartAccessPoint();
 
+    /// Stop the radio outright — no STA, no AP, no retries. Costs the web UI but
+    /// not OpenTherm, which is what makes it measurable: the gateway keeps
+    /// logging while the WiFi power is gone. Only a reboot brings it back, since
+    /// with the radio down there is nothing left to ask.
+    void StopRadio();
+
+    bool IsRadioStopped() const { return radioStopped_; }
+
     bool IsStaConnected() const { return staConnected_; }
     bool IsStaConnecting() const { return staConnecting_; }
 
@@ -72,6 +80,7 @@ private:
     std::atomic<int> staRetryCount_{0};
     std::atomic<bool> staConnected_{false};
     std::atomic<bool> staConnecting_{false};
+    std::atomic<bool> radioStopped_{false};
 
     Timer connectTimer_;
 

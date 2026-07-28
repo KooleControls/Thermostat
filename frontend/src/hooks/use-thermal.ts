@@ -39,5 +39,30 @@ export function useThermal() {
       .catch((e: Error) => toast.error(`Brightness change failed: ${e.message}`))
   }, [])
 
-  return { status, refresh, setMode, setBacklight }
+  const setCpuMhz = useCallback((cpuMhz: 80 | 160 | 240) => {
+    backend
+      .setThermal({ cpuMhz })
+      .then(setStatus)
+      .catch((e: Error) => toast.error(`CPU clock change failed: ${e.message}`))
+  }, [])
+
+  // The device replies first and stops WiFi a moment later, so this resolves and
+  // *then* the connection dies. Expected, and worth saying out loud.
+  const stopRadio = useCallback(() => {
+    backend
+      .setThermal({ stopRadio: true })
+      .then((s) => {
+        setStatus(s)
+        toast.info(
+          "WiFi is stopping — this page will go dead. OpenTherm keeps running, " +
+            "so the gateway goes on logging. Reboot to get the web UI back.",
+        )
+      })
+      .catch(() =>
+        // The reply can lose the race with the teardown; the device still did it.
+        toast.info("WiFi stopped (no reply — the socket went with it)."),
+      )
+  }, [])
+
+  return { status, refresh, setMode, setBacklight, setCpuMhz, stopRadio }
 }

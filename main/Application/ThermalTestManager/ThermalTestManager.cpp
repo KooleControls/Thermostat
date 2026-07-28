@@ -2,6 +2,7 @@
 #include "CommandManager/CommandManager.h"
 #include "RoomTemperatureManager/RoomTemperatureManager.h"
 #include "OpenThermManager/OpenThermManager.h"
+#include "NetworkManager/NetworkManager.h"
 #include "Board.h"
 #include "JsonScope.h"
 #include "JsonReader.h"
@@ -145,10 +146,23 @@ bool ThermalTestManager::SetCpuMhz(int mhz)
 
 void ThermalTestManager::Loop()
 {
+    // Ticks once a second so a deferred radio stop happens promptly; the console
+    // trace is every SampleSec-th tick.
+    int tick = 0;
     while (true)
     {
-        LogSample();
-        vTaskDelay(pdMS_TO_TICKS(SampleSec * 1000));
+        bool stopRadio = false;
+        {
+            LOCK(mutex_);
+            stopRadio = stopRadioRequested_;
+            stopRadioRequested_ = false;
+        }
+        if (stopRadio) serviceProvider_.getNetworkManager().StopRadio();
+
+        if (tick % SampleSec == 0) LogSample();
+        tick++;
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
@@ -199,6 +213,7 @@ void ThermalTestManager::WriteStatus(Stream &out)
     resp.field("cpuMhz", static_cast<int32_t>(cpuMhzActual_));
     resp.field("cpuControl", cpuControl_);
     resp.field("panelDead", serviceProvider_.getBoard().IsPanelInReset());
+    resp.field("radioStopped", serviceProvider_.getNetworkManager().IsRadioStopped());
     resp.field("secondsInState",
                static_cast<uint32_t>((esp_timer_get_time() - stateEnteredUs_) / 1000000));
 
@@ -224,7 +239,32 @@ void ThermalTestManager::Cmd_ThermalSet(Stream &in, Stream &out)
     ThermalMode parsed = ThermalMode::Baseline;
     bool        haveMode = json.GetString("mode", name, sizeof(name)) && ParseMode(name, parsed);
     int32_t     backlight = json.GetInt("backlight", -1);
+    int32_t     cpuMhz = json.GetInt("cpuMhz", 0);
+    bool        stopRadio = json.GetBool("stopRadio", false);
 
+    // The two ESP-side levers are independent of the panel ladder: the vendor
+    // points out the SoC heats too, and attributing that needs the CPU clock and
+    // the radio movable without also killing the display.
+    if (cpuMhz == 80 || cpuMhz == 160 || cpuMhz == 240)
+    {
+        LOCK(mutex_);
+        Levers levers = levers_;
+        levers.cpuMhz = cpuMhz;
+        mode_ = ThermalMode::Custom;
+        ApplyLevers(levers);
+        stateEnteredUs_ = esp_timer_get_time();
+        ESP_LOGI(TAG, "MODE custom (cpu %d MHz)", cpuMhzActual_);
+    }
+    else if (stopRadio)
+    {
+        // Handed to the task rather than done here: stopping WiFi tears down the
+        // socket this reply has to travel over, so the request would look like a
+        // failure instead of a success.
+        LOCK(mutex_);
+        stopRadioRequested_ = true;
+        ESP_LOGW(TAG, "Radio stop requested from the web UI");
+    }
+    else
     {
         LOCK(mutex_);
         if (haveMode)

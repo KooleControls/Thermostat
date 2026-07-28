@@ -37,7 +37,7 @@ const duration = (seconds: number) => {
 }
 
 export default function ThermalPage() {
-  const { status, setMode, setBacklight } = useThermal()
+  const { status, setMode, setBacklight, setCpuMhz, stopRadio } = useThermal()
 
   if (!status) {
     return (
@@ -55,6 +55,7 @@ export default function ThermalPage() {
         <h1 className="text-2xl font-bold">Self-heating</h1>
         <div className="flex items-center gap-2">
           {status.panelDead && <Badge variant="destructive">Panel dead</Badge>}
+          {status.radioStopped && <Badge variant="destructive">WiFi off</Badge>}
           <StateBadge
             label="OT"
             on={status.otLinked}
@@ -136,6 +137,70 @@ export default function ThermalPage() {
           The room figure is what goes out over OpenTherm, so the gateway's log
           is the record. Die temperature is shown here and used for nothing else.
         </p>
+      </Card>
+
+      <Card title="ESP itself">
+        <p className="col-span-2 text-sm text-muted-foreground">
+          The SoC contributes too, so these move on their own rather than only as
+          part of the ladder above. Both keep OpenTherm running, so the gateway
+          keeps logging either way.
+        </p>
+
+        <div className="col-span-2 mt-3">
+          <span className="text-xs text-muted-foreground">CPU clock</span>
+          <div className="mt-1 flex gap-2">
+            {([240, 160, 80] as const).map((mhz) => (
+              <Button
+                key={mhz}
+                variant={status.cpuMhz === mhz ? "default" : "outline"}
+                className="flex-1"
+                disabled={!status.cpuControl}
+                onClick={() => setCpuMhz(mhz)}
+              >
+                {mhz} MHz
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div className="col-span-2 mt-4 flex items-center justify-between">
+          <div className="pr-4">
+            <div className="font-medium text-foreground">WiFi radio</div>
+            <div className="text-xs text-muted-foreground">
+              The receiver is awake continuously (power save is off for latency),
+              so it draws the whole time. Stopping it is reboot-only: with the
+              radio down there is nothing left to ask.
+            </div>
+          </div>
+          {status.radioStopped ? (
+            <Badge variant="destructive">Stopped</Badge>
+          ) : (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="shrink-0 text-destructive hover:text-destructive"
+                >
+                  Stop WiFi
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Stop the WiFi radio?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    You lose this page until the unit is rebooted. OpenTherm and
+                    the display keep working, so the gateway goes on logging room
+                    temperature throughout.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={stopRadio}>Stop WiFi</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+        </div>
       </Card>
 
       <Card title="Brightness">

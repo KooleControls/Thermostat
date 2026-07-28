@@ -17,9 +17,11 @@
 //
 // It records nothing, on purpose. The measurement is the gateway's own log: the
 // thermostat reports room temperature over OpenTherm, and a second gateway
-// running the old thermostat is the reference. Every mode here therefore keeps
-// the OT link alive — light sleep and stopping the radio would both take the
-// gateway's log down with them, so neither is offered.
+// running the old thermostat is the reference. Every lever here therefore keeps
+// the OT link alive — that is the instrument. Light sleep is the one thing
+// deliberately absent: it starves the OT task, so it would blind the gateway and
+// measure nothing. Stopping the WiFi radio is fine by that rule (it costs the
+// web UI, not OpenTherm) and is offered.
 //
 // Levers, coarsest first (see Board for the hardware detail):
 //   backlight   LEDC duty on the LED string (0 = off). Biggest contributor.
@@ -30,6 +32,13 @@
 //               the display back.
 //   cpu freq    esp_pm_configure with max == min; needs CONFIG_PM_ENABLE, and
 //               reports itself unavailable rather than failing without it.
+//   radio       WiFi stopped outright. Costs the web UI (reboot to get it back)
+//               but not OpenTherm, so the gateway keeps logging — which is what
+//               makes the SoC's own contribution measurable at all.
+//
+// The last two are the ESP's own heat, and are settable on their own rather than
+// only as part of the panel ladder: the board vendor's point is that the SoC
+// contributes as well, and attributing that needs each lever moved by itself.
 //
 // Nothing is persisted: a reboot lands in Baseline with a lit screen, which is
 // both the safe state and an obvious step in the gateway's log.
@@ -99,6 +108,10 @@ private:
     InitState initState_;
     mutable Mutex mutex_;
     Task task_;
+
+    // Set by the command, acted on by the task: stopping WiFi tears down the
+    // socket the reply travels over.
+    bool stopRadioRequested_ = false;
 
     ThermalMode mode_ = ThermalMode::Baseline;
     Levers      levers_{ 100, 0, FullCpuMhz, false };
