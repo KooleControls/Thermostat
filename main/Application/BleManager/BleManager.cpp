@@ -4,6 +4,8 @@
 #include "SettingsManager/SettingsManager.h"
 #include "JsonScope.h"
 #include "JsonReader.h"
+#include "JsonHelpers.h"
+#include "CommandManager/CommandManager.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 
@@ -76,6 +78,31 @@ void BleManager::Init()
     timerArgs.arg = this;
     timerArgs.name = "ble_reconnect";
     esp_timer_create(&timerArgs, &reconnectTimer_);
+
+    // Transport resources before the stack: the queue must exist before the first
+    // notification can arrive. Buffers go to PSRAM — internal DRAM is what the
+    // BLE controller and the dispatch task's stack need.
+    inQueue_ = xQueueCreate(kInQueueDepth, sizeof(BleChunk));
+    outFrame_ = static_cast<uint8_t*>(
+        heap_caps_malloc(session::HEADER_LEN + BleChunk::MaxLen, MALLOC_CAP_SPIRAM));
+    inFrame_ = static_cast<uint8_t*>(
+        heap_caps_malloc(session::HEADER_LEN + BleChunk::MaxLen, MALLOC_CAP_SPIRAM));
+
+    if (inQueue_ == nullptr || outFrame_ == nullptr || inFrame_ == nullptr)
+    {
+        ESP_LOGE(TAG, "Could not allocate the session transport; BLE stays down");
+        init.SetReady();
+        return;
+    }
+
+    dispatchTask_.Init("ble_dispatch", 5, kDispatchStack);
+    dispatchTask_.SetHandler([this] { DispatchLoop(); });
+    if (!dispatchTask_.Run())
+    {
+        ESP_LOGE(TAG, "Could not start the BLE dispatch task; BLE stays down");
+        init.SetReady();
+        return;
+    }
 
     StartStack();
 
@@ -662,14 +689,10 @@ int BleManager::OnGapEvent(struct ble_gap_event* event)
             return 0;
 
         case BLE_GAP_EVENT_NOTIFY_RX:
-        {
-            // The inbound half of the session transport plugs in here: this is
-            // where a chunk gets queued for the dispatch task.
-            uint16_t len = OS_MBUF_PKTLEN(event->notify_rx.om);
-            ESP_LOGI(TAG, "Notify on handle %u, %u bytes (transport not wired yet)",
-                     event->notify_rx.attr_handle, len);
+            // Runs on the NimBLE host task: copy the chunk out and return
+            // immediately. Everything slow happens on the dispatch task.
+            EnqueueChunk(event->notify_rx.om);
             return 0;
-        }
 
         case BLE_GAP_EVENT_REPEAT_PAIRING:
         {
@@ -889,9 +912,124 @@ int BleManager::OnSubscribed(const struct ble_gatt_error* error)
 
     // One session chunk = one GATT write, so the usable payload is the MTU less
     // the 3-byte ATT header and the 3-byte session header.
-    ESP_LOGI(TAG, "Link READY (mtu %u, chunk payload %d bytes)",
-             mtu, static_cast<int>(mtu) - 3 - 3);
+    size_t chunkPayload = (mtu > 6 ? mtu - 3 - 3 : 0);
+    if (chunkPayload > BleChunk::MaxLen - session::HEADER_LEN)
+        chunkPayload = BleChunk::MaxLen - session::HEADER_LEN;
+
+    {
+        LOCK(mutex_);
+        outPayloadCap_ = chunkPayload;
+    }
+
+    ESP_LOGI(TAG, "Link READY (mtu %u, chunk payload %u bytes)",
+             mtu, static_cast<unsigned>(chunkPayload));
     return 0;
+}
+
+// ──────────────────────────────────────────────────────────────
+// Session transport
+// ──────────────────────────────────────────────────────────────
+
+// NimBLE host task context: no blocking, no allocation, no dispatch.
+void BleManager::EnqueueChunk(const struct os_mbuf* om)
+{
+    if (inQueue_ == nullptr) return;
+
+    BleChunk chunk;
+    uint16_t len = 0;
+    if (ble_hs_mbuf_to_flat(om, chunk.data, sizeof(chunk.data), &len) != 0)
+    {
+        ESP_LOGW(TAG, "inbound chunk did not fit %u bytes, dropped",
+                 static_cast<unsigned>(sizeof(chunk.data)));
+        return;
+    }
+    chunk.len = len;
+    ESP_LOGD(TAG, "notify rx: %u bytes queued", static_cast<unsigned>(len));
+
+    // Dropping is the honest failure: the gateway is outrunning us and silence
+    // would look like a hang. Flow control is the gateway's next problem.
+    if (xQueueSend(inQueue_, &chunk, 0) != pdTRUE)
+        ESP_LOGW(TAG, "inbound queue full, chunk dropped");
+}
+
+void BleManager::DispatchLoop()
+{
+    BleChunk chunk;
+    for (;;)
+    {
+        if (xQueueReceive(inQueue_, &chunk, portMAX_DELAY) != pdTRUE) continue;
+        ESP_LOGD(TAG, "dispatch: chunk of %u bytes", static_cast<unsigned>(chunk.len));
+        if (chunk.len < session::HEADER_LEN) continue;
+
+        // A request can arrive before our own bring-up has finished. With a
+        // bonded peer NimBLE restores the CCCD subscription the moment the link
+        // is encrypted, so the gateway is told "subscribed" and can notify while
+        // we are still discovering its characteristics — measured at ~1.5 s
+        // before we reached Ready. Hold the chunk for that window instead of
+        // dropping it, or the first command after every reconnect is lost.
+        for (int waited = 0; waited < kReadyWaitTicks; waited++)
+        {
+            if (GetLinkState() == LinkState::Ready) break;
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+
+        uint16_t conn, outHandle;
+        size_t payloadCap;
+        {
+            LOCK(mutex_);
+            if (link_ != LinkState::Ready)
+            {
+                ESP_LOGW(TAG, "chunk dropped: link never became ready");
+                continue;
+            }
+            conn = connHandle_;
+            outHandle = outboundValHandle_;
+            payloadCap = outPayloadCap_;
+        }
+
+        uint16_t sid = session::readU16(chunk.data);
+        uint8_t  flags = chunk.data[2];
+
+        // Link and mux live for exactly one request, like the WebSocket's do.
+        BleSessionLink link(conn, outHandle, inQueue_);
+        SessionMux mux(link, *this, outFrame_, payloadCap,
+                       inFrame_, session::HEADER_LEN + BleChunk::MaxLen);
+        mux.OnChunk(sid, flags, chunk.data + session::HEADER_LEN,
+                    chunk.len - session::HEADER_LEN);
+    }
+}
+
+// Mirrors WebSocketHandler::OnSessionOpened — the routing lives in the sink, so
+// the command layer receives an already-resolved call.
+void BleManager::OnSessionOpened(Session& session)
+{
+    const uint8_t* head = nullptr;
+    size_t headLen = 0;
+    session.peekRequest(head, headLen);
+
+    char line[128];
+    size_t n = headLen < sizeof(line) - 1 ? headLen : sizeof(line) - 1;
+    memcpy(line, head, n);
+    line[n] = '\0';
+    if (char* nl = strchr(line, '\n')) *nl = '\0';
+
+    char type[32] = {};
+    ExtractJsonString(line, "type", type, sizeof(type));
+
+    if (type[0] == '\0')
+    {
+        session.reject("missing type");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Command over BLE: %s", type);
+
+    if (!serviceProvider_.getCommandManager().Execute(type, session, session))
+    {
+        session.reject(type);
+        return;
+    }
+    session.finish();
 }
 
 // ──────────────────────────────────────────────────────────────

@@ -5,8 +5,12 @@
 #include "Mutex.h"
 #include "CommandManager/CommandEntry.h"
 #include "TypedSettings.h"
+#include "BleSessionLink.h"
+#include "SessionMux.h"
+#include "Task.h"
 #include "host/ble_hs.h"
 #include "esp_timer.h"
+#include "freertos/queue.h"
 #include <cstdint>
 #include <cstddef>
 
@@ -27,7 +31,7 @@ class JsonObject;
 // Bring-up order after a connect: encrypt/pair first, then discover, so no
 // service discovery ever happens on a plaintext link.
 // ──────────────────────────────────────────────────────────────
-class BleManager
+class BleManager : public SessionMux::Sink
 {
     static constexpr const char* TAG = "BleManager";
 
@@ -68,6 +72,10 @@ public:
     BleManager& operator=(BleManager&&) = delete;
 
     void Init();
+
+    /// SessionMux::Sink — a request has arrived over BLE and is ready to run.
+    /// Called on the dispatch task, never on the NimBLE host task.
+    void OnSessionOpened(Session& session) override;
 
     /// Kick a scan. False when the stack is down or a scan is already running.
     bool StartScan();
@@ -127,6 +135,9 @@ private:
     static int  SubscribeTrampoline(uint16_t conn, const struct ble_gatt_error* error,
                                     struct ble_gatt_attr* attr, void* arg);
 
+    void EnqueueChunk(const struct os_mbuf* om);
+    void DispatchLoop();
+
     void Cmd_BleScan(Stream& in, Stream& out);
     void Cmd_BleStatus(Stream& in, Stream& out);
     void Cmd_BleConnect(Stream& in, Stream& out);
@@ -169,4 +180,23 @@ private:
     uint16_t   inboundCccd_ = 0;
 
     esp_timer_handle_t reconnectTimer_ = nullptr;
+
+    // ── Session transport ───────────────────────────────────────
+    // Inbound notifications are queued by the NimBLE callback and drained by a
+    // task of our own, because Session::read() blocks waiting for the next chunk
+    // and blocking the host task would deadlock the radio.
+    static constexpr int    kInQueueDepth = 4;
+    static constexpr size_t kDispatchStack = 4096;
+    // 100 x 50 ms: long enough to cover discovery after a bonded reconnect.
+    static constexpr int    kReadyWaitTicks = 100;
+
+    QueueHandle_t inQueue_ = nullptr;
+    Task          dispatchTask_;
+
+    // Framing windows, deliberately in PSRAM: internal DRAM is the scarce
+    // resource here and neither buffer is touched from an ISR or with the cache
+    // disabled. Layout is [ 3-byte chunk header | payload ].
+    uint8_t* outFrame_ = nullptr;
+    uint8_t* inFrame_ = nullptr;
+    size_t   outPayloadCap_ = 0;
 };
