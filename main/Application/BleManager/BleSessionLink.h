@@ -36,34 +36,61 @@ class BleSessionLink : public SessionLink
     // goes quiet this long is treated as end-of-stream.
     static constexpr TickType_t kRecvTimeout = pdMS_TO_TICKS(10000);
 
-    uint16_t      conn_;
-    uint16_t      outHandle_;
-    QueueHandle_t queue_;
+    // Each write waits for its completion callback before the next one starts.
+    // That is the flow control: firing writes back to back exhausted NimBLE's
+    // mbuf pool on the first multi-chunk reply (rc 6, BLE_HS_ENOMEM), because
+    // nothing freed the buffers in between. One in flight also means the peer
+    // never has to buffer more than a chunk, which is what makes a firmware
+    // push bounded rather than hopeful.
+    static constexpr TickType_t kWriteTimeout = pdMS_TO_TICKS(3000);
+
+    uint16_t          conn_;
+    uint16_t          outHandle_;
+    QueueHandle_t     queue_;
+    SemaphoreHandle_t writeDone_;
+
+    static int OnWriteDone(uint16_t, const struct ble_gatt_error*,
+                           struct ble_gatt_attr*, void* arg)
+    {
+        auto* sem = static_cast<SemaphoreHandle_t>(arg);
+        if (sem) xSemaphoreGive(sem);
+        return 0;
+    }
 
 public:
-    BleSessionLink(uint16_t conn, uint16_t outHandle, QueueHandle_t queue)
-        : conn_(conn), outHandle_(outHandle), queue_(queue) {}
+    BleSessionLink(uint16_t conn, uint16_t outHandle, QueueHandle_t queue,
+                   SemaphoreHandle_t writeDone)
+        : conn_(conn), outHandle_(outHandle), queue_(queue), writeDone_(writeDone) {}
 
     bool SendRaw(const uint8_t* frame, size_t len) override
     {
         if (conn_ == BLE_HS_CONN_HANDLE_NONE || outHandle_ == 0) return false;
 
-        // NimBLE allows one GATT procedure per connection at a time, so a reply
-        // that spans several chunks can legitimately come back BUSY. Retry
-        // briefly rather than dropping a chunk in the middle of a reply.
-        for (int attempt = 0; attempt < 20; attempt++)
+        xSemaphoreTake(writeDone_, 0);          // clear any stale completion
+
+        // BUSY and ENOMEM are both transient here — one GATT procedure runs at a
+        // time and the mbuf pool refills as earlier writes complete.
+        int rc = BLE_HS_EBUSY;
+        for (int attempt = 0; attempt < 60 && (rc == BLE_HS_EBUSY || rc == BLE_HS_ENOMEM); attempt++)
         {
-            int rc = ble_gattc_write_flat(conn_, outHandle_, frame, len, nullptr, nullptr);
-            if (rc == 0) return true;
-            if (rc != BLE_HS_EBUSY)
-            {
-                ESP_LOGE(TAG, "write failed: %d", rc);
-                return false;
-            }
+            rc = ble_gattc_write_flat(conn_, outHandle_, frame, len,
+                                      &BleSessionLink::OnWriteDone, writeDone_);
+            if (rc == 0) break;
             vTaskDelay(pdMS_TO_TICKS(10));
         }
-        ESP_LOGE(TAG, "write still busy after retries, dropping chunk");
-        return false;
+
+        if (rc != 0)
+        {
+            ESP_LOGE(TAG, "write failed: %d", rc);
+            return false;
+        }
+
+        if (xSemaphoreTake(writeDone_, kWriteTimeout) != pdTRUE)
+        {
+            ESP_LOGE(TAG, "write never completed within the timeout");
+            return false;
+        }
+        return true;
     }
 
     int RecvChunk(uint8_t* buf, size_t cap, uint16_t* sid, uint8_t* flags) override

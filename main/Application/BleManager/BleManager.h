@@ -11,6 +11,7 @@
 #include "host/ble_hs.h"
 #include "esp_timer.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include <cstdint>
 #include <cstddef>
 
@@ -190,8 +191,9 @@ private:
     // 100 x 50 ms: long enough to cover discovery after a bonded reconnect.
     static constexpr int    kReadyWaitTicks = 100;
 
-    QueueHandle_t inQueue_ = nullptr;
-    Task          dispatchTask_;
+    QueueHandle_t     inQueue_ = nullptr;
+    SemaphoreHandle_t writeDone_ = nullptr;   // one outbound write in flight
+    Task              dispatchTask_;
 
     // Framing windows, deliberately in PSRAM: internal DRAM is the scarce
     // resource here and neither buffer is touched from an ISR or with the cache

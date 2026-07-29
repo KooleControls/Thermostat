@@ -83,12 +83,14 @@ void BleManager::Init()
     // notification can arrive. Buffers go to PSRAM — internal DRAM is what the
     // BLE controller and the dispatch task's stack need.
     inQueue_ = xQueueCreate(kInQueueDepth, sizeof(BleChunk));
+    writeDone_ = xSemaphoreCreateBinary();
     outFrame_ = static_cast<uint8_t*>(
         heap_caps_malloc(session::HEADER_LEN + BleChunk::MaxLen, MALLOC_CAP_SPIRAM));
     inFrame_ = static_cast<uint8_t*>(
         heap_caps_malloc(session::HEADER_LEN + BleChunk::MaxLen, MALLOC_CAP_SPIRAM));
 
-    if (inQueue_ == nullptr || outFrame_ == nullptr || inFrame_ == nullptr)
+    if (inQueue_ == nullptr || writeDone_ == nullptr ||
+        outFrame_ == nullptr || inFrame_ == nullptr)
     {
         ESP_LOGE(TAG, "Could not allocate the session transport; BLE stays down");
         init.SetReady();
@@ -993,7 +995,7 @@ void BleManager::DispatchLoop()
         uint8_t  flags = chunk.data[2];
 
         // Link and mux live for exactly one request, like the WebSocket's do.
-        BleSessionLink link(conn, outHandle, inQueue_);
+        BleSessionLink link(conn, outHandle, inQueue_, writeDone_);
         SessionMux mux(link, *this, outFrame_, payloadCap,
                        inFrame_, session::HEADER_LEN + BleChunk::MaxLen);
         mux.OnChunk(sid, flags, chunk.data + session::HEADER_LEN,
