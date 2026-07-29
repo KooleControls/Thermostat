@@ -7,11 +7,17 @@ to the ~+7 °C self-heating that skews the AHT20 room reading (see RA2-389 and t
 calibration question in RA2-442). Less heat at the sensor → a smaller, more stable
 calibration offset. Screen timeout / power saving is a welcome side benefit.
 
+The measurement half of this is now built and documented separately in
+`2026-07-28-self-heating-test-protocol.md` — `ThermalTestManager` already owns
+PWM brightness, the panel refresh clock and the CPU clock as test levers. What
+is left here is the *shipping* behaviour: idle timeout, restore on touch, and
+the settings that expose it.
+
 ## Likely scope
 
-- **Backlight brightness control** — PWM on the panel backlight, driven by
-  `DisplayManager`. Wire the brightness path if it isn't already exposed by the
-  board.
+- ~~**Backlight brightness control**~~ — done: the board drives the backlight
+  with LEDC (`Board::SetBacklightPercent`). `DisplayManager` still only ever
+  sets 100 %.
 - **Dim / off after inactivity** — a configurable idle timeout that lowers
   brightness (and optionally turns the backlight off); restore to full on touch.
 - **Settings** — brightness level(s) and timeout as persisted settings (typed

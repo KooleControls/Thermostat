@@ -23,6 +23,7 @@ extern "C" void app_main(void)
     g_appContext.getClimateManager().Init();
     g_appContext.getHotWaterManager().Init();
     g_appContext.getDisplayManager().Init();
+    g_appContext.getThermalTestManager().Init();
     g_appContext.getUpdateManager().Init();
     g_appContext.getWebServerManager().Init();
 

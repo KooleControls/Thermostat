@@ -1,4 +1,5 @@
 #include "NetworkManager.h"
+#include <cstring>
 #include "SettingsManager.h"
 #include "SystemManager.h"
 #include "CommandManager.h"
@@ -148,14 +149,49 @@ void NetworkManager::ConnectToStation(const char* ssid, const char* password)
     wifiPassword_.Set(staPassword_);
     serviceProvider_.getSettingsManager().Save();
 
-    ESP_LOGI(TAG, "New credentials for '%s' stored — connecting", staSsid_);
+    // Length, never the value: an empty passphrase makes a WPA2 AP look like
+    // "incompatible security" (reason 210) rather than a wrong password, which is
+    // otherwise indistinguishable from the AP being misconfigured.
+    ESP_LOGI(TAG, "New credentials for '%s' stored (passphrase %u chars) — connecting",
+             staSsid_, (unsigned)strlen(staPassword_));
     staRetryCount_ = 0;
     AttemptStaConnect();
+}
+
+void NetworkManager::StartAccessPoint()
+{
+    if (wifi_interface_.IsAP())
+    {
+        ESP_LOGI(TAG, "Already hosting the AP — nothing to do");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Hosting the AP on request (drops the STA link)");
+    staRetryCount_ = 0;   // a later ConnectToStation starts from a clean slate
+    FallbackToAP();
+}
+
+void NetworkManager::StopRadio()
+{
+    if (radioStopped_) return;
+
+    ESP_LOGW(TAG, "Stopping the radio — no web UI until the unit is rebooted "
+                  "(OpenTherm keeps running)");
+    connectTimer_.Stop();   // nothing may resurrect the link behind our back
+    wifi_interface_.Stop();
+    staConnected_ = false;
+    staConnecting_ = false;
+    radioStopped_ = true;
 }
 
 void NetworkManager::GetStaSsid(char* out, size_t maxLen) const
 {
     snprintf(out, maxLen, "%s", staSsid_);
+}
+
+void NetworkManager::GetApSsid(char* out, size_t maxLen) const
+{
+    snprintf(out, maxLen, "%s", DefaultApSsid);
 }
 
 void NetworkManager::AttemptStaConnect()

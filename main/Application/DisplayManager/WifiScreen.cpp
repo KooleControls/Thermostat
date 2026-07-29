@@ -36,7 +36,7 @@ void WifiScreen::Build(lv_obj_t* root)
 
     rescanButton_ = lv_button_create(listView_);
     lv_obj_set_size(rescanButton_, 200, 56);
-    lv_obj_align(rescanButton_, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_align(rescanButton_, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_obj_set_style_bg_color(rescanButton_, UiTheme::Surface(), 0);
     lv_obj_set_style_bg_color(rescanButton_, UiTheme::Accent(), LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(rescanButton_, 0, 0);
@@ -46,6 +46,22 @@ void WifiScreen::Build(lv_obj_t* root)
     lv_obj_set_style_text_color(rescanLabel, UiTheme::Text(), 0);
     lv_label_set_text(rescanLabel, LV_SYMBOL_REFRESH "  Scan again");
     lv_obj_center(rescanLabel);
+
+    // Host our own AP instead of joining one: the way in when the house network
+    // is unreachable or has no credentials stored yet. Disabled while it is
+    // already the active mode (RefreshStatus keeps that in sync).
+    apButton_ = lv_button_create(listView_);
+    lv_obj_set_size(apButton_, 200, 56);
+    lv_obj_align(apButton_, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_set_style_bg_color(apButton_, UiTheme::Surface(), 0);
+    lv_obj_set_style_bg_color(apButton_, UiTheme::Accent(), LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(apButton_, 0, 0);
+    lv_obj_add_event_cb(apButton_, ApCb, LV_EVENT_CLICKED, this);
+    lv_obj_t* apLabel = lv_label_create(apButton_);
+    lv_obj_set_style_text_font(apLabel, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(apLabel, UiTheme::Text(), 0);
+    lv_label_set_text(apLabel, LV_SYMBOL_WIFI "  Host AP");
+    lv_obj_center(apLabel);
 
     networkList_ = lv_obj_create(listView_);
     lv_obj_set_size(networkList_, LV_PCT(100), 480 - UiTheme::HeaderH - 32 - 2 * UiTheme::Pad - 64);
@@ -230,6 +246,11 @@ void WifiScreen::RefreshStatus()
     char ssid[33] = {};
     net.GetStaSsid(ssid, sizeof(ssid));
 
+    // Hosting the AP is a state, not an action, so the button that starts it is
+    // dead while it is already true.
+    if (net.IsAccessPoint()) lv_obj_add_state(apButton_, LV_STATE_DISABLED);
+    else                     lv_obj_remove_state(apButton_, LV_STATE_DISABLED);
+
     if (scanner_.GetState() == WifiScanner::State::Scanning)
     {
         lv_label_set_text(statusLabel_, "Scanning...");
@@ -251,7 +272,14 @@ void WifiScreen::RefreshStatus()
     }
     else if (net.IsAccessPoint())
     {
-        lv_label_set_text(statusLabel_, "Own access point - not on a network");
+        // Name the network and its address: on the AP there is no router to ask,
+        // so this screen is the only place to read them off.
+        char apSsid[33] = {};
+        net.GetApSsid(apSsid, sizeof(apSsid));
+        NetworkStatus status = net.wifi().getStatus();
+        char buf[80];
+        snprintf(buf, sizeof(buf), "AP %s  " IPSTR, apSsid, IP2STR(&status.ipv4.ip));
+        lv_label_set_text(statusLabel_, buf);
         lv_obj_set_style_text_color(statusLabel_, UiTheme::TextDim(), 0);
     }
     else
@@ -293,6 +321,21 @@ void WifiScreen::BackCb(lv_event_t* e)
 void WifiScreen::RescanCb(lv_event_t* e)
 {
     static_cast<WifiScreen*>(lv_event_get_user_data(e))->StartScan();
+}
+
+void WifiScreen::ApCb(lv_event_t* e)
+{
+    auto* self = static_cast<WifiScreen*>(lv_event_get_user_data(e));
+    ESP_LOGI(TAG, "Hosting the AP from the display");
+
+    // Same reason as Connect(): starting the AP stops and restarts the radio,
+    // which stalls this task, so push the frame out before it happens.
+    char apSsid[33] = {};
+    self->serviceProvider_.getNetworkManager().GetApSsid(apSsid, sizeof(apSsid));
+    lv_label_set_text_fmt(self->statusLabel_, "Starting AP %s...", apSsid);
+    lv_refr_now(lv_display_get_default());
+
+    self->serviceProvider_.getNetworkManager().StartAccessPoint();
 }
 
 void WifiScreen::NetworkCb(lv_event_t* e)

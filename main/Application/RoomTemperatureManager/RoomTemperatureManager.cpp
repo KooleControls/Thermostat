@@ -46,6 +46,7 @@ bool RoomTemperatureManager::GetRoomTemperature(float &celsius) const
 void RoomTemperatureManager::Loop()
 {
     TemperatureSensor &sensor = serviceProvider_.getBoard().GetTemperatureSensor();
+    HumiditySensor &humidity = serviceProvider_.getBoard().GetHumiditySensor();
 
     while (true)
     {
@@ -55,6 +56,17 @@ void RoomTemperatureManager::Loop()
             LOCK(mutex_);
             lastTemp_ = t;
             lastReadUs_ = esp_timer_get_time();
+        }
+
+        // Humidity rides along on the same cadence deliberately: the AHT20 is a
+        // trigger-then-latch device with internal state, so it must have exactly
+        // one sampler. Consumers read the cached value instead of the sensor.
+        float rh = 0;
+        if (humidity.ReadHumidity(rh))
+        {
+            LOCK(mutex_);
+            lastHumidity_ = rh;
+            lastHumidityUs_ = esp_timer_get_time();
         }
 
         // Log valid<->invalid transitions once (edge-detected, like the OT
@@ -71,6 +83,14 @@ void RoomTemperatureManager::Loop()
 
         vTaskDelay(pdMS_TO_TICKS(SampleIntervalMs));
     }
+}
+
+bool RoomTemperatureManager::GetRoomHumidity(float &percent) const
+{
+    LOCK(mutex_);
+    if (!IsValid(lastHumidityUs_, esp_timer_get_time())) return false;
+    percent = lastHumidity_;
+    return true;
 }
 
 void RoomTemperatureManager::Cmd_RoomTemp(Stream &, Stream &out)

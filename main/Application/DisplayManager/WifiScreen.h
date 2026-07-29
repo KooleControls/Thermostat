@@ -37,6 +37,7 @@ private:
     static void RefreshTimerCb(lv_timer_t* t);
     static void BackCb(lv_event_t* e);
     static void RescanCb(lv_event_t* e);
+    static void ApCb(lv_event_t* e);
     static void NetworkCb(lv_event_t* e);
     static void ConnectCb(lv_event_t* e);
     static void PasswordBackCb(lv_event_t* e);
@@ -50,6 +51,7 @@ private:
     lv_obj_t* listView_ = nullptr;
     lv_obj_t* networkList_ = nullptr;
     lv_obj_t* rescanButton_ = nullptr;
+    lv_obj_t* apButton_ = nullptr;
 
     lv_obj_t* passwordView_ = nullptr;
     lv_obj_t* passwordPrompt_ = nullptr;

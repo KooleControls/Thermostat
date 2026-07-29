@@ -47,12 +47,36 @@ void Board::Init()
         ESP_LOGE(TAG, "AHT20 init failed (sensor unavailable)");
     }
 
-    // Backlight GPIO — held off until DisplayManager has a first frame up.
-    gpio_config_t bkCfg = {};
-    bkCfg.pin_bit_mask = 1ULL << BoardConfig::LCD_PIN_BACKLIGHT;
-    bkCfg.mode = GPIO_MODE_OUTPUT;
-    gpio_config(&bkCfg);
-    gpio_set_level((gpio_num_t)BoardConfig::LCD_PIN_BACKLIGHT, 0);
+    // Die temperature — diagnostics (self-heating), not a room-temp source.
+    if (socTemp_.Init())
+    {
+        float die = 0;
+        if (socTemp_.ReadCelsius(die))
+            ESP_LOGI(TAG, "SoC die: %.1f degC", die);
+    }
+
+    // Backlight PWM — starts at 0 %, so the panel stays dark until
+    // DisplayManager has a first frame up.
+    {
+        ledc_timer_config_t timer = {};
+        timer.speed_mode = LEDC_LOW_SPEED_MODE;
+        timer.duty_resolution = kBacklightResolution;
+        timer.timer_num = kBacklightTimer;
+        timer.freq_hz = BoardConfig::LCD_BACKLIGHT_PWM_HZ;
+        timer.clk_cfg = LEDC_AUTO_CLK;
+        esp_err_t bkErr = ledc_timer_config(&timer);
+
+        ledc_channel_config_t channel = {};
+        channel.gpio_num = BoardConfig::LCD_PIN_BACKLIGHT;
+        channel.speed_mode = LEDC_LOW_SPEED_MODE;
+        channel.channel = kBacklightChannel;
+        channel.timer_sel = kBacklightTimer;
+        channel.duty = 0;
+        channel.hpoint = 0;
+        if (bkErr == ESP_OK) bkErr = ledc_channel_config(&channel);
+        if (bkErr != ESP_OK)
+            ESP_LOGE(TAG, "backlight PWM init failed: %s", esp_err_to_name(bkErr));
+    }
 
     // ST7701 panel. MUST init before the OT link below: the 3-wire SPI init
     // uses GPIO11/12, which otLink_.Init() then reclaims (gpio_reset_pin) as
@@ -116,4 +140,44 @@ void Board::Init()
 
     init.SetReady();
     ESP_LOGI(TAG, "Initialized");
+}
+
+void Board::SetBacklightPercent(uint8_t percent)
+{
+    if (percent > 100) percent = 100;
+    backlightPercent_ = percent;
+
+    uint32_t duty = (kBacklightMaxDuty * percent) / 100;
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, kBacklightChannel, duty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, kBacklightChannel);
+}
+
+void Board::HoldPanelInReset()
+{
+    if (panelInReset_) return;
+
+    // Active-low reset (the panel config leaves reset_active_high false), so
+    // pulling it down holds the ST7701 in reset. The RGB peripheral keeps
+    // scanning into a panel that is no longer listening — harmless, and the
+    // backlight is off in every case where we do this.
+    ESP_LOGW(TAG, "Holding the ST7701 in reset — display gone until reboot");
+    gpio_set_level((gpio_num_t)BoardConfig::LCD_PIN_RESET, 0);
+    panelInReset_ = true;
+}
+
+bool Board::SetPanelPclk(uint32_t hz)
+{
+    if (!panel_.ok() || hz == 0) return false;
+
+    esp_err_t err = esp_lcd_rgb_panel_set_pclk(panel_.panel(), hz);
+    if (err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "set pclk %lu Hz failed: %s", (unsigned long)hz, esp_err_to_name(err));
+        return false;
+    }
+    panelPclkHz_ = hz;
+    // The driver picks the new clock up on the next VSYNC; a big step can leave
+    // the DMA and the panel out of phase, which shows as a shifted image.
+    esp_lcd_rgb_panel_restart(panel_.panel());
+    return true;
 }

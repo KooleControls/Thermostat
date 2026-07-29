@@ -32,6 +32,12 @@ public:
     // false = no valid recent measurement (never read, or stale > 30 s).
     bool GetRoomTemperature(float &celsius) const;
 
+    /// Relative humidity from the same sensor, same cadence and validity rule.
+    /// Cached here rather than read at the call site because the AHT20 has one
+    /// sampler by design (see Loop()); it is also a second, independent witness
+    /// of local self-heating — a warmed sensor reads RH low.
+    bool GetRoomHumidity(float &percent) const;
+
 private:
     void Loop();
     void Cmd_RoomTemp(Stream &in, Stream &out);   // roomTemp
@@ -52,4 +58,7 @@ private:
     float   lastTemp_ = 0.0f;     // last successful reading
     int64_t lastReadUs_ = -1;     // esp_timer time of it; -1 = never read
     bool    lastValid_ = false;   // loop-task-only edge detector for the fault log
+
+    float   lastHumidity_ = 0.0f;
+    int64_t lastHumidityUs_ = -1;
 };

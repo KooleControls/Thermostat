@@ -49,7 +49,10 @@ void DisplayManager::Init()
         lvgl_port_unlock();
     }
 
-    serviceProvider_.getBoard().SetBacklight(true);
+    // Full brightness once there is something to look at. Brightness is a lever
+    // in the self-heating test rig too (ThermalTestManager, which initializes
+    // after this and may darken the panel again on purpose).
+    serviceProvider_.getBoard().SetBacklightPercent(100);
 
     init.SetReady();
     ESP_LOGI(TAG, "Initialized");
