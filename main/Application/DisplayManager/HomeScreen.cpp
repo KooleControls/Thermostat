@@ -64,8 +64,9 @@ void HomeScreen::ShowRoomTemp()
     if (valid) snprintf(buf, sizeof(buf), "%.1f\xC2\xB0", t);   // UTF-8 degree
     else       snprintf(buf, sizeof(buf), "--.-\xC2\xB0");
 
-    lv_label_set_text(stateLabel_, "");
-    lv_label_set_text(bigLabel_, buf);
+    // Guarded: this runs once a second and the reading rarely moves.
+    SetLabelText(stateLabel_, "");
+    SetLabelText(bigLabel_, buf);
     showingSetpoint_ = false;
 }
 
@@ -76,8 +77,8 @@ void HomeScreen::OnNudge(float deltaC)
     char buf[16];
     snprintf(buf, sizeof(buf), "%.1f\xC2\xB0", sp);
 
-    lv_label_set_text(stateLabel_, "SET");
-    lv_label_set_text(bigLabel_, buf);
+    SetLabelText(stateLabel_, "SET");
+    SetLabelText(bigLabel_, buf);
     if (revertTimer_) lv_timer_reset(revertTimer_);
     else revertTimer_ = lv_timer_create(RevertTimerCb, kRevertMs, this);
     showingSetpoint_ = true;

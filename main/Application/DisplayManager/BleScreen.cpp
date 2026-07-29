@@ -155,25 +155,24 @@ void BleScreen::RefreshStatus()
     switch (ble.GetLinkState())
     {
         case BleManager::LinkState::Ready:
-            lv_label_set_text(statusLabel_, LV_SYMBOL_OK "  Paired and connected");
+            SetLabelText(statusLabel_, LV_SYMBOL_OK "  Paired and connected");
             lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
             break;
         case BleManager::LinkState::Connecting:
-            lv_label_set_text(statusLabel_, "Connecting...");
+            SetLabelText(statusLabel_, "Connecting...");
             lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
             break;
         case BleManager::LinkState::Securing:
-            lv_label_set_text(statusLabel_, "Pairing...");
+            SetLabelText(statusLabel_, "Pairing...");
             lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
             break;
         case BleManager::LinkState::Discovering:
-            lv_label_set_text(statusLabel_, "Reading the gateway's services...");
+            SetLabelText(statusLabel_, "Reading the gateway's services...");
             lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
             break;
         case BleManager::LinkState::Down:
-            lv_label_set_text(statusLabel_,
-                              scanning ? "Looking for gateways..."
-                                       : "Not connected — pick a gateway");
+            SetLabelText(statusLabel_, scanning ? "Looking for gateways..."
+                                                : "Not connected — pick a gateway");
             lv_obj_add_state(forgetButton_, LV_STATE_DISABLED);
             break;
     }

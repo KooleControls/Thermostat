@@ -253,21 +253,24 @@ void WifiScreen::RefreshStatus()
 
     if (scanner_.GetState() == WifiScanner::State::Scanning)
     {
-        lv_label_set_text(statusLabel_, "Scanning...");
+        SetLabelText(statusLabel_, "Scanning...");
         return;
     }
 
+    // Formatted through a buffer rather than lv_label_set_text_fmt, so the text
+    // can be compared before it is written — this runs twice a second.
+    char buf[80];
     if (net.IsStaConnected())
     {
         NetworkStatus status = net.wifi().getStatus();
-        char buf[64];
         snprintf(buf, sizeof(buf), "%s " LV_SYMBOL_OK "  " IPSTR, ssid, IP2STR(&status.ipv4.ip));
-        lv_label_set_text(statusLabel_, buf);
+        SetLabelText(statusLabel_, buf);
         lv_obj_set_style_text_color(statusLabel_, UiTheme::Text(), 0);
     }
     else if (net.IsStaConnecting())
     {
-        lv_label_set_text_fmt(statusLabel_, "Connecting to %s...", ssid);
+        snprintf(buf, sizeof(buf), "Connecting to %s...", ssid);
+        SetLabelText(statusLabel_, buf);
         lv_obj_set_style_text_color(statusLabel_, UiTheme::TextDim(), 0);
     }
     else if (net.IsAccessPoint())
@@ -277,14 +280,13 @@ void WifiScreen::RefreshStatus()
         char apSsid[33] = {};
         net.GetApSsid(apSsid, sizeof(apSsid));
         NetworkStatus status = net.wifi().getStatus();
-        char buf[80];
         snprintf(buf, sizeof(buf), "AP %s  " IPSTR, apSsid, IP2STR(&status.ipv4.ip));
-        lv_label_set_text(statusLabel_, buf);
+        SetLabelText(statusLabel_, buf);
         lv_obj_set_style_text_color(statusLabel_, UiTheme::TextDim(), 0);
     }
     else
     {
-        lv_label_set_text(statusLabel_, "Not connected");
+        SetLabelText(statusLabel_, "Not connected");
         lv_obj_set_style_text_color(statusLabel_, UiTheme::TextDim(), 0);
     }
 }

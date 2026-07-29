@@ -1,4 +1,15 @@
 #include "Screen.h"
+#include <cstring>
+
+void Screen::SetLabelText(lv_obj_t* label, const char* text)
+{
+    if (label == nullptr || text == nullptr) return;
+
+    const char* current = lv_label_get_text(label);
+    if (current != nullptr && strcmp(current, text) == 0) return;
+
+    lv_label_set_text(label, text);
+}
 
 lv_obj_t* Screen::AddIconButton(lv_obj_t* parent, const char* icon)
 {

@@ -75,5 +75,20 @@ protected:
     /// Borderless, transparent icon button — the gear, close and back affordances.
     static lv_obj_t* AddIconButton(lv_obj_t* parent, const char* icon);
 
+    /// lv_label_set_text() that skips identical text.
+    ///
+    /// LVGL invalidates a label on every set_text, whether or not the string
+    /// changed, and an invalidated area is re-rendered and re-flushed. Screens
+    /// poll their managers on a timer and mostly write back what is already
+    /// there, so the unguarded call turns "nothing happened" into real work:
+    /// measured at 25-35 ms of software rendering plus a PSRAM flush burst once
+    /// a second on the home screen, for pixels that do not change. That burst
+    /// is also what makes the panel visibly glitch, because the flush contends
+    /// with the RGB bounce-buffer DMA for PSRAM bandwidth.
+    ///
+    /// Use this on every periodic path. Build() may call lv_label_set_text
+    /// directly — it runs once.
+    static void SetLabelText(lv_obj_t* label, const char* text);
+
     lv_obj_t* root_ = nullptr;
 };
