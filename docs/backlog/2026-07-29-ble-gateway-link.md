@@ -13,6 +13,12 @@ exactly as over the WebSocket.
 
 The OpenTherm link stays the control/demand path. BLE is the management channel.
 
+**Why (the only reason):** the thermostat stays reachable on **house WiFi in parallel**
+with talking to the gateway — separate radio for the link, single STA left free for the
+LAN, web UI never goes dark. Not a privacy or install-effort improvement: a BLE
+advertisement is as visible as a broadcast SSID. See
+`docs/reasoning/2026-07-29-09h38-the-ble-pivot-is-about-parallel-availability.md`.
+
 ## Steps
 
 1. **Extract `SessionLink` from `Session`.** `Session` holds a concrete
