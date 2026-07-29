@@ -1,5 +1,11 @@
 # Firmware updates over the gateway's WiFi AP
 
+> **SUPERSEDED 2026-07-29 — the management link pivoted to BLE.** See
+> `2026-07-29-ble-gateway-link.md`,
+> `docs/reasoning/2026-07-29-09h17-ble-instead-of-the-gateway-ap.md` and its correction
+> `-09h38-the-ble-pivot-is-about-parallel-availability.md`. Kept because the steps below
+> that are not about the AP still stand and moved to the BLE doc.
+
 **Status: direction chosen, not started.** (logged 2026-07-27) Supersedes
 `2026-07-27-wifi-update-ui.md` (pull-a-pinned-build-from-GitHub) and the BLE
 variants explored alongside it.
