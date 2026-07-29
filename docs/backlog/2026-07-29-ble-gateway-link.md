@@ -19,6 +19,11 @@ LAN, web UI never goes dark. Not a privacy or install-effort improvement: a BLE
 advertisement is as visible as a broadcast SSID. See
 `docs/reasoning/2026-07-29-09h38-the-ble-pivot-is-about-parallel-availability.md`.
 
+**Radios:** the gateway does **Ethernet + WiFi STA + BLE and is never an AP**; the
+thermostat does **STA when a network is available, its own AP when not** (the Strux
+fallback, already built), **plus BLE always** for the gateway link. See
+`docs/reasoning/2026-07-29-09h43-radio-split-between-the-two-boxes.md`.
+
 ## Steps
 
 1. **Extract `SessionLink` from `Session`.** `Session` holds a concrete
