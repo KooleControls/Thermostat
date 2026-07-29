@@ -18,3 +18,23 @@ CONFIG_FATFS_MAX_LFN=255
 
 # OTA rollback — pairs with esp_ota_mark_app_valid_cancel_rollback() in main.cpp
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# ── BLE (NimBLE) — the management link to the gateway ──────────
+# We are the CENTRAL: the gateway advertises, we scan and connect. Peripheral and
+# broadcaster roles stay at their defaults rather than being switched off, because
+# the GAP service (device name) is a GATT-server service and needs them.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+
+# One peer, ever: a thermostat pairs with exactly one gateway.
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+
+# Persist bonding keys, so a reconnect never asks the installer for the install
+# code again.
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+
+# Ask for the largest practical MTU: one session chunk = one GATT write, so the
+# MTU sets the chunk size and therefore the firmware-transfer rate.
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247

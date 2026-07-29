@@ -12,6 +12,7 @@ set(SOURCE_FILES_LIST
     "Application/WebServerManager/AuthGate.cpp"
     "Application/WebServerManager/SessionMux.cpp"
     "Application/WebServerManager/SessionTable.cpp"
+    "Application/BleManager/BleManager.cpp"
     "Application/CommandManager/CommandManager.cpp"
     "Application/OpenThermManager/OpenThermManager.cpp"
     "Application/RoomTemperatureManager/RoomTemperatureManager.cpp"
@@ -43,6 +44,7 @@ set(INCLUDE_DIRS_LIST
     "Application"
     "Application/NetworkManager"
     "Application/WebServerManager"
+    "Application/BleManager"
     "Application/CommandManager"
     "Application/OpenThermManager"
     "Application/ClimateManager"
@@ -64,6 +66,7 @@ set(INCLUDE_DIRS_LIST
 )
 
 set(COMPONENT_REQUIRES
+    bt
     esp_timer
     esp_netif
     esp_event
