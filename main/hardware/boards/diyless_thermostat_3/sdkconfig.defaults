@@ -23,10 +23,53 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # an option here — DFS never runs either, since the rig pins max == min.
 CONFIG_PM_ENABLE=y
 
+# ── RGB panel: do NOT enable CONFIG_LCD_RGB_RESTART_IN_VSYNC ────
+# Tried 2026-07-29 against the vertical-shift glitch and it made things
+# strictly worse: occasional shifts became continuous ones.
+#
+# It re-arms the GDMA channel every VBlank, and IDF's own comment above
+# lcd_rgb_panel_try_restart_transmission() admits the trade: a late restart
+# shifts that frame, because the LCD controller has already clocked out the
+# first bytes and the reset re-sends them. IDF assumes the ISR "has the
+# entirety of the VBlank time" — here it does not. The VSYNC ISR shares core 0
+# with the BT controller, NimBLE, WiFi and esp_timer and is not IRAM-safe,
+# while the restart path itself re-fills BOTH bounce buffers (up to 19.2 KB of
+# PSRAM memcpy) inside a VBlank only 38 lines = 1.98 ms wide. So it converts a
+# rare permanent desync into a per-frame one.
+#
+# The real cause is the bounce-buffer path: one PSRAM framebuffer + 10-line
+# bounce buffers means a GDMA EOF interrupt every 480 us that must memcpy
+# 9600 bytes out of PSRAM (~17 MB/s in ISR context, forever). Fix that layout
+# instead of re-arming the DMA around it.
+
 # Console on USB-Serial/JTAG, NOT UART0. UART0's default pins are repurposed
 # on this board: GPIO43 is the LCD reset and GPIO44 the STM32 boot pin — a
 # UART0 console would bit-bang log traffic onto them.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# ── Settings taken from the DIYLESS/ESPHome reference config ─────
+# diyless-thermostat-3.yaml runs this exact panel with the SAME esp_lcd config
+# we build (num_fbs 1, 10-line bounce buffers, framebuffer in PSRAM, PLL160M,
+# 10 MHz) and with BLE enabled alongside it. So the panel setup is not what
+# separates a smooth board from a glitchy one — the build settings are.
+#
+# A screen change is a full-screen redraw: 230400 px of software blending plus
+# font rendering, flushed to PSRAM in 48 chunks. For that whole window core 1
+# saturates the MSPI while the bounce-buffer ISR on core 0 needs a PSRAM read
+# every 480 us. Halving the redraw window halves the contention, which is why
+# the compiler flag matters to a *glitch* and not just to feel.
+#
+# ESPHome uses -Os; -O2 is faster still and flash is not tight here (the app
+# uses 39 % of a 3 MB slot). Assertions stay on — the win is the optimizer.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# ESPHome overrides IDF's 100 Hz default too. At 100 Hz the scheduler quantum
+# is 10 ms, so LVGL's 33 ms refresh period lands on 40 ms and esp_lvgl_port's
+# 5 ms tick becomes 10 ms. Touch polling and frame pacing both get coarse.
+CONFIG_FREERTOS_HZ=1000
+
+# Never referenced, and ESPHome force-disables them. Flash only, no runtime cost.
+CONFIG_LV_BUILD_DEMOS=n
 
 # LVGL — Montserrat font sizes used by the on-screen UI (14 is the only default).
 CONFIG_LV_FONT_MONTSERRAT_16=y
