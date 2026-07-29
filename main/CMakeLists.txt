@@ -12,6 +12,7 @@ set(SOURCE_FILES_LIST
     "Application/WebServerManager/AuthGate.cpp"
     "Application/WebServerManager/SessionMux.cpp"
     "Application/WebServerManager/SessionTable.cpp"
+    "Application/BleManager/BleManager.cpp"
     "Application/CommandManager/CommandManager.cpp"
     "Application/OpenThermManager/OpenThermManager.cpp"
     "Application/RoomTemperatureManager/RoomTemperatureManager.cpp"
@@ -23,6 +24,7 @@ set(SOURCE_FILES_LIST
     "Application/DisplayManager/PinScreen.cpp"
     "Application/DisplayManager/SettingsMenuScreen.cpp"
     "Application/DisplayManager/WifiScreen.cpp"
+    "Application/DisplayManager/BleScreen.cpp"
     "Application/DisplayManager/WifiScanner.cpp"
     "Application/DisplayManager/InfoScreen.cpp"
     "Application/DisplayManager/fonts/font_temp_96.c"
@@ -43,6 +45,7 @@ set(INCLUDE_DIRS_LIST
     "Application"
     "Application/NetworkManager"
     "Application/WebServerManager"
+    "Application/BleManager"
     "Application/CommandManager"
     "Application/OpenThermManager"
     "Application/ClimateManager"
@@ -64,6 +67,7 @@ set(INCLUDE_DIRS_LIST
 )
 
 set(COMPONENT_REQUIRES
+    bt
     esp_timer
     esp_netif
     esp_event

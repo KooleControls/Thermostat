@@ -8,7 +8,9 @@ The **KC Thermostat** — an OpenTherm room thermostat (OT master) that pairs wi
 
 Deviations from stock Strux: **no MQTT / Home Assistant managers** (the gateway owns smart-home integration).
 
-**Open-source (approved 2026-07-27).** This repo will be released open-source, so it's a firm rule: **no KC-proprietary code here** — the connection-server protocol, keys, and fleet semantics live on the *gateway*, and the thermostat exposes only a generic, transport-agnostic command surface (`CommandManager`). The gateway translates KC intent into plain commands; the thermostat never knows it's "KC". Keep it that way.
+**Open-source (approved 2026-07-27).** This repo is public, so: **don't leak existing KC internals** — the connection-server protocol, keys, and fleet semantics live on the *gateway*, and `CommandManager` stays a generic, transport-agnostic command surface.
+
+*Refined 2026-07-29:* the rule is about leaking internals, **not about KC-ness**. New KC-specific code **is allowed when it is confined to the BLE manager**, because a third party can delete that one module, plug in their own transport, and everything else still serves them. The test: *could someone rip out `BleManager` and still have a working generic thermostat?* See `docs/reasoning/2026-07-29-10h55-kc-specific-code-lives-in-the-ble-manager.md`.
 
 ## Build commands
 

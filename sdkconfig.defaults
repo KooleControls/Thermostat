@@ -18,3 +18,62 @@ CONFIG_FATFS_MAX_LFN=255
 
 # OTA rollback — pairs with esp_ota_mark_app_valid_cancel_rollback() in main.cpp
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# ── BLE (NimBLE) — the management link to the gateway ──────────
+# We are the CENTRAL: the gateway advertises, we scan and connect. Peripheral and
+# broadcaster roles stay at their defaults rather than being switched off, because
+# the GAP service (device name) is a GATT-server service and needs them.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+
+# One peer, ever: a thermostat pairs with exactly one gateway.
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+
+# Persist bonding keys, so a reconnect never asks the installer for the install
+# code again.
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+
+# Ask for the largest practical MTU: one session chunk = one GATT write, so the
+# MTU sets the chunk size and therefore the firmware-transfer rate.
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
+
+# ── Internal DRAM is the blocker for BLE on this board ──────────
+# Measured on hardware: with the display, WiFi and the web server up, only ~3.8 KB
+# of internal DRAM is free (largest block 2 KB), so NimBLE's host task cannot get
+# its 4 KB stack — and esp_nimble_enable() creates that task with
+# xTaskCreatePinnedToCore while IGNORING the result, so the failure is silent:
+# stack "up", no host task, no sync, every scan refused.
+#
+# Moving NimBLE's heap and the WiFi/LWIP buffers to PSRAM was tried and made it
+# WORSE — the controller then failed its own internal malloc and asserted
+# (BLE assert emi.c 164), which boot-loops the panel. So it is reverted here:
+#   CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+#   CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+# What the numbers showed: ~48 KB internal free before NimBLE, the controller takes
+# ~45 KB of it inside nimble_port_init, and the host task was left 3859 free /
+# 3584 largest — just under its 4 KB. CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y was
+# tried too and made it WORSE (37 KB free), so it is not set either. What actually
+# freed the room was halving LVGL's internal draw buffer in DisplayManager, and
+# BleManager refuses to start below a measured floor rather than asserting.
+
+# ── Reclaiming internal DRAM ────────────────────────────────────
+# The BLE controller wants ~45 KB of internal DRAM and every task stack must be
+# internal too, so the defaults below were leaving almost nothing. WiFi's buffers
+# are the biggest reclaimable block: static RX buffers are internal and DMA-capable
+# at ~1.6 KB each, so 10 of them is ~16 KB sitting idle on a device whose WiFi is a
+# development aid rather than a data path.
+#
+# The cost is WiFi throughput under load — fewer buffers means more retries when
+# something streams hard. Acceptable here: the web UI is interactive and firmware
+# now arrives over BLE.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=4
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_RX_BA_WIN=4
+
+# Anything larger than this prefers PSRAM instead of internal RAM. The 16 KB
+# default means every medium allocation lands in internal DRAM first, which is
+# exactly the memory BLE needs.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=2048

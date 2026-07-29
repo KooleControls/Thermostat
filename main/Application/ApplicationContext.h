@@ -1,6 +1,7 @@
 #pragma once
 #include "ServiceProvider.h"
 #include "Board.h"
+#include "BleManager/BleManager.h"
 #include "CommandManager/CommandManager.h"
 #include "ConsoleManager/ConsoleManager.h"
 #include "NetworkManager/NetworkManager.h"
@@ -24,6 +25,7 @@ public:
     ApplicationContext(const ApplicationContext&) = delete;
     ApplicationContext& operator=(const ApplicationContext&) = delete;
 
+    BleManager& getBleManager() override { return m_bleManager; }
     Board& getBoard() override { return m_board; }
     ClimateManager& getClimateManager() override { return m_climateManager; }
     CommandManager& getCommandManager() override { return m_commandManager; }
@@ -56,4 +58,5 @@ private:
     ThermalTestManager m_thermalTestManager{*this};
     UpdateManager m_updateManager{*this};
     WebServerManager m_webServerManager{*this};
+    BleManager m_bleManager{*this};
 };

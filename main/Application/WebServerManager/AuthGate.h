@@ -7,8 +7,15 @@
 class Authenticator;
 struct WsConnection;
 
-// The pre-auth handshake + authed/not routing decision, self-contained.
-// Depends only on the Authenticator. Owns the reply framing.
+// The pre-auth handshake + authed/not routing decision for the WebSocket,
+// self-contained. Depends only on the Authenticator. Owns the reply framing.
+//
+// Deliberately typed on WsSessionLink, not the transport-agnostic SessionLink:
+// authentication is a property of the physical link, not of the session layer.
+// A password + bearer token is what a *browser over WiFi* needs; BLE proves the
+// peer with pairing (the install-code passkey) and bonding at the link layer, so
+// it has no login handshake and never routes through here. See
+// docs/reasoning/2026-07-29-11h29-authentication-belongs-to-the-transport.md.
 class AuthGate {
 public:
     explicit AuthGate(Authenticator& auth) : auth_(auth) {}

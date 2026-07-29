@@ -8,6 +8,7 @@
 #include "PinScreen.h"
 #include "SettingsMenuScreen.h"
 #include "WifiScreen.h"
+#include "BleScreen.h"
 #include "InfoScreen.h"
 #include "lvgl.h"
 
@@ -55,6 +56,7 @@ private:
     PinScreen pinScreen_{pinGate_, *this};
     SettingsMenuScreen settingsScreen_{serviceProvider_, *this};
     WifiScreen wifiScreen_{serviceProvider_, *this};
+    BleScreen bleScreen_{serviceProvider_, *this};
     InfoScreen infoScreen_{serviceProvider_, *this};
 
     ScreenId current_ = ScreenId::Home;
