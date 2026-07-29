@@ -1,8 +1,12 @@
 #include "DisplayManager.h"
 #include "SettingsManager/SettingsManager.h"
+#include "CommandManager/CommandManager.h"
 #include "Board.h"
+#include "JsonScope.h"
+#include "JsonReader.h"
 #include "esp_lvgl_port.h"
 #include "esp_log.h"
+#include <cstring>
 
 DisplayManager::DisplayManager(ServiceProvider &serviceProvider)
     : serviceProvider_(serviceProvider)
@@ -21,6 +25,11 @@ void DisplayManager::Init()
     // Registered even when headless: the PIN is also editable over the web
     // settings UI, and that must not depend on a panel being present.
     pinGate_.Register(serviceProvider_.getSettingsManager());
+
+    // Likewise for uiGo — headless it reports the shell's idea of the current
+    // screen and navigates nothing, which is a truthful answer rather than a
+    // missing command.
+    serviceProvider_.getCommandManager().Register(this, commands_);
 
     if (serviceProvider_.getBoard().GetPanel() == nullptr)
     {
@@ -133,6 +142,57 @@ void DisplayManager::Go(ScreenId id)
     Resolve(id)->Load();
     current_ = id;
     lvgl_port_unlock();
+}
+
+const char* DisplayManager::ScreenName(ScreenId id)
+{
+    switch (id)
+    {
+        case ScreenId::Home:     return "home";
+        case ScreenId::Pin:      return "pin";
+        case ScreenId::Settings: return "settings";
+        case ScreenId::Wifi:     return "wifi";
+        case ScreenId::Ble:      return "ble";
+        case ScreenId::Info:     return "info";
+    }
+    return "home";
+}
+
+bool DisplayManager::ParseScreen(const char *name, ScreenId &out)
+{
+    static constexpr ScreenId kAll[] = {
+        ScreenId::Home, ScreenId::Pin, ScreenId::Settings,
+        ScreenId::Wifi, ScreenId::Ble, ScreenId::Info,
+    };
+    for (ScreenId id : kAll)
+    {
+        if (strcmp(name, ScreenName(id)) == 0)
+        {
+            out = id;
+            return true;
+        }
+    }
+    return false;
+}
+
+void DisplayManager::Cmd_UiGo(Stream &in, Stream &out)
+{
+    JsonReader<128> json(in);
+
+    char    name[16] = {};
+    ScreenId target = current_;
+    bool    haveName = json.GetString("screen", name, sizeof(name));
+    bool    known = haveName && ParseScreen(name, target);
+
+    if (haveName && known)
+        Go(target);   // takes the LVGL lock itself; blocks until it has it
+
+    JsonObject resp(out);
+    resp.field("ok", !haveName || known);
+    resp.field("screen", ScreenName(current_));
+    resp.field("headless", lvDisplay_ == nullptr);
+    if (haveName && !known)
+        resp.field("error", "unknown screen");
 }
 
 void DisplayManager::IdleTimerCb(lv_timer_t *t)

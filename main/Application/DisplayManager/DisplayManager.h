@@ -10,6 +10,7 @@
 #include "WifiScreen.h"
 #include "BleScreen.h"
 #include "InfoScreen.h"
+#include "CommandManager/CommandEntry.h"
 #include "lvgl.h"
 
 // Owns LVGL (via esp_lvgl_port) and is the navigation shell: it holds every
@@ -44,6 +45,25 @@ private:
     bool InitLvgl();
     Screen* Resolve(ScreenId id);
     static void IdleTimerCb(lv_timer_t* t);
+
+    static const char* ScreenName(ScreenId id);
+    static bool ParseScreen(const char* name, ScreenId& out);
+
+    /// `uiGo` — drive navigation from a bench client instead of a fingertip.
+    ///   {"screen":"home"|"pin"|"settings"|"wifi"|"ble"|"info"}
+    /// Reports the screen actually shown, which is not always the one asked
+    /// for: Pin resolves to Settings when no PIN is stored. Omitting "screen"
+    /// just reads the current one back.
+    ///
+    /// Exists because a screen change is the heaviest thing the panel does — a
+    /// full-screen redraw — and measuring it had meant asking someone to tap
+    /// the glass at the right moment. Also the only way to exercise the UI on
+    /// a headless or remote unit.
+    void Cmd_UiGo(Stream& in, Stream& out);
+
+    inline static CommandEntry commands_[] = {
+        { "uiGo", &InvokeCommand<&DisplayManager::Cmd_UiGo> },
+    };
 
     ServiceProvider& serviceProvider_;
     InitState initState_;
