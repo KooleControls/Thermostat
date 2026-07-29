@@ -78,31 +78,48 @@ bool DisplayManager::InitLvgl()
         return false;
     }
 
-    // Partial draw buffer (10 lines) in internal DMA RAM. Rendering into a
-    // PSRAM buffer competes with the panel DMA for PSRAM bandwidth → on-screen
-    // artifacts; internal RAM + bounce-buffer mode is the proven config.
+    // SPIKE — direct mode into the panel's two PSRAM framebuffers.
     //
-    // 10 lines, not 20: at RGB565 each line costs 960 bytes of internal DMA RAM,
-    // and 20 lines (19 KB) left too little internal DRAM for the BLE stack — the
-    // controller takes ~45 KB and NimBLE's host task needs a 4 KB internal stack,
-    // which it silently failed to get. Halving this costs render flushes, not
-    // correctness: same location, same bounce-buffer mode, just smaller batches.
+    // Replaces a 10-line internal staging buffer + bounce-buffer DMA. Why, from
+    // measurements on this board (LVGL sysmon, screen changes driven by uiGo):
+    //
+    //   * A full-screen redraw cost ~108 ms of render with a 10-line buffer and
+    //     ~54 ms with a 20-line one. Halving the pass count halved the time, so
+    //     per-pass overhead dominated, not pixel work — each pass re-walks the
+    //     object tree and re-clips every object. 480x480 in 10-line slices is
+    //     48 passes. Direct mode is ONE.
+    //   * The staging buffer then had to be copied into the framebuffer. In
+    //     direct mode LVGL renders into the framebuffer, so that copy is gone.
+    //   * No bounce buffers means no GDMA EOF interrupt every 480 us with a CPU
+    //     memcpy out of PSRAM, so the deadline that produced the vertical slip
+    //     no longer exists to be missed.
+    //   * Frees ~38 KB of internal DRAM (19 KB staging + 19 KB bounce buffers),
+    //     which is what the BLE stack was starved of.
+    //
+    // The old comment here said rendering into PSRAM competes with the panel DMA
+    // and produced artifacts. That was measured without double buffering and
+    // without a VSYNC-synced swap — avoid_tearing supplies both, which is
+    // precisely what stops the renderer and the scanout touching one buffer.
+    //
+    // With avoid_tearing the port ignores buffer_size and adopts the panel's own
+    // framebuffers, but direct mode still asserts buffer_size == hres*vres.
     lvgl_port_display_cfg_t disp_cfg = {};
     disp_cfg.panel_handle = serviceProvider_.getBoard().GetPanel();
-    disp_cfg.buffer_size = 480 * 10;
-    disp_cfg.double_buffer = false;
+    disp_cfg.buffer_size = 480 * 480;
+    disp_cfg.double_buffer = true;
     disp_cfg.hres = 480;
     disp_cfg.vres = 480;
     disp_cfg.monochrome = false;
     disp_cfg.color_format = LV_COLOR_FORMAT_RGB565;
-    disp_cfg.flags.buff_dma = true;
+    disp_cfg.flags.buff_dma = false;
     disp_cfg.flags.buff_spiram = false;
     disp_cfg.flags.swap_bytes = false;
     disp_cfg.flags.full_refresh = false;
+    disp_cfg.flags.direct_mode = true;
 
     lvgl_port_display_rgb_cfg_t rgb_cfg = {};
-    rgb_cfg.flags.bb_mode = true;         // bounce-buffer mode (anti-glitch)
-    rgb_cfg.flags.avoid_tearing = false;
+    rgb_cfg.flags.bb_mode = false;
+    rgb_cfg.flags.avoid_tearing = true;
 
     lvDisplay_ = lvgl_port_add_disp_rgb(&disp_cfg, &rgb_cfg);
     if (lvDisplay_ == nullptr)

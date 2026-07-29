@@ -54,6 +54,24 @@ struct St7701Config
     lcd_clock_source_t clk_src = LCD_CLK_SRC_DEFAULT;   // DIYLESS pins PLL160M
     size_t dma_burst_size = 0;   // 0 → driver default
 
+    // Framebuffer layout. Two shapes are useful here:
+    //
+    //   num_fbs 1 + bounce_buffer_lines N
+    //     One framebuffer in PSRAM, DMA fed from a pair of small internal
+    //     bounce buffers refilled by a GDMA EOF interrupt every N lines. Cheap
+    //     on PSRAM, but the refill is a CPU memcpy out of PSRAM inside an ISR
+    //     with a hard deadline of N lines of scanout; miss it and the panel is
+    //     fed from the wrong offset and the image slips vertically.
+    //
+    //   num_fbs 2 + bounce_buffer_lines 0
+    //     Two framebuffers in PSRAM, DMA streaming straight from them, no
+    //     interrupt and no deadline to miss. Lets LVGL render directly into the
+    //     buffers and swap on VSYNC — one render pass instead of one per
+    //     bounce-buffer's worth of lines, no staging copy, and no tearing.
+    //     Costs a second full framebuffer of PSRAM.
+    size_t num_fbs = 1;
+    int bounce_buffer_lines = 10;   // 0 disables bounce-buffer mode entirely
+
     // ST7701 panel device
     gpio_num_t reset_gpio = GPIO_NUM_NC;   // NC when reset is via an IO expander
     lcd_rgb_element_order_t rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
@@ -106,8 +124,10 @@ public:
         esp_lcd_rgb_panel_config_t rgb_cfg = {};
         rgb_cfg.clk_src = cfg.clk_src;
         rgb_cfg.data_width = 16;
-        rgb_cfg.num_fbs = 1;
-        rgb_cfg.bounce_buffer_size_px = cfg.h_res * 10;
+        rgb_cfg.num_fbs = cfg.num_fbs;
+        rgb_cfg.bounce_buffer_size_px = cfg.bounce_buffer_lines > 0
+                                            ? cfg.h_res * cfg.bounce_buffer_lines
+                                            : 0;
         rgb_cfg.dma_burst_size = cfg.dma_burst_size;  // 0 keeps the driver default
         rgb_cfg.hsync_gpio_num = cfg.hsync;
         rgb_cfg.vsync_gpio_num = cfg.vsync;
