@@ -4,11 +4,14 @@
 (`2026-07-27-gateway-ap-update-link.md`). Reasoning:
 `docs/reasoning/2026-07-29-09h17-ble-instead-of-the-gateway-ap.md`.
 
-The gateway is a BLE peripheral advertising **its device name + a suffix derived from its
-BLE MAC** — *not* the gateway ID: `gatewayId` defaults to `0` and `gatewayName` defaults to
-`"NEW DOORLOCK GATEWAY"` on every unit, so neither can be relied on in the field. The
-thermostat is the central: it scans, lists what it finds in a new **BLE menu next to the
-WiFi menu**, and the installer picks the gateway from that list.
+The gateway is a BLE peripheral advertising **its DGID (`gatewayId`) as manufacturer data
+plus its name in the scan-response packet** — two packets, because 31 bytes each will not
+hold both. The **MAC needs no field**: it is in every packet header. The **install code is
+never advertised**. The thermostat is the central: it scans and lists what it hears in a new
+**BLE menu next to the WiFi menu**, showing **name as the primary row and DGID underneath**,
+with a MAC suffix as the fallback when a unit is unprovisioned (`gatewayId` defaults to `0`,
+`gatewayName` to `"NEW DOORLOCK GATEWAY"`). See
+`docs/reasoning/2026-07-29-11h03-what-goes-in-the-advertisement.md`.
 BLE then carries the **full `CommandManager` surface** — not a trigger, not a
 firmware-only pipe — so `writePartition`, settings and everything else work over it
 exactly as over the WebSocket.
