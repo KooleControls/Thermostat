@@ -3,6 +3,7 @@
 #include "CommandManager/CommandManager.h"
 #include "SettingsManager/SettingsManager.h"
 #include "JsonScope.h"
+#include "JsonReader.h"
 #include "esp_log.h"
 
 #include "nimble/nimble_port.h"
@@ -11,6 +12,7 @@
 #include "services/gap/ble_svc_gap.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 // Bond storage lives in the NimBLE "store config" module, which has no public
@@ -39,7 +41,8 @@ void BleManager::Init()
 
     s_instance = this;
     serviceProvider_.getCommandManager().Register(this, commands_);
-    serviceProvider_.getSettingsManager().Register({ &enableSetting_ });
+    serviceProvider_.getSettingsManager().Register(
+        { &enableSetting_, &peerSetting_, &peerTypeSetting_ });
 
     if (!enableSetting_.Get())
     {
@@ -47,6 +50,31 @@ void BleManager::Init()
         init.SetReady();
         return;
     }
+
+    // Remember the paired gateway, if there is one: the link is re-established
+    // without any installer action, here and after every dropout.
+    char stored[24] = {};
+    peerSetting_.Get(stored, sizeof(stored));
+    if (stored[0] != '\0')
+    {
+        ble_addr_t addr{};
+        if (ParseAddr(stored, static_cast<uint8_t>(peerTypeSetting_.Get()), addr))
+        {
+            target_ = addr;
+            haveTarget_ = true;
+            ESP_LOGI(TAG, "Paired gateway on record: %s", stored);
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Stored peer '%s' is not a valid address, ignoring", stored);
+        }
+    }
+
+    esp_timer_create_args_t timerArgs = {};
+    timerArgs.callback = &BleManager::ReconnectTimerCb;
+    timerArgs.arg = this;
+    timerArgs.name = "ble_reconnect";
+    esp_timer_create(&timerArgs, &reconnectTimer_);
 
     StartStack();
 
@@ -112,9 +140,12 @@ void BleManager::OnResetTrampoline(int reason)
     ESP_LOGW("BleManager", "NimBLE host reset, reason %d", reason);
     if (s_instance)
     {
-        LOCK(s_instance->mutex_);
-        s_instance->synced_ = false;
-        s_instance->scanning_ = false;
+        {
+            LOCK(s_instance->mutex_);
+            s_instance->synced_ = false;
+            s_instance->scanning_ = false;
+        }
+        s_instance->DropLink("host reset");
     }
 }
 
@@ -137,13 +168,17 @@ void BleManager::OnSync()
         return;
     }
 
+    bool reconnect;
     {
         LOCK(mutex_);
         ownAddrType_ = addrType;
         synced_ = true;
+        reconnect = haveTarget_;
     }
 
     ESP_LOGI(TAG, "Controller synced (own address type %u)", addrType);
+
+    if (reconnect) StartConnect();
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -208,39 +243,6 @@ int BleManager::GetPeers(Peer* out, int max) const
         out[n++] = p;
     }
     return n;
-}
-
-int BleManager::GapEventTrampoline(struct ble_gap_event* event, void* arg)
-{
-    auto* self = static_cast<BleManager*>(arg);
-    return self ? self->OnGapEvent(event) : 0;
-}
-
-int BleManager::OnGapEvent(struct ble_gap_event* event)
-{
-    switch (event->type)
-    {
-        case BLE_GAP_EVENT_DISC:
-            NotePeer(event->disc);
-            return 0;
-
-        case BLE_GAP_EVENT_DISC_COMPLETE:
-        {
-            int found;
-            {
-                LOCK(mutex_);
-                scanning_ = false;
-                found = 0;
-                for (const auto& p : peers_) if (p.used) found++;
-            }
-            ESP_LOGI(TAG, "Scan complete (reason %d), %d gateway(s) heard",
-                     event->disc_complete.reason, found);
-            return 0;
-        }
-
-        default:
-            return 0;
-    }
 }
 
 // Merge one advertising report into the peer table. The gateway id comes from
@@ -312,12 +314,579 @@ void BleManager::NotePeer(const struct ble_gap_disc_desc& disc)
     }
 }
 
+// ──────────────────────────────────────────────────────────────
+// Connect / pair / discover
+// ──────────────────────────────────────────────────────────────
+
+bool BleManager::Connect(const ble_addr_t& addr, uint32_t passkey)
+{
+    char text[18];
+    FormatAddr(addr, text, sizeof(text));
+
+    {
+        LOCK(mutex_);
+        if (!stackUp_ || !synced_)
+        {
+            ESP_LOGW(TAG, "Connect requested but stack is not ready");
+            return false;
+        }
+        target_ = addr;
+        haveTarget_ = true;
+        pendingPasskey_ = passkey;
+    }
+
+    // Remember the choice before the attempt: a pairing that fails halfway
+    // should still leave us retrying the gateway the installer picked, rather
+    // than silently forgetting it.
+    peerSetting_.Set(text);
+    peerTypeSetting_.Set(addr.type);
+
+    // Scanning and connecting cannot run at the same time.
+    if (Scanning())
+    {
+        ble_gap_disc_cancel();
+        LOCK(mutex_);
+        scanning_ = false;
+    }
+
+    StartConnect();
+    return true;
+}
+
+void BleManager::StartConnect()
+{
+    uint8_t    ownType;
+    ble_addr_t addr;
+    {
+        LOCK(mutex_);
+        if (!haveTarget_ || !synced_) return;
+        if (link_ != LinkState::Down)
+        {
+            ESP_LOGD(TAG, "Connect skipped, link is %s", StateName(link_));
+            return;
+        }
+        ownType = ownAddrType_;
+        addr = target_;
+        link_ = LinkState::Connecting;
+    }
+
+    char text[18];
+    FormatAddr(addr, text, sizeof(text));
+    ESP_LOGI(TAG, "Connecting to %s (type %u)", text, addr.type);
+
+    int rc = ble_gap_connect(ownType, &addr, ConnectTimeoutMs, nullptr,
+                             &BleManager::GapEventTrampoline, this);
+    if (rc != 0)
+    {
+        ESP_LOGE(TAG, "ble_gap_connect failed: %d", rc);
+        SetState(LinkState::Down);
+        ScheduleReconnect();
+    }
+}
+
+void BleManager::ScheduleReconnect()
+{
+    bool want;
+    {
+        LOCK(mutex_);
+        want = haveTarget_ && link_ == LinkState::Down;
+    }
+    if (!want || reconnectTimer_ == nullptr) return;
+
+    // Never give up on the link (docs/reasoning/2026-07-27-16h17-...): a gateway
+    // switched off for a week must be picked up when it returns, with no
+    // installer present.
+    esp_timer_stop(reconnectTimer_);
+    esp_timer_start_once(reconnectTimer_, ReconnectDelayUs);
+}
+
+void BleManager::ReconnectTimerCb(void* arg)
+{
+    auto* self = static_cast<BleManager*>(arg);
+    if (self) self->StartConnect();
+}
+
+void BleManager::DropLink(const char* why)
+{
+    uint16_t handle;
+    {
+        LOCK(mutex_);
+        handle = connHandle_;
+        connHandle_ = BLE_HS_CONN_HANDLE_NONE;
+        link_ = LinkState::Down;
+        mtu_ = 23;
+        svcStart_ = svcEnd_ = 0;
+        inboundValHandle_ = outboundValHandle_ = inboundCccd_ = 0;
+    }
+
+    if (handle != BLE_HS_CONN_HANDLE_NONE)
+        ble_gap_terminate(handle, BLE_ERR_REM_USER_CONN_TERM);
+
+    ESP_LOGW(TAG, "Link down: %s", why);
+    ScheduleReconnect();
+}
+
+void BleManager::Forget()
+{
+    ble_addr_t addr;
+    bool had;
+    {
+        LOCK(mutex_);
+        addr = target_;
+        had = haveTarget_;
+        haveTarget_ = false;
+        pendingPasskey_ = 0;
+    }
+
+    peerSetting_.Set("");
+    peerTypeSetting_.Set(0);
+
+    if (reconnectTimer_) esp_timer_stop(reconnectTimer_);
+
+    uint16_t handle;
+    {
+        LOCK(mutex_);
+        handle = connHandle_;
+        connHandle_ = BLE_HS_CONN_HANDLE_NONE;
+        link_ = LinkState::Down;
+    }
+    if (handle != BLE_HS_CONN_HANDLE_NONE)
+        ble_gap_terminate(handle, BLE_ERR_REM_USER_CONN_TERM);
+
+    // Delete the bond too, otherwise a re-pair with the same gateway would
+    // resume the old keys instead of asking for the install code again.
+    if (had) ble_store_util_delete_peer(&addr);
+
+    ESP_LOGI(TAG, "Gateway forgotten");
+}
+
+void BleManager::SetState(LinkState s)
+{
+    LOCK(mutex_);
+    link_ = s;
+}
+
+BleManager::LinkState BleManager::GetLinkState() const
+{
+    LOCK(mutex_);
+    return link_;
+}
+
+const char* BleManager::StateName(LinkState s)
+{
+    switch (s)
+    {
+        case LinkState::Down:        return "down";
+        case LinkState::Connecting:  return "connecting";
+        case LinkState::Securing:    return "securing";
+        case LinkState::Discovering: return "discovering";
+        case LinkState::Ready:       return "ready";
+    }
+    return "?";
+}
+
+// ──────────────────────────────────────────────────────────────
+// GAP events
+// ──────────────────────────────────────────────────────────────
+
+int BleManager::GapEventTrampoline(struct ble_gap_event* event, void* arg)
+{
+    auto* self = static_cast<BleManager*>(arg);
+    return self ? self->OnGapEvent(event) : 0;
+}
+
+int BleManager::OnGapEvent(struct ble_gap_event* event)
+{
+    switch (event->type)
+    {
+        case BLE_GAP_EVENT_DISC:
+            NotePeer(event->disc);
+            return 0;
+
+        case BLE_GAP_EVENT_DISC_COMPLETE:
+        {
+            int found = 0;
+            {
+                LOCK(mutex_);
+                scanning_ = false;
+                for (const auto& p : peers_) if (p.used) found++;
+            }
+            ESP_LOGI(TAG, "Scan complete (reason %d), %d gateway(s) heard",
+                     event->disc_complete.reason, found);
+            return 0;
+        }
+
+        case BLE_GAP_EVENT_CONNECT:
+        {
+            if (event->connect.status != 0)
+            {
+                ESP_LOGW(TAG, "Connect failed: status %d", event->connect.status);
+                SetState(LinkState::Down);
+                ScheduleReconnect();
+                return 0;
+            }
+
+            {
+                LOCK(mutex_);
+                connHandle_ = event->connect.conn_handle;
+                link_ = LinkState::Securing;
+            }
+            ESP_LOGI(TAG, "Connected (handle %u), starting encryption",
+                     event->connect.conn_handle);
+
+            // A bigger MTU is what makes the transfer rate tolerable: one
+            // session chunk is one GATT write, so the MTU *is* the chunk size.
+            ble_gattc_exchange_mtu(event->connect.conn_handle, nullptr, nullptr);
+
+            // Encrypt/pair BEFORE discovering anything. On a first pairing this
+            // triggers the passkey prompt; with a stored bond it silently
+            // resumes the old keys.
+            int rc = ble_gap_security_initiate(event->connect.conn_handle);
+            if (rc != 0)
+            {
+                ESP_LOGE(TAG, "ble_gap_security_initiate failed: %d", rc);
+                DropLink("security could not be started");
+            }
+            return 0;
+        }
+
+        case BLE_GAP_EVENT_DISCONNECT:
+            ESP_LOGW(TAG, "Disconnected, reason 0x%x", event->disconnect.reason);
+            {
+                LOCK(mutex_);
+                connHandle_ = BLE_HS_CONN_HANDLE_NONE;
+                link_ = LinkState::Down;
+                mtu_ = 23;
+                inboundValHandle_ = outboundValHandle_ = inboundCccd_ = 0;
+            }
+            ScheduleReconnect();
+            return 0;
+
+        case BLE_GAP_EVENT_ENC_CHANGE:
+        {
+            ble_gap_conn_desc desc{};
+            if (event->enc_change.status != 0 ||
+                ble_gap_conn_find(event->enc_change.conn_handle, &desc) != 0)
+            {
+                ESP_LOGW(TAG, "Encryption failed: status %d", event->enc_change.status);
+                DropLink("encryption failed");
+                return 0;
+            }
+
+            // This is the whole authentication decision for this transport, so
+            // it is deliberately strict: encrypted is not enough, the link must
+            // be *authenticated*, which is only true if the passkey was really
+            // used. A just-works pairing gets no command surface.
+            if (!desc.sec_state.encrypted || !desc.sec_state.authenticated)
+            {
+                ESP_LOGE(TAG, "Refusing link: encrypted=%d authenticated=%d",
+                         desc.sec_state.encrypted, desc.sec_state.authenticated);
+                DropLink("link not authenticated");
+                return 0;
+            }
+
+            { LOCK(mutex_); pendingPasskey_ = 0; }   // consumed
+            ESP_LOGI(TAG, "Link encrypted and authenticated (bonded=%d)",
+                     desc.sec_state.bonded);
+            StartDiscovery();
+            return 0;
+        }
+
+        case BLE_GAP_EVENT_PASSKEY_ACTION:
+        {
+            if (event->passkey.params.action != BLE_SM_IOACT_INPUT)
+            {
+                ESP_LOGE(TAG, "Unexpected passkey action %d — the gateway holds "
+                              "the passkey and we enter it",
+                         event->passkey.params.action);
+                return 0;
+            }
+
+            uint32_t key;
+            { LOCK(mutex_); key = pendingPasskey_; }
+
+            if (key == 0)
+            {
+                ESP_LOGE(TAG, "Gateway asked for a passkey but none was given "
+                              "(bond gone? re-pair with the install code)");
+                DropLink("no passkey available");
+                return 0;
+            }
+
+            ble_sm_io io = {};
+            io.action = BLE_SM_IOACT_INPUT;
+            io.passkey = key;
+            int rc = ble_sm_inject_io(event->passkey.conn_handle, &io);
+            ESP_LOGI(TAG, "Passkey submitted (rc %d)", rc);
+            return 0;
+        }
+
+        case BLE_GAP_EVENT_MTU:
+            { LOCK(mutex_); mtu_ = event->mtu.value; }
+            ESP_LOGI(TAG, "MTU negotiated: %u", event->mtu.value);
+            return 0;
+
+        case BLE_GAP_EVENT_NOTIFY_RX:
+        {
+            // The inbound half of the session transport plugs in here: this is
+            // where a chunk gets queued for the dispatch task.
+            uint16_t len = OS_MBUF_PKTLEN(event->notify_rx.om);
+            ESP_LOGI(TAG, "Notify on handle %u, %u bytes (transport not wired yet)",
+                     event->notify_rx.attr_handle, len);
+            return 0;
+        }
+
+        case BLE_GAP_EVENT_REPEAT_PAIRING:
+        {
+            // The gateway wants to pair again while we still hold a bond for it.
+            // Drop ours and let the new pairing proceed, otherwise the link
+            // would be stuck forever on stale keys.
+            ble_gap_conn_desc desc{};
+            if (ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc) == 0)
+                ble_store_util_delete_peer(&desc.peer_id_addr);
+            return BLE_GAP_REPEAT_PAIRING_RETRY;
+        }
+
+        default:
+            return 0;
+    }
+}
+
+// ──────────────────────────────────────────────────────────────
+// GATT discovery chain: service → characteristics → CCCD → subscribe
+// ──────────────────────────────────────────────────────────────
+
+void BleManager::StartDiscovery()
+{
+    uint16_t handle;
+    {
+        LOCK(mutex_);
+        handle = connHandle_;
+        link_ = LinkState::Discovering;
+        svcStart_ = svcEnd_ = 0;
+        inboundValHandle_ = outboundValHandle_ = inboundCccd_ = 0;
+    }
+
+    int rc = ble_gattc_disc_svc_by_uuid(handle, &kcble::SERVICE_UUID.u,
+                                        &BleManager::SvcDiscTrampoline, this);
+    if (rc != 0)
+    {
+        ESP_LOGE(TAG, "Service discovery could not start: %d", rc);
+        DropLink("service discovery failed to start");
+    }
+}
+
+int BleManager::SvcDiscTrampoline(uint16_t, const struct ble_gatt_error* error,
+                                  const struct ble_gatt_svc* svc, void* arg)
+{
+    auto* self = static_cast<BleManager*>(arg);
+    return self ? self->OnSvcDisc(error, svc) : 0;
+}
+
+int BleManager::OnSvcDisc(const struct ble_gatt_error* error,
+                          const struct ble_gatt_svc* svc)
+{
+    if (error->status == 0 && svc != nullptr)
+    {
+        LOCK(mutex_);
+        svcStart_ = svc->start_handle;
+        svcEnd_ = svc->end_handle;
+        return 0;
+    }
+
+    if (error->status != BLE_HS_EDONE)
+    {
+        ESP_LOGE(TAG, "Service discovery error: %d", error->status);
+        DropLink("service discovery error");
+        return 0;
+    }
+
+    uint16_t handle, start, end;
+    {
+        LOCK(mutex_);
+        handle = connHandle_;
+        start = svcStart_;
+        end = svcEnd_;
+    }
+
+    if (start == 0)
+    {
+        // Connected to something that is not a KC gateway, or to one running
+        // firmware without the service.
+        ESP_LOGE(TAG, "Peer does not expose the KC command service");
+        DropLink("service not found");
+        return 0;
+    }
+
+    ESP_LOGI(TAG, "Service found (handles %u..%u), discovering characteristics",
+             start, end);
+    // One pass over all characteristics, matching UUIDs ourselves — cheaper than
+    // two by-uuid discoveries, and it fails loudly if one is missing.
+    int rc = ble_gattc_disc_all_chrs(handle, start, end,
+                                     &BleManager::ChrDiscTrampoline, this);
+    if (rc != 0) DropLink("characteristic discovery failed to start");
+    return 0;
+}
+
+int BleManager::ChrDiscTrampoline(uint16_t, const struct ble_gatt_error* error,
+                                  const struct ble_gatt_chr* chr, void* arg)
+{
+    auto* self = static_cast<BleManager*>(arg);
+    return self ? self->OnChrDisc(error, chr) : 0;
+}
+
+int BleManager::OnChrDisc(const struct ble_gatt_error* error,
+                          const struct ble_gatt_chr* chr)
+{
+    if (error->status == 0 && chr != nullptr)
+    {
+        LOCK(mutex_);
+        if (ble_uuid_cmp(&chr->uuid.u, &kcble::CHR_INBOUND_UUID.u) == 0)
+            inboundValHandle_ = chr->val_handle;
+        else if (ble_uuid_cmp(&chr->uuid.u, &kcble::CHR_OUTBOUND_UUID.u) == 0)
+            outboundValHandle_ = chr->val_handle;
+        return 0;
+    }
+
+    if (error->status != BLE_HS_EDONE)
+    {
+        ESP_LOGE(TAG, "Characteristic discovery error: %d", error->status);
+        DropLink("characteristic discovery error");
+        return 0;
+    }
+
+    uint16_t handle, inbound, outbound, end;
+    {
+        LOCK(mutex_);
+        handle = connHandle_;
+        inbound = inboundValHandle_;
+        outbound = outboundValHandle_;
+        end = svcEnd_;
+    }
+
+    if (inbound == 0 || outbound == 0)
+    {
+        ESP_LOGE(TAG, "Service is missing a characteristic (in=%u out=%u)",
+                 inbound, outbound);
+        DropLink("incomplete service");
+        return 0;
+    }
+
+    ESP_LOGI(TAG, "Characteristics found (in=%u out=%u), finding the CCCD",
+             inbound, outbound);
+    // The CCCD is a descriptor of the inbound characteristic; writing it is what
+    // actually turns notifications on.
+    int rc = ble_gattc_disc_all_dscs(handle, inbound, end,
+                                     &BleManager::DscDiscTrampoline, this);
+    if (rc != 0) DropLink("descriptor discovery failed to start");
+    return 0;
+}
+
+int BleManager::DscDiscTrampoline(uint16_t, const struct ble_gatt_error* error,
+                                  uint16_t, const struct ble_gatt_dsc* dsc, void* arg)
+{
+    auto* self = static_cast<BleManager*>(arg);
+    return self ? self->OnDscDisc(error, dsc) : 0;
+}
+
+int BleManager::OnDscDisc(const struct ble_gatt_error* error,
+                          const struct ble_gatt_dsc* dsc)
+{
+    if (error->status == 0 && dsc != nullptr)
+    {
+        ble_uuid16_t cccd = BLE_UUID16_INIT(BLE_GATT_DSC_CLT_CFG_UUID16);
+        LOCK(mutex_);
+        if (inboundCccd_ == 0 && ble_uuid_cmp(&dsc->uuid.u, &cccd.u) == 0)
+            inboundCccd_ = dsc->handle;
+        return 0;
+    }
+
+    if (error->status != BLE_HS_EDONE)
+    {
+        ESP_LOGE(TAG, "Descriptor discovery error: %d", error->status);
+        DropLink("descriptor discovery error");
+        return 0;
+    }
+
+    uint16_t handle, cccdHandle;
+    {
+        LOCK(mutex_);
+        handle = connHandle_;
+        cccdHandle = inboundCccd_;
+    }
+
+    if (cccdHandle == 0)
+    {
+        ESP_LOGE(TAG, "Inbound characteristic has no CCCD — cannot subscribe");
+        DropLink("no CCCD");
+        return 0;
+    }
+
+    uint8_t value[2] = { 0x01, 0x00 };     // notifications on
+    int rc = ble_gattc_write_flat(handle, cccdHandle, value, sizeof(value),
+                                  &BleManager::SubscribeTrampoline, this);
+    if (rc != 0) DropLink("subscribe write failed to start");
+    return 0;
+}
+
+int BleManager::SubscribeTrampoline(uint16_t, const struct ble_gatt_error* error,
+                                    struct ble_gatt_attr*, void* arg)
+{
+    auto* self = static_cast<BleManager*>(arg);
+    return self ? self->OnSubscribed(error) : 0;
+}
+
+int BleManager::OnSubscribed(const struct ble_gatt_error* error)
+{
+    if (error->status != 0)
+    {
+        ESP_LOGE(TAG, "Subscribe failed: %d", error->status);
+        DropLink("subscribe failed");
+        return 0;
+    }
+
+    uint16_t mtu;
+    {
+        LOCK(mutex_);
+        link_ = LinkState::Ready;
+        mtu = mtu_;
+    }
+
+    // One session chunk = one GATT write, so the usable payload is the MTU less
+    // the 3-byte ATT header and the 3-byte session header.
+    ESP_LOGI(TAG, "Link READY (mtu %u, chunk payload %d bytes)",
+             mtu, static_cast<int>(mtu) - 3 - 3);
+    return 0;
+}
+
+// ──────────────────────────────────────────────────────────────
+// Address helpers
+// ──────────────────────────────────────────────────────────────
+
 void BleManager::FormatAddr(const ble_addr_t& addr, char* out, size_t cap)
 {
     // On air the address is little-endian; humans read it MSB-first.
     snprintf(out, cap, "%02x:%02x:%02x:%02x:%02x:%02x",
              addr.val[5], addr.val[4], addr.val[3],
              addr.val[2], addr.val[1], addr.val[0]);
+}
+
+bool BleManager::ParseAddr(const char* text, uint8_t type, ble_addr_t& out)
+{
+    if (text == nullptr) return false;
+
+    unsigned b[6];
+    if (sscanf(text, "%x:%x:%x:%x:%x:%x",
+               &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) != 6)
+        return false;
+
+    for (int i = 0; i < 6; i++)
+    {
+        if (b[i] > 0xFF) return false;
+        out.val[5 - i] = static_cast<uint8_t>(b[i]);   // text is MSB-first
+    }
+    out.type = type;
+    return true;
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -342,10 +911,14 @@ void BleManager::Cmd_BleStatus(Stream& in, Stream& out)
 {
     (void)in;
     bool up, synced;
+    LinkState state;
+    uint16_t mtu;
     {
         LOCK(mutex_);
         up = stackUp_;
         synced = synced_;
+        state = link_;
+        mtu = mtu_;
     }
 
     JsonObject root(out);
@@ -354,8 +927,52 @@ void BleManager::Cmd_BleStatus(Stream& in, Stream& out)
     root.field("stackUp", up);
     root.field("synced", synced);
     root.field("scanning", Scanning());
-    root.field("connected", false);      // the connect path lands next
+    root.field("link", StateName(state));
+    root.field("connected", state == LinkState::Ready);
+    root.field("mtu", static_cast<uint32_t>(mtu));
+    char peer[24] = {};
+    peerSetting_.Get(peer, sizeof(peer));
+    root.field("peer", peer);
     WritePeers(root);
+}
+
+void BleManager::Cmd_BleConnect(Stream& in, Stream& out)
+{
+    JsonReader<192> json(in);
+
+    char addrText[24] = {};
+    char codeText[16] = {};
+    json.GetString("addr", addrText, sizeof(addrText));
+    json.GetString("code", codeText, sizeof(codeText));
+    int32_t addrTypeVal = json.GetInt("addrType", 0);
+
+    JsonObject root(out);
+
+    ble_addr_t addr{};
+    if (!ParseAddr(addrText, static_cast<uint8_t>(addrTypeVal), addr))
+    {
+        root.field("ok", false);
+        root.field("error", "addr must be aa:bb:cc:dd:ee:ff");
+        return;
+    }
+
+    // The install code is only needed for a first pairing; a stored bond
+    // re-encrypts without it, so an empty code is legal here.
+    uint32_t passkey = codeText[0] != '\0'
+                     ? static_cast<uint32_t>(strtoul(codeText, nullptr, 10))
+                     : 0;
+
+    bool ok = Connect(addr, passkey);
+    root.field("ok", ok);
+    if (!ok) root.field("error", "BLE stack not ready");
+}
+
+void BleManager::Cmd_BleForget(Stream& in, Stream& out)
+{
+    (void)in;
+    Forget();
+    JsonObject root(out);
+    root.field("ok", true);
 }
 
 // Appends the peer array to the caller's already-open root object.
