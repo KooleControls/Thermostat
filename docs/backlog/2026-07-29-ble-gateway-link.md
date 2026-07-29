@@ -4,9 +4,11 @@
 (`2026-07-27-gateway-ap-update-link.md`). Reasoning:
 `docs/reasoning/2026-07-29-09h17-ble-instead-of-the-gateway-ap.md`.
 
-The gateway is a BLE peripheral advertising **its device name + gateway ID**
-(`DGWN`/`DGID`). The thermostat is the central: it scans, lists what it finds in a new
-**BLE menu next to the WiFi menu**, and the installer picks the right gateway by name.
+The gateway is a BLE peripheral advertising **its device name + a suffix derived from its
+BLE MAC** — *not* the gateway ID: `gatewayId` defaults to `0` and `gatewayName` defaults to
+`"NEW DOORLOCK GATEWAY"` on every unit, so neither can be relied on in the field. The
+thermostat is the central: it scans, lists what it finds in a new **BLE menu next to the
+WiFi menu**, and the installer picks the gateway from that list.
 BLE then carries the **full `CommandManager` surface** — not a trigger, not a
 firmware-only pipe — so `writePartition`, settings and everything else work over it
 exactly as over the WebSocket.
@@ -16,8 +18,12 @@ The OpenTherm link stays the control/demand path. BLE is the management channel.
 **Why (the only reason):** the thermostat stays reachable on **house WiFi in parallel**
 with talking to the gateway — separate radio for the link, single STA left free for the
 LAN, web UI never goes dark. Not a privacy or install-effort improvement: a BLE
-advertisement is as visible as a broadcast SSID. See
-`docs/reasoning/2026-07-29-09h38-the-ble-pivot-is-about-parallel-availability.md`.
+advertisement is as visible as a broadcast SSID.
+**But note who benefits:** thermostat WiFi is mainly a *development* aid and may be
+**disabled in the field**, so BLE must stand alone — no falling back to WiFi for the big
+transfer, and **field-relevant UI belongs on the display**, since the React UI is served
+over HTTP and is unreachable over BLE. See
+`docs/reasoning/2026-07-29-09h38-...md` and its correction `-10h55-3-wifi-is-a-development-convenience.md`.
 
 **Radios:** the gateway does **Ethernet + WiFi STA + BLE and is never an AP**; the
 thermostat does **STA when a network is available, its own AP when not** (the Strux
@@ -37,9 +43,13 @@ fallback, already built), **plus BLE always** for the gateway link. See
    decide once the roles are wired. The existing `BleManager` +
    `KCThermoBleProtocol.h` demo code is the precedent for the transport, but its three
    fixed characteristics are not the protocol we want.
-3. **Pairing / bonding UI.** Scan list in the service menu, connect, bond, store the
-   gateway address in settings. Then auto-reconnect and never stop retrying (see
-   `docs/reasoning/2026-07-27-16h17-never-stop-retrying-the-link.md`).
+3. **Pairing: the gateway's 6 public install-code digits as the BLE passkey.** The
+   gateway holds it fixed (`system.installCode`, ASCII, default `"000000"`); the installer
+   types it on the **touchscreen** — display-first, not browser-only. Then bond, store the
+   peer in settings, auto-reconnect and never stop retrying (see
+   `docs/reasoning/2026-07-27-16h17-never-stop-retrying-the-link.md`). Accepted: one code
+   per resort, and a fixed passkey is sniffable in principle — this keeps the curious out,
+   it is not a foolproof channel. See `-10h55-2-picked-by-name-gated-by-the-install-code.md`.
 4. **Auth over BLE.** In-band `hello` → `login`/`auth` is already per-connection, so it
    carries over — but `web.password` defaults to empty (auth off), so decide whether a
    bonded BLE peer counts as authenticated or the gateway has to hold a credential.
@@ -52,11 +62,20 @@ fallback, already built), **plus BLE always** for the gateway link. See
 - **Fix lost-IP recovery.** `Ipv4Lost` clears `staConnected_` and nothing retries; a
   lease lost while still associated strands the device until reboot. Now purely about
   house WiFi, but still a real bug.
-- **Merge `feature/wifi-diagnostics`** — disconnect reason code + passphrase length.
+- ~~Merge `feature/wifi-diagnostics`~~ — done, merged into `main` 2026-07-29.
 - **NTP through the gateway** is no longer free: with no shared IP link the thermostat
   needs its own route to an NTP server, or the time has to come over BLE as a command.
 - The **`www` partition** is a second transfer over the same mechanism, and local `.bin`
   upload via `FirmwarePage` stays the offline floor.
+
+## Open-source boundary
+
+KC-specific code **is allowed here as long as it stays inside the BLE manager** — a third
+party can delete that module, plug in their own transport, and everything else (display,
+control loop, OpenTherm, settings, commands, web UI) still serves them. The prohibition is
+on leaking *existing* KC internals (connection-server protocol, keys, fleet semantics), not
+on KC-ness. So the GATT/pairing contract can be plainly KC's. See
+`docs/reasoning/2026-07-29-10h55-kc-specific-code-lives-in-the-ble-manager.md`.
 
 ## Relations
 
