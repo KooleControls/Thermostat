@@ -11,6 +11,7 @@ enum class ScreenId
     Pin,        // resolved to Settings by the shell when no PIN is set
     Settings,
     Wifi,
+    Ble,
     Info,
 };
 

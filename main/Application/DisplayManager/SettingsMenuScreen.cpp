@@ -16,6 +16,7 @@ void SettingsMenuScreen::Build(lv_obj_t* root)
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
 
     wifiSummary_ = AddRow(list, LV_SYMBOL_WIFI, "WiFi", ScreenId::Wifi);
+    AddRow(list, LV_SYMBOL_BLUETOOTH, "Gateway", ScreenId::Ble);
     // Still the shared shell the firmware-update item plugs into
     // (docs/backlog/2026-07-27-wifi-update-ui.md).
     AddPendingRow(list, LV_SYMBOL_DOWNLOAD, "Firmware");

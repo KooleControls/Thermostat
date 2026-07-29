@@ -106,6 +106,7 @@ Screen* DisplayManager::Resolve(ScreenId id)
         case ScreenId::Pin:      return &pinScreen_;
         case ScreenId::Settings: return &settingsScreen_;
         case ScreenId::Wifi:     return &wifiScreen_;
+        case ScreenId::Ble:      return &bleScreen_;
         case ScreenId::Info:     return &infoScreen_;
     }
     return &homeScreen_;
