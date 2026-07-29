@@ -38,3 +38,22 @@ CONFIG_BT_NIMBLE_NVS_PERSIST=y
 # Ask for the largest practical MTU: one session chunk = one GATT write, so the
 # MTU sets the chunk size and therefore the firmware-transfer rate.
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
+
+# ── Internal DRAM is the blocker for BLE on this board ──────────
+# Measured on hardware: with the display, WiFi and the web server up, only ~3.8 KB
+# of internal DRAM is free (largest block 2 KB), so NimBLE's host task cannot get
+# its 4 KB stack — and esp_nimble_enable() creates that task with
+# xTaskCreatePinnedToCore while IGNORING the result, so the failure is silent:
+# stack "up", no host task, no sync, every scan refused.
+#
+# Moving NimBLE's heap and the WiFi/LWIP buffers to PSRAM was tried and made it
+# WORSE — the controller then failed its own internal malloc and asserted
+# (BLE assert emi.c 164), which boot-loops the panel. So it is reverted here:
+#   CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+#   CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+# What the numbers showed: ~48 KB internal free before NimBLE, the controller takes
+# ~45 KB of it inside nimble_port_init, and the host task was left 3859 free /
+# 3584 largest — just under its 4 KB. CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y was
+# tried too and made it WORSE (37 KB free), so it is not set either. What actually
+# freed the room was halving LVGL's internal draw buffer in DisplayManager, and
+# BleManager refuses to start below a measured floor rather than asserting.

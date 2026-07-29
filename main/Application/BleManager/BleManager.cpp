@@ -5,6 +5,7 @@
 #include "JsonScope.h"
 #include "JsonReader.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -88,6 +89,24 @@ void BleManager::Init()
 
 void BleManager::StartStack()
 {
+    // Pre-flight the internal DRAM. The BLE controller allocates tens of KB of
+    // internal RAM and NimBLE's host task needs a 4 KB internal stack; when
+    // neither fits, the failure modes are both awful — the controller asserts
+    // (BLE assert emi.c 164, which boot-loops the panel) or the host task fails
+    // to be created *silently*, because esp_nimble_enable() ignores the result of
+    // xTaskCreatePinnedToCore. Refusing up front turns both into one clear line.
+    size_t freeInternal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    if (freeInternal < kMinInternalHeap)
+    {
+        ESP_LOGE(TAG, "BLE not started: only %u bytes of internal DRAM free "
+                      "(largest block %u), need at least %u. Free internal RAM "
+                      "first — the LVGL draw buffer is the prime suspect.",
+                 static_cast<unsigned>(freeInternal), static_cast<unsigned>(largest),
+                 static_cast<unsigned>(kMinInternalHeap));
+        return;
+    }
+
     esp_err_t err = nimble_port_init();
     if (err != ESP_OK)
     {
@@ -120,6 +139,14 @@ void BleManager::StartStack()
 
     nimble_port_freertos_init(&BleManager::HostTask);
     stackUp_ = true;
+
+    // esp_nimble_enable() creates the host task with xTaskCreatePinnedToCore and
+    // ignores the result, so a failure to allocate its 4 KB internal stack is
+    // completely silent: no host task, no sync callback, no crash. Log the
+    // internal-DRAM figures next to it so that failure mode is diagnosable.
+    ESP_LOGI(TAG, "host task requested; internal DRAM left: %u free, %u largest",
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)));
 }
 
 void BleManager::HostTask(void* param)
@@ -318,7 +345,7 @@ void BleManager::NotePeer(const struct ble_gap_disc_desc& disc)
 // Connect / pair / discover
 // ──────────────────────────────────────────────────────────────
 
-bool BleManager::Connect(const ble_addr_t& addr, uint32_t passkey)
+bool BleManager::Connect(const ble_addr_t& addr, const char* code)
 {
     char text[18];
     FormatAddr(addr, text, sizeof(text));
@@ -332,7 +359,13 @@ bool BleManager::Connect(const ble_addr_t& addr, uint32_t passkey)
         }
         target_ = addr;
         haveTarget_ = true;
-        pendingPasskey_ = passkey;
+        // An empty string means "no code given". The code is kept as text up to
+        // here because "000000" — the factory default — is a perfectly valid
+        // passkey that a numeric 0 cannot be distinguished from.
+        havePasskey_ = (code != nullptr && code[0] != '\0');
+        pendingPasskey_ = havePasskey_
+                        ? static_cast<uint32_t>(strtoul(code, nullptr, 10))
+                        : 0;
     }
 
     // Remember the choice before the attempt: a pairing that fails halfway
@@ -435,6 +468,7 @@ void BleManager::Forget()
         addr = target_;
         had = haveTarget_;
         haveTarget_ = false;
+        havePasskey_ = false;
         pendingPasskey_ = 0;
     }
 
@@ -585,7 +619,7 @@ int BleManager::OnGapEvent(struct ble_gap_event* event)
                 return 0;
             }
 
-            { LOCK(mutex_); pendingPasskey_ = 0; }   // consumed
+            { LOCK(mutex_); havePasskey_ = false; pendingPasskey_ = 0; }   // consumed
             ESP_LOGI(TAG, "Link encrypted and authenticated (bonded=%d)",
                      desc.sec_state.bonded);
             StartDiscovery();
@@ -602,10 +636,11 @@ int BleManager::OnGapEvent(struct ble_gap_event* event)
                 return 0;
             }
 
-            uint32_t key;
-            { LOCK(mutex_); key = pendingPasskey_; }
+            uint32_t key = 0;
+            bool have = false;
+            { LOCK(mutex_); key = pendingPasskey_; have = havePasskey_; }
 
-            if (key == 0)
+            if (!have)
             {
                 ESP_LOGE(TAG, "Gateway asked for a passkey but none was given "
                               "(bond gone? re-pair with the install code)");
@@ -958,11 +993,7 @@ void BleManager::Cmd_BleConnect(Stream& in, Stream& out)
 
     // The install code is only needed for a first pairing; a stored bond
     // re-encrypts without it, so an empty code is legal here.
-    uint32_t passkey = codeText[0] != '\0'
-                     ? static_cast<uint32_t>(strtoul(codeText, nullptr, 10))
-                     : 0;
-
-    bool ok = Connect(addr, passkey);
+    bool ok = Connect(addr, codeText);
     root.field("ok", ok);
     if (!ok) root.field("error", "BLE stack not ready");
 }

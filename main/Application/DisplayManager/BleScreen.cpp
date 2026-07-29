@@ -253,13 +253,12 @@ void BleScreen::RebuildPeerList()
 void BleScreen::Connect()
 {
     const char* code = lv_textarea_get_text(codeInput_);
-    uint32_t passkey = static_cast<uint32_t>(strtoul(code ? code : "", nullptr, 10));
 
     char addr[18];
     BleManager::FormatAddr(selected_.addr, addr, sizeof(addr));
     ESP_LOGI(TAG, "Pairing with %s", addr);
 
-    serviceProvider_.getBleManager().Connect(selected_.addr, passkey);
+    serviceProvider_.getBleManager().Connect(selected_.addr, code);
 
     ShowListView();
     RefreshStatus();

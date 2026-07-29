@@ -38,6 +38,12 @@ public:
     static constexpr int32_t ConnectTimeoutMs = 10000;
     static constexpr int64_t ReconnectDelayUs = 5LL * 1000 * 1000;
 
+    // Below this much free internal DRAM the stack is not started at all: the
+    // controller needs tens of KB of it and the host task a 4 KB stack, and both
+    // failure modes are bad (a controller assert boot-loops the panel; a failed
+    // host task is silent). Measured floor, not a guess — see sdkconfig.defaults.
+    static constexpr size_t kMinInternalHeap = 48 * 1024;
+
     // One gateway we have heard. Filled from two packets: the advertisement
     // (gateway id) and the scan response (name), merged by address.
     struct Peer
@@ -70,11 +76,12 @@ public:
     /// Copy out what the current/last scan has heard. Returns the count.
     int GetPeers(Peer* out, int max) const;
 
-    /// Pair with (or reconnect to) a gateway. `passkey` is the gateway's 6
-    /// public install-code digits; it is only needed for the first pairing —
-    /// afterwards the stored bond re-encrypts without it. Remembers the peer so
-    /// the link comes back by itself after a reboot or a dropout.
-    bool Connect(const ble_addr_t& addr, uint32_t passkey);
+    /// Pair with (or reconnect to) a gateway. `code` is the gateway's 6 public
+    /// install-code digits as TEXT — empty means "no code, rely on the stored
+    /// bond". Text, not a number, because "000000" is a perfectly valid passkey
+    /// and a numeric 0 cannot be told apart from "none given". Remembers the peer
+    /// so the link comes back by itself after a reboot or a dropout.
+    bool Connect(const ble_addr_t& addr, const char* code);
 
     /// Drop the link, forget the peer and delete its bond.
     void Forget();
@@ -151,7 +158,8 @@ private:
     LinkState  link_ = LinkState::Down;
     ble_addr_t target_{};
     bool       haveTarget_ = false;
-    uint32_t   pendingPasskey_ = 0;      // only set between Connect() and pairing
+    uint32_t   pendingPasskey_ = 0;      // only meaningful while havePasskey_
+    bool       havePasskey_ = false;     // set between Connect() and pairing
     uint16_t   connHandle_ = BLE_HS_CONN_HANDLE_NONE;
     uint16_t   mtu_ = 23;                // until the exchange completes
     uint16_t   svcStart_ = 0;

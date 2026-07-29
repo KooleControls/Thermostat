@@ -69,12 +69,18 @@ bool DisplayManager::InitLvgl()
         return false;
     }
 
-    // Partial draw buffer (20 lines) in internal DMA RAM. Rendering into a
+    // Partial draw buffer (10 lines) in internal DMA RAM. Rendering into a
     // PSRAM buffer competes with the panel DMA for PSRAM bandwidth → on-screen
     // artifacts; internal RAM + bounce-buffer mode is the proven config.
+    //
+    // 10 lines, not 20: at RGB565 each line costs 960 bytes of internal DMA RAM,
+    // and 20 lines (19 KB) left too little internal DRAM for the BLE stack — the
+    // controller takes ~45 KB and NimBLE's host task needs a 4 KB internal stack,
+    // which it silently failed to get. Halving this costs render flushes, not
+    // correctness: same location, same bounce-buffer mode, just smaller batches.
     lvgl_port_display_cfg_t disp_cfg = {};
     disp_cfg.panel_handle = serviceProvider_.getBoard().GetPanel();
-    disp_cfg.buffer_size = 480 * 20;
+    disp_cfg.buffer_size = 480 * 10;
     disp_cfg.double_buffer = false;
     disp_cfg.hres = 480;
     disp_cfg.vres = 480;
