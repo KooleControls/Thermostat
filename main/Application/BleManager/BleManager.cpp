@@ -438,7 +438,24 @@ void BleManager::StartConnect()
     FormatAddr(addr, text, sizeof(text));
     ESP_LOGI(TAG, "Connecting to %s (type %u)", text, addr.type);
 
-    int rc = ble_gap_connect(ownType, &addr, ConnectTimeoutMs, nullptr,
+    // Ask for a shorter connection interval than NimBLE's 30–50 ms default. As the
+    // central we set this at connect time, and it is the dominant cost of a command:
+    // a round trip is a notify one way plus a write the other, so it costs a few
+    // connection events whatever we do — measured ~193 ms at the default. Both boxes
+    // are mains-powered, so the usual battery argument for a long interval does not
+    // apply; 15–20 ms is short enough to matter and long enough to leave the ESP32
+    // gateway's WiFi coexistence room to breathe.
+    ble_gap_conn_params connParams = {};
+    connParams.scan_itvl = 16;              // 10 ms, units of 0.625 ms
+    connParams.scan_window = 16;
+    connParams.itvl_min = 12;               // 15 ms, units of 1.25 ms
+    connParams.itvl_max = 16;               // 20 ms
+    connParams.latency = 0;                 // never skip a connection event
+    connParams.supervision_timeout = 400;   // 4 s, units of 10 ms
+    connParams.min_ce_len = 0;
+    connParams.max_ce_len = 0;
+
+    int rc = ble_gap_connect(ownType, &addr, ConnectTimeoutMs, &connParams,
                              &BleManager::GapEventTrampoline, this);
     if (rc != 0)
     {
