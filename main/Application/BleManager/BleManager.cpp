@@ -124,6 +124,8 @@ void BleManager::StartStack()
     // xTaskCreatePinnedToCore. Refusing up front turns both into one clear line.
     size_t freeInternal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    ESP_LOGI(TAG, "internal DRAM before the stack: %u free, %u largest",
+             static_cast<unsigned>(freeInternal), static_cast<unsigned>(largest));
     if (freeInternal < kMinInternalHeap)
     {
         ESP_LOGE(TAG, "BLE not started: only %u bytes of internal DRAM free "
@@ -996,6 +998,19 @@ void BleManager::DispatchLoop()
                        inFrame_, session::HEADER_LEN + BleChunk::MaxLen);
         mux.OnChunk(sid, flags, chunk.data + session::HEADER_LEN,
                     chunk.len - session::HEADER_LEN);
+
+        // Report the deepest this task has ever gone, once per new low-water mark:
+        // its stack is internal DRAM, the scarcest resource on this board, and
+        // sizing it by guesswork is how you either crash or waste 2 KB.
+        static size_t worst = SIZE_MAX;
+        size_t headroom = uxTaskGetStackHighWaterMark(nullptr);
+        if (headroom < worst)
+        {
+            worst = headroom;
+            ESP_LOGI(TAG, "dispatch stack headroom low-water: %u bytes of %u",
+                     static_cast<unsigned>(headroom),
+                     static_cast<unsigned>(kDispatchStack));
+        }
     }
 }
 
