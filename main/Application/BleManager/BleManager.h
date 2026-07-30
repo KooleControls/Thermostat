@@ -12,6 +12,7 @@
 #include "esp_timer.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
+#include <atomic>
 #include <cstdint>
 #include <cstddef>
 
@@ -204,6 +205,12 @@ private:
 
     QueueHandle_t     inQueue_ = nullptr;
     SemaphoreHandle_t writeDone_ = nullptr;   // one outbound write in flight
+
+    // Raised by the host task when a chunk had to be dropped, cleared by the
+    // dispatch task when it starts a session. A hole in a stream is invisible to
+    // everything downstream, so the link ends the stream instead of letting a
+    // consumer write on and fail a hash check minutes later.
+    std::atomic<bool> inboundDropped_{false};
     Task              dispatchTask_;
 
     // Framing windows, deliberately in PSRAM: internal DRAM is the scarce

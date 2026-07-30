@@ -7,6 +7,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include <atomic>
 #include <cstring>
 
 // One session chunk as it arrives from the radio. Sized so a chunk is exactly one
@@ -44,10 +45,11 @@ class BleSessionLink : public SessionLink
     // push bounded rather than hopeful.
     static constexpr TickType_t kWriteTimeout = pdMS_TO_TICKS(3000);
 
-    uint16_t          conn_;
-    uint16_t          outHandle_;
-    QueueHandle_t     queue_;
-    SemaphoreHandle_t writeDone_;
+    uint16_t              conn_;
+    uint16_t              outHandle_;
+    QueueHandle_t         queue_;
+    SemaphoreHandle_t     writeDone_;
+    std::atomic<bool>*    dropped_;
 
     static int OnWriteDone(uint16_t, const struct ble_gatt_error*,
                            struct ble_gatt_attr*, void* arg)
@@ -59,8 +61,9 @@ class BleSessionLink : public SessionLink
 
 public:
     BleSessionLink(uint16_t conn, uint16_t outHandle, QueueHandle_t queue,
-                   SemaphoreHandle_t writeDone)
-        : conn_(conn), outHandle_(outHandle), queue_(queue), writeDone_(writeDone) {}
+                   SemaphoreHandle_t writeDone, std::atomic<bool>* dropped)
+        : conn_(conn), outHandle_(outHandle), queue_(queue), writeDone_(writeDone),
+          dropped_(dropped) {}
 
     bool SendRaw(const uint8_t* frame, size_t len) override
     {
@@ -95,13 +98,28 @@ public:
 
     int RecvChunk(uint8_t* buf, size_t cap, uint16_t* sid, uint8_t* flags) override
     {
+        // A dropped chunk is a hole in the middle of the stream, and nothing
+        // downstream can see it: the consumer would keep writing and only the final
+        // hash would disagree, minutes later. Ending the stream here turns silent
+        // corruption into an immediate, attributable failure.
+        if (dropped_ != nullptr && dropped_->load(std::memory_order_relaxed))
+        {
+            ESP_LOGE(TAG, "a chunk was dropped earlier in this stream, ending it");
+            return -1;
+        }
+
         BleChunk chunk;
         if (xQueueReceive(queue_, &chunk, kRecvTimeout) != pdTRUE)
         {
             ESP_LOGW(TAG, "no further chunk within the timeout, ending the stream");
             return -1;
         }
-        if (chunk.len < session::HEADER_LEN || chunk.len > cap) return -1;
+        if (chunk.len < session::HEADER_LEN || chunk.len > cap)
+        {
+            ESP_LOGE(TAG, "unusable chunk (len %u, cap %u), ending the stream",
+                     static_cast<unsigned>(chunk.len), static_cast<unsigned>(cap));
+            return -1;
+        }
 
         memcpy(buf, chunk.data, chunk.len);
         *sid = session::readU16(buf);

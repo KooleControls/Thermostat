@@ -968,9 +968,14 @@ void BleManager::EnqueueChunk(const struct os_mbuf* om)
     ESP_LOGD(TAG, "notify rx: %u bytes queued", static_cast<unsigned>(len));
 
     // Dropping is the honest failure: the gateway is outrunning us and silence
-    // would look like a hang. Flow control is the gateway's next problem.
+    // would look like a hang. Flag it so the session ends on the hole rather than
+    // writing around it — a dropped chunk in a firmware image is invisible until
+    // the final hash disagrees, minutes of transfer later.
     if (xQueueSend(inQueue_, &chunk, 0) != pdTRUE)
+    {
+        inboundDropped_.store(true, std::memory_order_relaxed);
         ESP_LOGW(TAG, "inbound queue full, chunk dropped");
+    }
 }
 
 void BleManager::DispatchLoop()
@@ -1011,12 +1016,29 @@ void BleManager::DispatchLoop()
         uint16_t sid = session::readU16(chunk.data);
         uint8_t  flags = chunk.data[2];
 
+        // Cleared per request: a drop belongs to the stream it happened in, and the
+        // chunk that opens this one is already in hand.
+        inboundDropped_.store(false, std::memory_order_relaxed);
+
         // Link and mux live for exactly one request, like the WebSocket's do.
-        BleSessionLink link(conn, outHandle, inQueue_, writeDone_);
+        BleSessionLink link(conn, outHandle, inQueue_, writeDone_, &inboundDropped_);
         SessionMux mux(link, *this, outFrame_, payloadCap,
                        inFrame_, session::HEADER_LEN + BleChunk::MaxLen);
         mux.OnChunk(sid, flags, chunk.data + session::HEADER_LEN,
                     chunk.len - session::HEADER_LEN);
+
+        // Anything still queued is residue, not the next request: the peer runs one
+        // request at a time, so a session that ended early — a failed upload, say —
+        // leaves its remaining body chunks behind. Left in place, the next loop
+        // iteration reads firmware bytes as a session header and invents a command
+        // out of them. Dropping them here is what keeps one failure from poisoning
+        // the request after it.
+        int stale = 0;
+        BleChunk discard;
+        while (xQueueReceive(inQueue_, &discard, 0) == pdTRUE) stale++;
+        if (stale > 0)
+            ESP_LOGW(TAG, "discarded %d stale chunk(s) left over from the last request",
+                     stale);
 
         // Report the deepest this task has ever gone, once per new low-water mark:
         // its stack is internal DRAM, the scarcest resource on this board, and

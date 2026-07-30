@@ -297,6 +297,22 @@ void UpdateManager::Cmd_WritePartition(Stream& in, Stream& out)
     ESP_LOGI(TAG, "write timing: worst %lld us at offset %u over %u bytes total",
              worstWriteUs, (unsigned)worstAt, (unsigned)w.written());
 
+    // A stream that broke is not a complete image, even though it ended the same
+    // way a complete one does — read() returns 0 for both. Returning here without
+    // finish() leaves the destructor to abort the write, so a truncated image is
+    // never validated, never activated, and the sender is told the real reason
+    // instead of "image validation failed" a megabyte later.
+    if (in.failed())
+    {
+        ESP_LOGE(TAG, "request stream failed after %u bytes, discarding the image",
+                 (unsigned)w.written());
+        int len = snprintf(msg, sizeof(msg),
+                           "{\"ok\":false,\"error\":\"stream failed at %lu bytes\"}",
+                           (unsigned long)w.written());
+        out.write(msg, len);
+        return;
+    }
+
     err = w.finish();
     int len = err
         ? snprintf(msg, sizeof(msg), "{\"ok\":false,\"error\":\"%s\"}", err)
