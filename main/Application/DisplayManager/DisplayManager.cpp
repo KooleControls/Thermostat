@@ -78,7 +78,7 @@ bool DisplayManager::InitLvgl()
         return false;
     }
 
-    // SPIKE — direct mode into the panel's two PSRAM framebuffers.
+    // Direct mode into the panel's two PSRAM framebuffers.
     //
     // Replaces a 10-line internal staging buffer + bounce-buffer DMA. Why, from
     // measurements on this board (LVGL sysmon, screen changes driven by uiGo):

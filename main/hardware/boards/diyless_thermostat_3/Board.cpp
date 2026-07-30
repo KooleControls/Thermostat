@@ -104,7 +104,9 @@ void Board::Init()
         cfg.pclk_active_neg = BoardConfig::LCD_PCLK_ACTIVE_NEG;
         cfg.pclk_idle_high = BoardConfig::LCD_PCLK_IDLE_HIGH;
         cfg.clk_src = LCD_CLK_SRC_PLL160M;   // DIYLESS pins PLL160M (anti-jitter)
-        // SPIKE: two PSRAM framebuffers, no bounce buffers. See DisplayManager.
+        // Two PSRAM framebuffers, no bounce buffers: LVGL renders into them
+        // directly and they swap on VSYNC. The reasoning, and the measurements
+        // that chose it over bounce-buffer mode, are in DisplayManager::InitLvgl.
         cfg.num_fbs = 2;
         cfg.bounce_buffer_lines = 0;
         cfg.reset_gpio = (gpio_num_t)BoardConfig::LCD_PIN_RESET;
