@@ -7,8 +7,30 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_app_desc.h"
+#include "esp_timer.h"
 #include <cstring>
 #include <cstdio>
+
+namespace {
+
+// Command handlers run on whichever transport task dispatched them, and the BLE
+// dispatch task's stack is a few KB — so a multi-KB *local* buffer overruns it and
+// scribbles on whatever memory follows. That surfaces as wild crashes in unrelated
+// subsystems (it presented as a NULL semaphore inside lwIP's select), which is
+// about as hard to diagnose as a bug gets. Anything of that size belongs on the
+// heap, freed on every exit path.
+struct HeapBuf
+{
+    uint8_t* p;
+    explicit HeapBuf(size_t n) : p(static_cast<uint8_t*>(malloc(n))) {}
+    ~HeapBuf() { free(p); }
+    HeapBuf(const HeapBuf&) = delete;
+    HeapBuf& operator=(const HeapBuf&) = delete;
+};
+
+constexpr size_t kIoBufSize = 4096;
+
+}   // namespace
 
 UpdateManager::UpdateManager(ServiceProvider& serviceProvider)
     : serviceProvider_(serviceProvider)
@@ -211,17 +233,58 @@ void UpdateManager::Cmd_WritePartition(Stream& in, Stream& out)
         return;
     }
 
-    uint8_t buf[4096];
-    size_t n;
-    size_t reported = 0;
-    while ((n = in.read(buf, sizeof(buf))) > 0)   // 0 == end of stream == full image
+    // Heap, not stack — see HeapBuf above.
+    static constexpr size_t BUF_SIZE = kIoBufSize;
+    HeapBuf buffer(BUF_SIZE);
+
+    if (buffer.p == nullptr)
     {
+        int len = snprintf(msg, sizeof(msg), "{\"ok\":false,\"error\":\"out of memory\"}");
+        out.write(msg, len);
+        return;
+    }
+    uint8_t* const buf = buffer.p;
+
+    size_t reported = 0;
+    bool endOfStream = false;
+    // Diagnostic: a write that triggers a sector erase blocks code running from
+    // flash, and the BLE host runs from flash — so a slow erase can cost the link
+    // its supervision timeout. Timed here to find out whether that is what happens.
+    int64_t worstWriteUs = 0;
+    size_t  worstAt = 0;
+    while (!endOfStream)
+    {
+        // Fill the buffer before touching flash. A transport chunk is far smaller
+        // than this (241 bytes over BLE), and writing per chunk paid the flash
+        // overhead ~17 times over while the transport's inbound queue kept filling
+        // behind us — which is how chunks got dropped and images silently corrupted.
+        size_t n = 0;
+        while (n < BUF_SIZE)
+        {
+            size_t got = in.read(buf + n, BUF_SIZE - n);
+            if (got == 0) { endOfStream = true; break; }   // end of stream == full image
+            n += got;
+        }
+        if (n == 0) break;
+
+        const int64_t writeStart = esp_timer_get_time();
         if (!w.write(buf, n))                      // dtor aborts a half-written image
         {
             int len = snprintf(msg, sizeof(msg), "{\"ok\":false,\"error\":\"write failed\"}");
             out.write(msg, len);
             return;
         }
+        const int64_t writeUs = esp_timer_get_time() - writeStart;
+        if (writeUs > worstWriteUs)
+        {
+            worstWriteUs = writeUs;
+            worstAt = w.written();
+        }
+        // 20 ms is already longer than a connection interval, so anything above it
+        // is a candidate for having starved the radio.
+        if (writeUs > 20000)
+            ESP_LOGW(TAG, "slow write: %lld us for %u bytes at offset %u",
+                     writeUs, (unsigned)n, (unsigned)(w.written() - n));
         if (w.written() - reported >= REPORT_EVERY)
         {
             int len = snprintf(msg, sizeof(msg), "{\"p\":%lu}", (unsigned long)w.written());
@@ -230,6 +293,9 @@ void UpdateManager::Cmd_WritePartition(Stream& in, Stream& out)
             reported = w.written();
         }
     }
+
+    ESP_LOGI(TAG, "write timing: worst %lld us at offset %u over %u bytes total",
+             worstWriteUs, (unsigned)worstAt, (unsigned)w.written());
 
     err = w.finish();
     int len = err
@@ -329,11 +395,18 @@ void UpdateManager::Cmd_DownloadPartition(Stream& in, Stream& out)
 
     ESP_LOGI(TAG, "Download partition '%s' (%lu bytes)", label, (unsigned long)p->size);
 
-    uint8_t buf[4096];
+    HeapBuf buffer(kIoBufSize);   // heap, not stack — see HeapBuf above
+    if (buffer.p == nullptr)
+    {
+        ESP_LOGE(TAG, "out of memory for the download buffer");
+        return;
+    }
+    uint8_t* const buf = buffer.p;
+
     size_t offset = 0;
     while (offset < p->size)
     {
-        size_t n = (p->size - offset < sizeof(buf)) ? (p->size - offset) : sizeof(buf);
+        size_t n = (p->size - offset < kIoBufSize) ? (p->size - offset) : kIoBufSize;
         if (esp_partition_read(p, offset, buf, n) != ESP_OK)
         {
             ESP_LOGE(TAG, "esp_partition_read failed at offset %lu", (unsigned long)offset);

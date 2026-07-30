@@ -92,3 +92,6 @@ www/
 
 # Claude Code
 .claude/
+
+# Knowledge-graph output, regenerated on demand
+graphify-out

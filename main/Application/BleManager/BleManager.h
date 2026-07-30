@@ -186,8 +186,19 @@ private:
     // Inbound notifications are queued by the NimBLE callback and drained by a
     // task of our own, because Session::read() blocks waiting for the next chunk
     // and blocking the host task would deadlock the radio.
-    static constexpr int    kInQueueDepth = 4;
-    static constexpr size_t kDispatchStack = 4096;
+    //
+    // Depth is set by the worst stall the consumer can take while chunks keep
+    // arriving, not by the request/reply traffic it was first written for. A
+    // firmware push streams continuously and the consumer pauses to write flash —
+    // measured at up to 20 ms, several chunks' worth — so a depth of 4 overflowed
+    // and dropped chunks, silently corrupting the image. 16 costs ~3 KB more of
+    // internal DRAM and leaves margin over the observed worst case.
+    static constexpr int    kInQueueDepth = 16;
+    // Command handlers run on this task, so it carries whatever the deepest handler
+    // needs. 4 KB left only ~1.7 KB headroom on a shallow command, which is too thin
+    // a margin for a stack that hosts arbitrary handlers — and too thin to notice
+    // before something overruns it.
+    static constexpr size_t kDispatchStack = 6144;
     // 100 x 50 ms: long enough to cover discovery after a bonded reconnect.
     static constexpr int    kReadyWaitTicks = 100;
 
