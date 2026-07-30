@@ -280,11 +280,6 @@ void UpdateManager::Cmd_WritePartition(Stream& in, Stream& out)
             worstWriteUs = writeUs;
             worstAt = w.written();
         }
-        // 20 ms is already longer than a connection interval, so anything above it
-        // is a candidate for having starved the radio.
-        if (writeUs > 20000)
-            ESP_LOGW(TAG, "slow write: %lld us for %u bytes at offset %u",
-                     writeUs, (unsigned)n, (unsigned)(w.written() - n));
         if (w.written() - reported >= REPORT_EVERY)
         {
             int len = snprintf(msg, sizeof(msg), "{\"p\":%lu}", (unsigned long)w.written());
