@@ -75,6 +75,10 @@ public:
     void GetApSsid(char* out, size_t maxLen) const;
     static bool IsApOpen() { return DefaultApPassword[0] == '\0'; }
 
+    /// Associated AP's signal strength in dBm. False when there is none to report
+    /// (AP mode, or not associated).
+    bool GetRssi(int8_t& out) const { return wifi_interface_.GetRssi(out); }
+
 private:
     ServiceProvider& serviceProvider_;
 
@@ -96,10 +100,10 @@ private:
     void FallbackToAP();
 
     // ── WebSocket commands (registered with CommandManager in Init) ──
-    void Cmd_WifiScan(Stream& in, Stream& out);
+    RequestError Cmd_WifiScan(CommandContext& ctx);
 
     inline static CommandEntry commands_[] = {
-        { "wifiScan", &InvokeCommand<&NetworkManager::Cmd_WifiScan> },
+        { "wifi", "scan", &InvokeCommand<&NetworkManager::Cmd_WifiScan> },
     };
 
     // ── Settings (registered with SettingsManager in Init) ──

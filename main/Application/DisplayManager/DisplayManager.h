@@ -59,10 +59,10 @@ private:
     /// full-screen redraw — and measuring it had meant asking someone to tap
     /// the glass at the right moment. Also the only way to exercise the UI on
     /// a headless or remote unit.
-    void Cmd_UiGo(Stream& in, Stream& out);
+    RequestError Cmd_UiGo(CommandContext& ctx);
 
     inline static CommandEntry commands_[] = {
-        { "uiGo", &InvokeCommand<&DisplayManager::Cmd_UiGo> },
+        { "ui", "go", &InvokeCommand<&DisplayManager::Cmd_UiGo> },
     };
 
     ServiceProvider& serviceProvider_;

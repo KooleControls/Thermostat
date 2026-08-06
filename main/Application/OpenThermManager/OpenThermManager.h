@@ -116,10 +116,10 @@ private:
     void     StoreSlaveStatus(uint8_t bits);
     void     MarkLinkDown();
 
-    void Cmd_Status(Stream &in, Stream &out);     // otStatus
+    RequestError Cmd_Status(CommandContext& ctx);     // ot status
 
     inline static CommandEntry commands_[] = {
-        { "otStatus", &InvokeCommand<&OpenThermManager::Cmd_Status> },
+        { "ot", "status", &InvokeCommand<&OpenThermManager::Cmd_Status> },
     };
 
     ServiceProvider &serviceProvider_;

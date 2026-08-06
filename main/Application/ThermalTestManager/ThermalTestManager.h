@@ -100,12 +100,12 @@ private:
     void LogSample();
 
     void WriteStatus(Stream &out);
-    void Cmd_ThermalStatus(Stream &in, Stream &out);
-    void Cmd_ThermalSet(Stream &in, Stream &out);
+    RequestError Cmd_ThermalStatus(CommandContext& ctx);
+    RequestError Cmd_ThermalSet(CommandContext& ctx);
 
     inline static CommandEntry commands_[] = {
-        { "thermalStatus", &InvokeCommand<&ThermalTestManager::Cmd_ThermalStatus> },
-        { "thermalSet",    &InvokeCommand<&ThermalTestManager::Cmd_ThermalSet> },
+        { "thermal", "status", &InvokeCommand<&ThermalTestManager::Cmd_ThermalStatus> },
+        { "thermal", "set",    &InvokeCommand<&ThermalTestManager::Cmd_ThermalSet> },
     };
 
     // The one persisted value — see the note at the top of this file. 100 % is

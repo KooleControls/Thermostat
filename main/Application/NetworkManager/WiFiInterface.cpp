@@ -1,6 +1,7 @@
 #include "WiFiInterface.h"
 
 #include <assert.h>
+#include <cstdio>
 #include <cstring>
 #include "esp_netif.h"
 #include "esp_wifi.h"
@@ -47,6 +48,10 @@ void WiFiInterface::ConnectSta(const char* ssid, const char* password)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
 
     wifi_config_t config = {};
+    // strncpy, NOT snprintf, and deliberately so: these are esp_wifi's fixed-width
+    // fields, not C strings. A 32-character SSID legitimately fills ssid[32] with no
+    // terminator, so snprintf would silently drop its last character. Do not
+    // "modernize" these four calls — see the note in NetworkManager.
     strncpy((char*)config.sta.ssid, ssid, sizeof(config.sta.ssid) - 1);
     strncpy((char*)config.sta.password, password, sizeof(config.sta.password) - 1);
 
@@ -87,6 +92,7 @@ void WiFiInterface::StartAP(const char* ssid, const char* password, uint8_t chan
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
 
     wifi_config_t config = {};
+    // Fixed-width esp_wifi fields — see the note in Connect().
     strncpy((char*)config.ap.ssid, ssid, sizeof(config.ap.ssid) - 1);
     config.ap.ssid_len = strlen(ssid);
     strncpy((char*)config.ap.password, password, sizeof(config.ap.password) - 1);
@@ -102,6 +108,19 @@ void WiFiInterface::Stop()
 {
     esp_wifi_disconnect();
     esp_wifi_stop();
+}
+
+bool WiFiInterface::GetRssi(int8_t& out) const
+{
+    if (isAP_) return false;
+
+    // Fails when the station is not associated, which is exactly when there is no
+    // signal strength to report — so the error is the answer, not a problem.
+    wifi_ap_record_t ap = {};
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) return false;
+
+    out = ap.rssi;
+    return true;
 }
 
 int WiFiInterface::Scan(ScanResult* out, int maxResults)
@@ -130,25 +149,29 @@ int WiFiInterface::Scan(ScanResult* out, int maxResults)
         return 0;
     }
 
-    uint16_t count = 0;
-    esp_wifi_scan_get_ap_num(&count);
-    ESP_LOGI(TAG, "Scan found %d networks", count);
+    uint16_t found = 0;
+    esp_wifi_scan_get_ap_num(&found);
+    ESP_LOGI(TAG, "Scan found %d networks", found);
 
-    if (count > static_cast<uint16_t>(maxResults)) count = maxResults;
-
-    wifi_ap_record_t* records = new wifi_ap_record_t[count]();
-    esp_wifi_scan_get_ap_records(&count, records);
-
-    for (uint16_t i = 0; i < count; i++)
+    // One record at a time, so nothing here is sized by how many networks happen to
+    // be in the air: esp_wifi_scan_get_ap_record hands over the next record and frees
+    // it, where esp_wifi_scan_get_ap_records wants an array as long as the result set
+    // — which is why this used to allocate one per scan.
+    int count = 0;
+    wifi_ap_record_t record;
+    while (count < maxResults && esp_wifi_scan_get_ap_record(&record) == ESP_OK)
     {
-        strncpy(out[i].ssid, reinterpret_cast<const char*>(records[i].ssid), sizeof(out[i].ssid) - 1);
-        out[i].ssid[sizeof(out[i].ssid) - 1] = '\0';
-        out[i].rssi = records[i].rssi;
-        out[i].channel = records[i].primary;
-        out[i].secure = records[i].authmode != WIFI_AUTH_OPEN;
+        snprintf(out[count].ssid, sizeof(out[count].ssid), "%s",
+                 reinterpret_cast<const char*>(record.ssid));
+        out[count].rssi = record.rssi;
+        out[count].channel = record.primary;
+        out[count].secure = record.authmode != WIFI_AUTH_OPEN;
+        count++;
     }
 
-    delete[] records;
+    // Stopping at maxResults leaves the rest of the driver's list allocated; this is
+    // what releases it. Harmless when the loop already drained the list.
+    esp_wifi_clear_ap_list();
 
     if (prevMode == WIFI_MODE_AP)
     {

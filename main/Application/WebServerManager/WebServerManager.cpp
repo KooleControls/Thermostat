@@ -1,8 +1,14 @@
 #include "WebServerManager.h"
 #include "ConsoleManager.h"
 #include "SettingsManager.h"
+#include "CommandManager.h"
+#include "JsonHelpers.h"
+#include "JsonScope.h"
+#include "SessionTable.h"
 
 #include <unistd.h>
+#include <cstdio>
+#include <cstring>
 #include <esp_log.h>
 #include <esp_vfs_fat.h>
 
@@ -28,12 +34,15 @@ void WebServerManager::Init()
 
     wsHandler_.SetCommandManager(serviceProvider_.getCommandManager());
 
-    auth_.Register(serviceProvider_.getSettingsManager());
+    serviceProvider_.getSettingsManager().Register({ &webPassword_ });
+    auth_.Init();   // snapshot the stored password (after registration)
     wsHandler_.SetAuth(auth_);
 
     MountFatPartition();
     StartServer();
     RegisterRoutes();
+
+    serviceProvider_.getCommandManager().Register(this, commands_);
 
     // Wire console broadcast to WS clients
     serviceProvider_.getConsoleManager().SetBroadcastCallback(
@@ -112,4 +121,104 @@ void WebServerManager::BroadcastBinary(const uint8_t* data, size_t len)
 {
     if (server_)
         wsHandler_.BroadcastBinary(server_, data, len);
+}
+
+// ──────────────────────────────────────────────────────────────
+// Commands
+// ──────────────────────────────────────────────────────────────
+
+RequestError WebServerManager::Cmd_GetWebFile(CommandContext& ctx)
+{
+    // First handler on the pull contract: no envelope handling, no JsonReader, and
+    // it will keep working unchanged when the request format stops being JSON.
+    char path[192] = {};
+    RETURN_IF_ERROR(ctx.readArgs(Required("path", path)));
+
+    StaticFileHandler::Resolved file;
+    FILE* f = nullptr;
+
+    if (StaticFileHandler::Resolve(BASE_PATH, path, file))
+        f = fopen(file.path, "rb");
+
+    if (!f)
+    {
+        // A real 404 — SPA fallback is the asking route layer's decision, not
+        // ours (see StaticFileHandler::Resolve).
+        static constexpr const char* notFound = "{\"ok\":true,\"status\":404}\n";
+        ctx.out.write(notFound, strlen(notFound));
+        return RequestError::Ok;   // the request was fine; the file simply is not there
+    }
+
+    char header[256];
+    int n = snprintf(header, sizeof(header),
+                     "{\"ok\":true,\"status\":200,\"contentType\":\"%s\"%s}\n",
+                     file.contentType,
+                     file.gzipped ? ",\"contentEncoding\":\"gzip\"" : "");
+    ctx.out.write(header, static_cast<size_t>(n));
+
+    // Streams out chunk-by-chunk through the session window; a 200 KB bundle
+    // never needs a 200 KB buffer here or on the transport.
+    char buf[512];
+    size_t r;
+    while ((r = fread(buf, 1, sizeof(buf), f)) > 0)
+        ctx.out.write(buf, r);
+
+    fclose(f);
+    return RequestError::Ok;
+}
+
+// ──────────────────────────────────────────────────────────────
+// auth — the handshake as ordinary commands. Nothing here frames its own reply or
+// parses its own wire format any more; it is a handler like every other.
+// ──────────────────────────────────────────────────────────────
+
+RequestError WebServerManager::Cmd_AuthHello(CommandContext& ctx)
+{
+    RETURN_IF_ERROR(ctx.readArgs());
+
+    JsonObject resp(ctx.out);
+    resp.field("authRequired", auth_.AuthRequired());
+    return RequestError::Ok;
+}
+
+RequestError WebServerManager::Cmd_AuthLogin(CommandContext& ctx)
+{
+    char password[64] = {};
+    RETURN_IF_ERROR(ctx.readArgs(Optional("password", password)));
+
+    JsonObject resp(ctx.out);
+
+    // A wrong password is MEANING, not form: the request was perfectly well made, the
+    // answer is no. So it is a reply, not a refusal.
+    if (!auth_.CheckPassword(password))
+    {
+        resp.field("ok", false);
+        return RequestError::Ok;
+    }
+
+    char key[SessionTable::TOKEN_LEN] = {};
+    auth_.MintKey(key);
+    if (ctx.connection) ctx.connection->authenticate(key);
+
+    resp.field("ok", true);
+    resp.field("key", key);
+    return RequestError::Ok;
+}
+
+RequestError WebServerManager::Cmd_AuthResume(CommandContext& ctx)
+{
+    char key[SessionTable::TOKEN_LEN] = {};
+    RETURN_IF_ERROR(ctx.readArgs(Required("key", key)));
+
+    JsonObject resp(ctx.out);
+
+    if (!auth_.ValidateKey(key))
+    {
+        resp.field("ok", false);
+        return RequestError::Ok;
+    }
+
+    if (ctx.connection) ctx.connection->authenticate(key);
+    resp.field("ok", true);
+    return RequestError::Ok;
 }

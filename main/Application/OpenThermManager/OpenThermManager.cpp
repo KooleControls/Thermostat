@@ -380,8 +380,10 @@ void OpenThermManager::MarkLinkDown()
 
 // ── commands (web-UI console / WebSocket) ─────────────────────
 
-void OpenThermManager::Cmd_Status(Stream &, Stream &out)
+RequestError OpenThermManager::Cmd_Status(CommandContext& ctx)
 {
+    RETURN_IF_ERROR(ctx.readArgs());
+
     OtBoilerState s;
     OtDemand d;
     {
@@ -389,7 +391,7 @@ void OpenThermManager::Cmd_Status(Stream &, Stream &out)
         s = state_;
         d = demand_;
     }
-    JsonObject resp(out);
+    JsonObject resp(ctx.out);
     resp.field("linked", s.linked);
     resp.field("fault", s.fault);
     resp.field("chActive", s.chActive);
@@ -415,5 +417,6 @@ void OpenThermManager::Cmd_Status(Stream &, Stream &out)
     resp.field("roomSetpoint", d.roomSetpoint);
     resp.field("dhwSetpoint", d.dhwSetpoint);
     resp.field("tSet", d.tSet);
+    return RequestError::Ok;
 }
 

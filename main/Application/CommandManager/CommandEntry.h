@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Fatal.h"
+#include "CommandContext.h"
 #include <type_traits>
 
 class Stream;
@@ -20,8 +21,14 @@ class Stream;
 // ──────────────────────────────────────────────────────────────
 struct CommandEntry
 {
+    // Two-part route: `partition write`, `system ping`. The category is the domain the
+    // owning manager already claims, which is the one piece of structure a flat
+    // registry threw away — and it is what lets `list` and `status` exist in several
+    // places without colliding. Two levels, fixed: deeper nesting would turn dispatch
+    // into a tree walk for nothing.
+    const char* category;
     const char* name;
-    void (*handler)(void* ctx, Stream& in, Stream& out);
+    RequestError (*handler)(void* ctx, CommandContext& c);
 
     // Managed by CommandManager::Register() — owners never touch these.
     void* ctx = nullptr;
@@ -48,18 +55,16 @@ struct CommandEntry
 // Handlers are ordinary functions with no ctx in sight — either a
 // (usually private, non-static) member of the owning manager:
 //
-//     void Ping(Stream& in, Stream& out);
-//     { "ping", &InvokeCommand<&SystemManager::Ping> },
+//     RequestError Cmd_Ping(CommandContext& ctx);
+//     { "system", "ping", &InvokeCommand<&SystemManager::Cmd_Ping> },
 //
 // or a free/static function (e.g. quick hacking in main.cpp —
-// register with ctx = nullptr):
+// register with ctx = nullptr).
 //
-//     static void Test(Stream& in, Stream& out);
-//     { "test", &InvokeCommand<&Test> },
-//
-// `in` carries the request payload, the handler writes its complete
-// reply to `out`. Streams are the contract; JSON is a dialect the
-// handler opts into by constructing JsonReader/JsonObject on line one.
+// Arguments arrive already parsed and validated; `in` is positioned at the body
+// (empty for most commands), and the handler writes its reply to `out`. Returning
+// anything but Ok makes the framework refuse the request — a handler never writes
+// error text and never names a framework error.
 //
 // The trampoline is instantiated at compile time; for members the
 // owning class is deduced from the method pointer itself, so the
@@ -70,19 +75,19 @@ struct CommandEntry
 // one chain hold commands of many classes) but it lives only here.
 // ──────────────────────────────────────────────────────────────
 template <typename T> struct CommandOwner;
-template <typename C> struct CommandOwner<void (C::*)(Stream&, Stream&)>       { using type = C; };
-template <typename C> struct CommandOwner<void (C::*)(Stream&, Stream&) const> { using type = const C; };
+template <typename C> struct CommandOwner<RequestError (C::*)(CommandContext&)>       { using type = C; };
+template <typename C> struct CommandOwner<RequestError (C::*)(CommandContext&) const> { using type = const C; };
 
 template <auto Handler>
-void InvokeCommand(void* ctx, Stream& in, Stream& out)
+RequestError InvokeCommand(void* ctx, CommandContext& c)
 {
     if constexpr (std::is_member_function_pointer_v<decltype(Handler)>)
     {
         using C = typename CommandOwner<decltype(Handler)>::type;
-        (static_cast<C*>(ctx)->*Handler)(in, out);
+        return (static_cast<C*>(ctx)->*Handler)(c);
     }
     else
     {
-        Handler(in, out);   // free/static function — ctx unused
+        return Handler(c);
     }
 }

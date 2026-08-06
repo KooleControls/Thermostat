@@ -3,13 +3,13 @@
 #include <esp_http_server.h>
 #include "Mutex.h"
 #include "SessionTable.h"
-#include "SessionMux.h"
+#include "CommandEnvelope.h"
 #include "ConnectionRegistry.h"
 
 class CommandManager;
 class Authenticator;
 
-class WebSocketHandler : public SessionMux::Sink {
+class WebSocketHandler {
     static constexpr const char* TAG = "WebSocketHandler";
 
 public:
@@ -24,6 +24,7 @@ public:
     void OnClientDisconnected(int fd);
 
 private:
+    // The session sink: CommandManager dispatches, this transport only frames.
     CommandManager* commandManager_ = nullptr;
     Authenticator* auth_ = nullptr;
 
@@ -70,5 +71,4 @@ private:
     // delegated to AuthGate, constructed locally per frame (it only holds an
     // Authenticator&, so this is cheap) — see AuthGate.h.
     void HandleBinary(httpd_req_t* req, const uint8_t* frame, size_t len);
-    void OnSessionOpened(Session& session) override;
 };

@@ -1,11 +1,9 @@
 #include "BleManager.h"
 #include "BleGattProtocol.h"
 #include "CommandManager/CommandManager.h"
+#include "CommandEnvelope.h"   // protocol::RunCommandSession — names, dispatches, closes
 #include "SettingsManager/SettingsManager.h"
 #include "JsonScope.h"
-#include "JsonReader.h"
-#include "JsonHelpers.h"
-#include "CommandManager/CommandManager.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 
@@ -1020,12 +1018,21 @@ void BleManager::DispatchLoop()
         // chunk that opens this one is already in hand.
         inboundDropped_.store(false, std::memory_order_relaxed);
 
-        // Link and mux live for exactly one request, like the WebSocket's do.
+        // Link and session live for exactly one request, like the WebSocket's do:
+        // the transport builds the Session on its own stack, feeds it the chunk that
+        // opened the request, and hands it to the protocol layer to name, dispatch
+        // and close. Nothing in between, and no routing here — that moved into
+        // protocol::RunCommandSession when the dispatcher stopped knowing about
+        // sessions.
         BleSessionLink link(conn, outHandle, inQueue_, writeDone_, &inboundDropped_);
-        SessionMux mux(link, *this, outFrame_, payloadCap,
-                       inFrame_, session::HEADER_LEN + BleChunk::MaxLen);
-        mux.OnChunk(sid, flags, chunk.data + session::HEADER_LEN,
-                    chunk.len - session::HEADER_LEN);
+        Session s(sid, link, outFrame_, payloadCap,
+                  inFrame_, session::HEADER_LEN + BleChunk::MaxLen);
+        s.feedRequest(chunk.data + session::HEADER_LEN,
+                      chunk.len - session::HEADER_LEN,
+                      (flags & session::FLAG_FINAL) != 0);
+
+        LinkAuthedGate gate;
+        protocol::RunCommandSession(s, serviceProvider_.getCommandManager(), gate);
 
         // Anything still queued is residue, not the next request: the peer runs one
         // request at a time, so a session that ended early — a failed upload, say —
@@ -1053,39 +1060,6 @@ void BleManager::DispatchLoop()
                      static_cast<unsigned>(kDispatchStack));
         }
     }
-}
-
-// Mirrors WebSocketHandler::OnSessionOpened — the routing lives in the sink, so
-// the command layer receives an already-resolved call.
-void BleManager::OnSessionOpened(Session& session)
-{
-    const uint8_t* head = nullptr;
-    size_t headLen = 0;
-    session.peekRequest(head, headLen);
-
-    char line[128];
-    size_t n = headLen < sizeof(line) - 1 ? headLen : sizeof(line) - 1;
-    memcpy(line, head, n);
-    line[n] = '\0';
-    if (char* nl = strchr(line, '\n')) *nl = '\0';
-
-    char type[32] = {};
-    ExtractJsonString(line, "type", type, sizeof(type));
-
-    if (type[0] == '\0')
-    {
-        session.reject("missing type");
-        return;
-    }
-
-    ESP_LOGI(TAG, "Command over BLE: %s", type);
-
-    if (!serviceProvider_.getCommandManager().Execute(type, session, session))
-    {
-        session.reject(type);
-        return;
-    }
-    session.finish();
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -1122,23 +1096,26 @@ bool BleManager::ParseAddr(const char* text, uint8_t type, ble_addr_t& out)
 // Commands
 // ──────────────────────────────────────────────────────────────
 
-void BleManager::Cmd_BleScan(Stream& in, Stream& out)
+RequestError BleManager::Cmd_BleScan(CommandContext& ctx)
 {
-    (void)in;
+    RETURN_IF_ERROR(ctx.readArgs());
+
     // Kick a scan and answer immediately with whatever is known: scanning takes
-    // seconds and the caller (display or web UI) polls. Mirrors wifiScan.
+    // seconds and the caller (display or web UI) polls. Mirrors `wifi scan`.
     bool started = StartScan();
 
-    JsonObject root(out);
+    JsonObject root(ctx.out);
     root.field("ok", true);
     root.field("started", started);
     root.field("scanning", Scanning());
     WritePeers(root);
+    return RequestError::Ok;
 }
 
-void BleManager::Cmd_BleStatus(Stream& in, Stream& out)
+RequestError BleManager::Cmd_BleStatus(CommandContext& ctx)
 {
-    (void)in;
+    RETURN_IF_ERROR(ctx.readArgs());
+
     bool up, synced;
     LinkState state;
     uint16_t mtu;
@@ -1150,7 +1127,7 @@ void BleManager::Cmd_BleStatus(Stream& in, Stream& out)
         mtu = mtu_;
     }
 
-    JsonObject root(out);
+    JsonObject root(ctx.out);
     root.field("ok", true);
     root.field("enabled", enableSetting_.Get());
     root.field("stackUp", up);
@@ -1163,26 +1140,30 @@ void BleManager::Cmd_BleStatus(Stream& in, Stream& out)
     peerSetting_.Get(peer, sizeof(peer));
     root.field("peer", peer);
     WritePeers(root);
+    return RequestError::Ok;
 }
 
-void BleManager::Cmd_BleConnect(Stream& in, Stream& out)
+RequestError BleManager::Cmd_BleConnect(CommandContext& ctx)
 {
-    JsonReader<192> json(in);
+    char     addrText[24] = {};
+    char     codeText[16] = {};
+    uint32_t addrTypeVal = 0;
+    RETURN_IF_ERROR(ctx.readArgs(
+        Required("addr",     addrText),
+        Optional("code",     codeText),
+        Optional("addrType", addrTypeVal)
+    ));
 
-    char addrText[24] = {};
-    char codeText[16] = {};
-    json.GetString("addr", addrText, sizeof(addrText));
-    json.GetString("code", codeText, sizeof(codeText));
-    int32_t addrTypeVal = json.GetInt("addrType", 0);
+    JsonObject root(ctx.out);
 
-    JsonObject root(out);
-
+    // A malformed address is MEANING, not form — the argument was supplied and is a
+    // string, it just is not an address — so it answers rather than refuses.
     ble_addr_t addr{};
     if (!ParseAddr(addrText, static_cast<uint8_t>(addrTypeVal), addr))
     {
         root.field("ok", false);
         root.field("error", "addr must be aa:bb:cc:dd:ee:ff");
-        return;
+        return RequestError::Ok;
     }
 
     // The install code is only needed for a first pairing; a stored bond
@@ -1190,14 +1171,16 @@ void BleManager::Cmd_BleConnect(Stream& in, Stream& out)
     bool ok = Connect(addr, codeText);
     root.field("ok", ok);
     if (!ok) root.field("error", "BLE stack not ready");
+    return RequestError::Ok;
 }
 
-void BleManager::Cmd_BleForget(Stream& in, Stream& out)
+RequestError BleManager::Cmd_BleForget(CommandContext& ctx)
 {
-    (void)in;
+    RETURN_IF_ERROR(ctx.readArgs());
     Forget();
-    JsonObject root(out);
+    JsonObject root(ctx.out);
     root.field("ok", true);
+    return RequestError::Ok;
 }
 
 // Appends the peer array to the caller's already-open root object.

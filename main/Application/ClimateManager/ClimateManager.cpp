@@ -189,19 +189,23 @@ void ClimateManager::PushSafeState()
     status_ = ClimateStatus{};
 }
 
-void ClimateManager::Cmd_ClimateSet(Stream &in, Stream &out)
+RequestError ClimateManager::Cmd_ClimateSet(CommandContext& ctx)
 {
-    JsonReader<128> json(in);
+    char  modeStr[8] = {};
+    float sp = NAN;                  // absent stays NAN, so "no setpoint given" survives
+    RETURN_IF_ERROR(ctx.readArgs(
+        Optional("mode",     modeStr),
+        Optional("setpoint", sp)
+    ));
+
     bool changed = false;
     {
         LOCK(mutex_);
-        char modeStr[8] = {};
-        if (json.GetString("mode", modeStr, sizeof(modeStr)))
+        if (modeStr[0] != '\0')
         {
             ClimateMode m;
             if (ParseClimateMode(modeStr, m) && m != mode_) { mode_ = m; changed = true; }
         }
-        float sp = json.GetFloat("setpoint", NAN);
         if (!std::isnan(sp))
         {
             if (sp < kSetpointMin) sp = kSetpointMin;
@@ -214,12 +218,15 @@ void ClimateManager::Cmd_ClimateSet(Stream &in, Stream &out)
             lastChangeUs_ = esp_timer_get_time();   // persisted later by MaybeCommitSettings
         }
     }
-    WriteStatus(out);
+    WriteStatus(ctx.out);
+    return RequestError::Ok;
 }
 
-void ClimateManager::Cmd_ClimateStatus(Stream &, Stream &out)
+RequestError ClimateManager::Cmd_ClimateStatus(CommandContext& ctx)
 {
-    WriteStatus(out);
+    RETURN_IF_ERROR(ctx.readArgs());
+    WriteStatus(ctx.out);
+    return RequestError::Ok;
 }
 
 void ClimateManager::WriteStatus(Stream &out)

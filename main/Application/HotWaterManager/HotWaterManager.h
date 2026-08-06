@@ -28,13 +28,13 @@ public:
 
 private:
     void Push();   // send current enable+setpoint to OpenThermManager
-    void Cmd_HotWaterSet(Stream &in, Stream &out);
-    void Cmd_HotWaterStatus(Stream &in, Stream &out);
+    RequestError Cmd_HotWaterSet(CommandContext& ctx);
+    RequestError Cmd_HotWaterStatus(CommandContext& ctx);
     void WriteStatus(Stream &out);
 
     inline static CommandEntry commands_[] = {
-        { "hotWaterSet",    &InvokeCommand<&HotWaterManager::Cmd_HotWaterSet> },
-        { "hotWaterStatus", &InvokeCommand<&HotWaterManager::Cmd_HotWaterStatus> },
+        { "hotwater", "set",    &InvokeCommand<&HotWaterManager::Cmd_HotWaterSet> },
+        { "hotwater", "status", &InvokeCommand<&HotWaterManager::Cmd_HotWaterStatus> },
     };
 
     inline static BoolSetting  enableSetting_{ "dhw.enable", "DHW Enable", false };

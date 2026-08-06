@@ -192,24 +192,25 @@ bool DisplayManager::ParseScreen(const char *name, ScreenId &out)
     return false;
 }
 
-void DisplayManager::Cmd_UiGo(Stream &in, Stream &out)
+RequestError DisplayManager::Cmd_UiGo(CommandContext& ctx)
 {
-    JsonReader<128> json(in);
+    char name[16] = {};
+    RETURN_IF_ERROR(ctx.readArgs(Optional("screen", name)));
 
-    char    name[16] = {};
     ScreenId target = current_;
-    bool    haveName = json.GetString("screen", name, sizeof(name));
-    bool    known = haveName && ParseScreen(name, target);
+    bool     haveName = name[0] != '\0';
+    bool     known = haveName && ParseScreen(name, target);
 
     if (haveName && known)
         Go(target);   // takes the LVGL lock itself; blocks until it has it
 
-    JsonObject resp(out);
+    JsonObject resp(ctx.out);
     resp.field("ok", !haveName || known);
     resp.field("screen", ScreenName(current_));
     resp.field("headless", lvDisplay_ == nullptr);
     if (haveName && !known)
         resp.field("error", "unknown screen");
+    return RequestError::Ok;
 }
 
 void DisplayManager::IdleTimerCb(lv_timer_t *t)

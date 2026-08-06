@@ -60,9 +60,9 @@ private:
     static ConsoleManager* s_instance_;
 
     // ── WebSocket commands (registered with CommandManager in Init) ──
-    void Cmd_GetLogs(Stream& in, Stream& out);
+    RequestError Cmd_GetLogs(CommandContext& ctx);
 
     inline static CommandEntry commands_[] = {
-        { "getLogs", &InvokeCommand<&ConsoleManager::Cmd_GetLogs> },
+        { "log", "list", &InvokeCommand<&ConsoleManager::Cmd_GetLogs> },
     };
 };

@@ -2,35 +2,10 @@
 #include "PartitionWriter.h"
 #include "CommandManager.h"
 #include "JsonScope.h"
-#include "JsonReader.h"
-#include "JsonHelpers.h"
-#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_app_desc.h"
-#include "esp_timer.h"
 #include <cstring>
 #include <cstdio>
-
-namespace {
-
-// Command handlers run on whichever transport task dispatched them, and the BLE
-// dispatch task's stack is a few KB — so a multi-KB *local* buffer overruns it and
-// scribbles on whatever memory follows. That surfaces as wild crashes in unrelated
-// subsystems (it presented as a NULL semaphore inside lwIP's select), which is
-// about as hard to diagnose as a bug gets. Anything of that size belongs on the
-// heap, freed on every exit path.
-struct HeapBuf
-{
-    uint8_t* p;
-    explicit HeapBuf(size_t n) : p(static_cast<uint8_t*>(malloc(n))) {}
-    ~HeapBuf() { free(p); }
-    HeapBuf(const HeapBuf&) = delete;
-    HeapBuf& operator=(const HeapBuf&) = delete;
-};
-
-constexpr size_t kIoBufSize = 4096;
-
-}   // namespace
 
 UpdateManager::UpdateManager(ServiceProvider& serviceProvider)
     : serviceProvider_(serviceProvider)
@@ -52,25 +27,17 @@ void UpdateManager::Init()
     ESP_LOGI(TAG, "Initialized");
 }
 
-namespace {
-
-// Read the command's header line (the request envelope) from `in`, up to and
-// consuming the terminating '\n'. The body — if any — is whatever remains in
-// `in` afterwards. Reads a byte at a time; the line always lives in the first
-// inbound chunk, so this never blocks on the socket.
-void ReadHeaderLine(Stream& in, char* out, size_t cap)
-{
-    size_t i = 0;
-    char c;
-    while (i < cap - 1 && in.read(&c, 1) == 1)
-    {
-        if (c == '\n') break;
-        out[i++] = c;
-    }
-    out[i] = '\0';
-}
-
-} // namespace
+// The 4 KB I/O buffer these two commands used to carry is gone rather than moved.
+// It could not live on the stack — handlers run on whichever transport task
+// dispatched them, and 4 KB of a few-KB stack scribbles on whatever follows (in the
+// KC1245 fork that surfaced as a NULL semaphore inside lwIP's select teardown, with
+// nothing in the backtrace pointing at the culprit). The heap fixed that overrun and
+// bought a fragmentation problem plus an allocation that can fail mid-write.
+//
+// Neither is needed: the bytes are already in a buffer at both ends. An upload sits
+// in the transport's inbound buffer, a download is assembled in its framing buffer,
+// and Session lends both out (Stream::canLend), so these handlers move bytes between
+// flash and a buffer they do not own.
 
 const char* UpdateManager::GetRunningPartition() const
 {
@@ -167,24 +134,29 @@ int UpdateManager::GetPartitions(PartitionInfo* out, int maxCount) const
 // Status / enumeration commands
 // ──────────────────────────────────────────────────────────────
 
-void UpdateManager::Cmd_UpdateStatus(Stream& in, Stream& out)
+RequestError UpdateManager::Cmd_UpdateStatus(CommandContext& ctx)
 {
-    JsonObject resp(out);
+    RETURN_IF_ERROR(ctx.readArgs());
+
+    JsonObject resp(ctx.out);
 
     const esp_app_desc_t* app = esp_app_get_description();
 
     resp.field("firmware", app->version);
     resp.field("running", GetRunningPartition());
     resp.field("nextSlot", GetNextPartition());
+    return RequestError::Ok;
 }
 
-void UpdateManager::Cmd_Partitions(Stream& in, Stream& out)
+RequestError UpdateManager::Cmd_Partitions(CommandContext& ctx)
 {
     static constexpr int MAX_PARTITIONS = 16;
     PartitionInfo parts[MAX_PARTITIONS];
+    RETURN_IF_ERROR(ctx.readArgs());
+
     int count = GetPartitions(parts, MAX_PARTITIONS);
 
-    JsonObject root(out);
+    JsonObject root(ctx.out);
     JsonArray arr = root.array("partitions");
 
     for (int i = 0; i < count; i++)
@@ -201,6 +173,7 @@ void UpdateManager::Cmd_Partitions(Stream& in, Stream& out)
         o.field("uploadable", p.uploadable);
         o.field("version",    p.version);
     }
+    return RequestError::Ok;
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -208,7 +181,7 @@ void UpdateManager::Cmd_Partitions(Stream& in, Stream& out)
 // Envelope: {"type":"writePartition","partition":"<label>"}\n<bytes…>
 // ──────────────────────────────────────────────────────────────
 
-void UpdateManager::Cmd_WritePartition(Stream& in, Stream& out)
+RequestError UpdateManager::Cmd_WritePartition(CommandContext& ctx)
 {
     // Reply is a stream of newline-free JSON messages, one per chunk: zero or more
     // progress reports {"p":<bytesWritten>} flushed as they happen, then a final
@@ -216,218 +189,187 @@ void UpdateManager::Cmd_WritePartition(Stream& in, Stream& out)
     // so the client's bar tracks the real write, not bytes queued into the socket.
     static constexpr size_t REPORT_EVERY = 32 * 1024;
 
-    char line[128];
-    ReadHeaderLine(in, line, sizeof(line));   // consume the envelope; body follows
-
     char label[17] = {};
-    ExtractJsonString(line, "partition", label, sizeof(label));
+    uint32_t offset = 0;
 
+    // Absence and a legitimate zero mean different things here, hence has():
+    // no `offset` is the one-shot upload — start at zero, erase as we go, activate
+    // at the end, the whole image in one command, which is what the web UI sends.
+    // An explicit offset (including 0) means the sender is driving the upload in
+    // pieces and owns the clearPartition and activatePartition steps itself.
+    RETURN_IF_ERROR(ctx.readArgs(
+        Required("partition", label),
+        Optional("offset",    offset)
+    ));
+
+    // `in` is now positioned at the body, past the envelope.
     char msg[96];
 
     const char* err = nullptr;
-    PartitionWriter w(label, &err);
+    PartitionWriter w(label, offset, &err);
     if (!w.ok())
     {
         int len = snprintf(msg, sizeof(msg), "{\"ok\":false,\"error\":\"%s\"}", err);
-        out.write(msg, len);
-        return;
+        ctx.out.write(msg, len);
+        return RequestError::Ok;
     }
 
-    // Heap, not stack — see HeapBuf above.
-    static constexpr size_t BUF_SIZE = kIoBufSize;
-    HeapBuf buffer(BUF_SIZE);
-
-    if (buffer.p == nullptr)
+    // Asked before the loop, not inside it: past this point 0 means end of image,
+    // and a stream that lends nothing would look exactly like an empty one — an
+    // upload that "succeeded" having written nothing.
+    if (!ctx.in.canLend())
     {
-        int len = snprintf(msg, sizeof(msg), "{\"ok\":false,\"error\":\"out of memory\"}");
-        out.write(msg, len);
-        return;
+        int len = snprintf(msg, sizeof(msg),
+                           "{\"ok\":false,\"error\":\"transport cannot stream\"}");
+        ctx.out.write(msg, len);
+        return RequestError::Ok;
     }
-    uint8_t* const buf = buffer.p;
 
+    const uint8_t* chunk = nullptr;
+    size_t n;
     size_t reported = 0;
-    bool endOfStream = false;
-    // Diagnostic: a write that triggers a sector erase blocks code running from
-    // flash, and the BLE host runs from flash — so a slow erase can cost the link
-    // its supervision timeout. Timed here to find out whether that is what happens.
-    int64_t worstWriteUs = 0;
-    size_t  worstAt = 0;
-    while (!endOfStream)
+    while ((n = ctx.in.lendInput(chunk)) > 0)   // 0 == end of stream == full image
     {
-        // Fill the buffer before touching flash. A transport chunk is far smaller
-        // than this (241 bytes over BLE), and writing per chunk paid the flash
-        // overhead ~17 times over while the transport's inbound queue kept filling
-        // behind us — which is how chunks got dropped and images silently corrupted.
-        size_t n = 0;
-        while (n < BUF_SIZE)
-        {
-            size_t got = in.read(buf + n, BUF_SIZE - n);
-            if (got == 0) { endOfStream = true; break; }   // end of stream == full image
-            n += got;
-        }
-        if (n == 0) break;
-
-        const int64_t writeStart = esp_timer_get_time();
-        if (!w.write(buf, n))                      // dtor aborts a half-written image
+        if (!w.write(chunk, n))
         {
             int len = snprintf(msg, sizeof(msg), "{\"ok\":false,\"error\":\"write failed\"}");
-            out.write(msg, len);
-            return;
-        }
-        const int64_t writeUs = esp_timer_get_time() - writeStart;
-        if (writeUs > worstWriteUs)
-        {
-            worstWriteUs = writeUs;
-            worstAt = w.written();
+            ctx.out.write(msg, len);
+            return RequestError::Ok;
         }
         if (w.written() - reported >= REPORT_EVERY)
         {
             int len = snprintf(msg, sizeof(msg), "{\"p\":%lu}", (unsigned long)w.written());
-            out.write(msg, len);
-            out.flush();                           // push this progress chunk now
+            ctx.out.write(msg, len);
+            ctx.out.flush();                       // push this progress chunk now
             reported = w.written();
         }
     }
 
-    ESP_LOGI(TAG, "write timing: worst %lld us at offset %u over %u bytes total",
-             worstWriteUs, (unsigned)worstAt, (unsigned)w.written());
-
-    // A stream that broke is not a complete image, even though it ended the same
-    // way a complete one does — read() returns 0 for both. Returning here without
-    // finish() leaves the destructor to abort the write, so a truncated image is
-    // never validated, never activated, and the sender is told the real reason
-    // instead of "image validation failed" a megabyte later.
-    if (in.failed())
+    // A stream that broke is not a complete write, even though it ended the same way
+    // a complete one does — read() returns 0 for both. Returning without activating
+    // leaves the boot pointer where it was, so a truncated image is inert and the
+    // sender is told the real reason instead of "image validation failed" later.
+    if (ctx.in.failed())
     {
-        ESP_LOGE(TAG, "request stream failed after %u bytes, discarding the image",
+        ESP_LOGE(TAG, "request stream failed after %u bytes, not activating",
                  (unsigned)w.written());
         int len = snprintf(msg, sizeof(msg),
                            "{\"ok\":false,\"error\":\"stream failed at %lu bytes\"}",
                            (unsigned long)w.written());
-        out.write(msg, len);
-        return;
+        ctx.out.write(msg, len);
+        return RequestError::Ok;
     }
 
-    err = w.finish();
-    int len = err
-        ? snprintf(msg, sizeof(msg), "{\"ok\":false,\"error\":\"%s\"}", err)
-        : snprintf(msg, sizeof(msg), "{\"ok\":true,\"size\":%lu}", (unsigned long)w.written());
-    out.write(msg, len);   // OnSessionOpened's finish() emits this as the FINAL chunk
+    // This piece landed, and that is all this command claims. Erasing is `clear`'s
+    // job and switching the boot slot is `activate`'s; a write writes.
+    int len = snprintf(msg, sizeof(msg), "{\"ok\":true,\"offset\":%lu,\"size\":%lu}",
+                       (unsigned long)offset, (unsigned long)w.written());
+    ctx.out.write(msg, len);   // the dispatcher's finish() emits this as the FINAL chunk
+    return RequestError::Ok;
 }
 
 // ──────────────────────────────────────────────────────────────
-// Pull OTA — the device fetches the image itself, into the same writer.
+// Chunked-upload steps — the two halves the one-shot path does implicitly, so a
+// sender can drive an upload as many short sessions instead of one long one.
 // ──────────────────────────────────────────────────────────────
 
-void UpdateManager::Cmd_UpdateFromUrl(Stream& in, Stream& out)
-{
-    JsonReader<512> req(in);
-    JsonObject resp(out);
+// These two are the first handlers written against the console request format
+// rather than the JSON envelope:
+//
+//     clearPartition -p ota_1
+//     activatePartition -p ota_1
+//
+// Note what is absent: no JsonReader, so no buffer holding the request. `label` is
+// seventeen bytes because a partition label is seventeen bytes — the request's length
+// does not enter into it. The reply stays JSON, which costs nothing because writing
+// is single-pass already.
+//
+// Converted first because they are new and nothing in the web UI calls them yet, so
+// the format can be proven on hardware without touching the frontend.
 
-    char url[256] = {};
-    if (!req.GetString("url", url, sizeof(url)))
+RequestError UpdateManager::Cmd_ClearPartition(CommandContext& ctx)
+{
+    char label[17] = {};
+    RETURN_IF_ERROR(ctx.readArgs(Required("partition", label)));
+
+    JsonObject resp(ctx.out);
+    if (const char* err = PartitionWriter::Clear(label))
     {
         resp.field("ok", false);
-        resp.field("error", "missing url");
-        return;
+        resp.field("error", err);
+        return RequestError::Ok;
     }
-
-    // Partition by label; defaults to the next OTA slot (the normal
-    // "update my firmware from here" case).
-    char label[17] = {};
-    if (!req.GetString("partition", label, sizeof(label)))
-    {
-        const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
-        if (!next) { resp.field("ok", false); resp.field("error", "no ota slot"); return; }
-        snprintf(label, sizeof(label), "%s", next->label);
-    }
-
-    esp_http_client_config_t cfg = {};
-    cfg.url = url;
-    cfg.timeout_ms = 15000;
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    if (!client) { resp.field("ok", false); resp.field("error", "client init failed"); return; }
-
-    const char* err = nullptr;
-    uint32_t total = 0;
-
-    do
-    {
-        if (esp_http_client_open(client, 0) != ESP_OK) { err = "connect failed"; break; }
-        esp_http_client_fetch_headers(client);
-        int status = esp_http_client_get_status_code(client);
-        if (status != 200) { err = "http status"; break; }
-
-        PartitionWriter w(label, &err);   // dtor aborts if we break before finish()
-        if (!w.ok()) break;
-
-        char buf[1024];
-        int n;
-        while ((n = esp_http_client_read(client, buf, sizeof(buf))) > 0)
-        {
-            if (!w.write(buf, n)) { err = "write failed"; break; }
-            total += n;
-        }
-        if (err) break;
-        if (n < 0) { err = "read failed"; break; }
-
-        err = w.finish();
-    } while (false);
-
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-
-    if (err) { resp.field("ok", false); resp.field("error", err); return; }
     resp.field("ok", true);
-    resp.field("size", total);
-    ESP_LOGI(TAG, "Pull update from %s complete (%lu bytes)", url, (unsigned long)total);
+    return RequestError::Ok;
+}
+
+RequestError UpdateManager::Cmd_ActivatePartition(CommandContext& ctx)
+{
+    char label[17] = {};
+    RETURN_IF_ERROR(ctx.readArgs(Required("partition", label)));
+
+    JsonObject resp(ctx.out);
+    if (const char* err = PartitionWriter::Activate(label))
+    {
+        resp.field("ok", false);
+        resp.field("error", err);
+        return RequestError::Ok;
+    }
+    resp.field("ok", true);
+    return RequestError::Ok;
 }
 
 // ──────────────────────────────────────────────────────────────
 // Partition download — tiny JSON request in, raw bytes out
 // ──────────────────────────────────────────────────────────────
 
-void UpdateManager::Cmd_DownloadPartition(Stream& in, Stream& out)
+RequestError UpdateManager::Cmd_DownloadPartition(CommandContext& ctx)
 {
-    JsonReader<256> req(in);
-
     char label[17] = {};
-    req.GetString("partition", label, sizeof(label));
+    RETURN_IF_ERROR(ctx.readArgs(Required("partition", label)));
 
     const esp_partition_t* p = esp_partition_find_first(
         ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, label);
     if (!p)
     {
-        JsonObject resp(out);
+        JsonObject resp(ctx.out);
         resp.field("ok", false);
         resp.field("error", "unknown partition");
-        return;
+        return RequestError::Ok;
     }
 
     ESP_LOGI(TAG, "Download partition '%s' (%lu bytes)", label, (unsigned long)p->size);
 
-    HeapBuf buffer(kIoBufSize);   // heap, not stack — see HeapBuf above
-    if (buffer.p == nullptr)
+    if (!ctx.out.canLend())
     {
-        ESP_LOGE(TAG, "out of memory for the download buffer");
-        return;
+        JsonObject resp(ctx.out);
+        resp.field("ok", false);
+        resp.field("error", "transport cannot stream");
+        return RequestError::Ok;
     }
-    uint8_t* const buf = buffer.p;
 
+    // Read flash straight into the reply frame the transport is about to send. The
+    // run is one chunk's worth of payload, not a size of ours — which is why there
+    // is no buffer here to pick a size for.
     size_t offset = 0;
     while (offset < p->size)
     {
-        size_t n = (p->size - offset < kIoBufSize) ? (p->size - offset) : kIoBufSize;
-        if (esp_partition_read(p, offset, buf, n) != ESP_OK)
-        {
-            ESP_LOGE(TAG, "esp_partition_read failed at offset %lu", (unsigned long)offset);
-            return;
-        }
-        if (out.write(buf, n) != n)
+        size_t avail = 0;
+        uint8_t* dst = ctx.out.lendOutput(avail);
+        if (dst == nullptr)
         {
             ESP_LOGW(TAG, "Client disconnected during download");
-            return;
+            return RequestError::Ok;
         }
+
+        size_t n = (p->size - offset < avail) ? (p->size - offset) : avail;
+        if (esp_partition_read(p, offset, dst, n) != ESP_OK)
+        {
+            ESP_LOGE(TAG, "esp_partition_read failed at offset %lu", (unsigned long)offset);
+            return RequestError::Ok;
+        }
+        ctx.out.commitOutput(n);
         offset += n;
     }
+    return RequestError::Ok;
 }

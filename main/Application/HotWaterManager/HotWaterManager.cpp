@@ -44,19 +44,26 @@ void HotWaterManager::Push()
     serviceProvider_.getOpenThermManager().SetDhwDemand(en, sp);
 }
 
-void HotWaterManager::Cmd_HotWaterSet(Stream &in, Stream &out)
+RequestError HotWaterManager::Cmd_HotWaterSet(CommandContext& ctx)
 {
-    JsonReader<128> json(in);
+    // Both optional, and both need "absent" to differ from a value. A bool cannot
+    // carry that, so enable arrives as the same tri-state number the JSON reader
+    // used, and the setpoint keeps NAN for "not given".
+    uint32_t enable = 2;             // 0/1 set it; anything else leaves it alone
+    float    f = NAN;
+    RETURN_IF_ERROR(ctx.readArgs(
+        Optional("enable",   enable),
+        Optional("setpoint", f)
+    ));
+
     bool changed = false;
     {
         LOCK(mutex_);
-        int i = json.GetInt("enable", -1);
-        if (i >= 0)
+        if (enable <= 1)
         {
-            bool v = (i != 0);
+            bool v = (enable != 0);
             if (enable_ != v) { enable_ = v; changed = true; }
         }
-        float f = json.GetFloat("setpoint", NAN);
         if (!std::isnan(f))
         {
             if (f < kSetpointMin) f = kSetpointMin;
@@ -74,12 +81,15 @@ void HotWaterManager::Cmd_HotWaterSet(Stream &in, Stream &out)
         serviceProvider_.getSettingsManager().Save();
         Push();
     }
-    WriteStatus(out);
+    WriteStatus(ctx.out);
+    return RequestError::Ok;
 }
 
-void HotWaterManager::Cmd_HotWaterStatus(Stream &, Stream &out)
+RequestError HotWaterManager::Cmd_HotWaterStatus(CommandContext& ctx)
 {
-    WriteStatus(out);
+    RETURN_IF_ERROR(ctx.readArgs());
+    WriteStatus(ctx.out);
+    return RequestError::Ok;
 }
 
 void HotWaterManager::WriteStatus(Stream &out)

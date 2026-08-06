@@ -275,12 +275,14 @@ void NetworkManager::HandleNetworkEvent(const NetworkEvent& event)
 // WebSocket commands
 // ──────────────────────────────────────────────────────────────
 
-void NetworkManager::Cmd_WifiScan(Stream& in, Stream& out)
+RequestError NetworkManager::Cmd_WifiScan(CommandContext& ctx)
 {
     WiFiInterface::ScanResult results[20] = {};
+    RETURN_IF_ERROR(ctx.readArgs());
+
     int count = wifi().Scan(results, 20);
 
-    JsonObject root(out);
+    JsonObject root(ctx.out);
     root.field("ok", true);
     JsonArray networks = root.array("networks");
 
@@ -292,4 +294,5 @@ void NetworkManager::Cmd_WifiScan(Stream& in, Stream& out)
         n.field("channel", static_cast<int32_t>(results[i].channel));
         n.field("secure", results[i].secure);
     }
+    return RequestError::Ok;
 }

@@ -2,12 +2,10 @@
 #include "CommandManager.h"
 #include "Authenticator.h"
 #include "AuthGate.h"
-#include "WsSessionLink.h"   // the concrete link; SessionMux only knows SessionLink
-#include "JsonHelpers.h"
+#include "WsSessionLink.h"   // the concrete SessionLink for this transport
 #include "esp_log.h"
 #include "esp_timer.h"
 
-#include <algorithm>
 #include <cstring>
 
 static constexpr const char* TAG = "WebSocketHandler";
@@ -219,52 +217,19 @@ void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size
     WsConnection* conn = registry_.find(fd);
     if (!conn) return;   // unknown fd (closed mid-frame)
 
+    // The session lives on this stack frame for exactly one dispatch: the first chunk
+    // opens it, and its FLAG_FINAL tells the Session whether a body follows (further
+    // chunks pulled by read()) or the request ends here. Runs synchronously on the
+    // httpd task.
+    //
+    // The gate decides what may run before this connection has authenticated, and
+    // lends its auth state to the `auth` handlers. No handshake parsing here any more
+    // — the handshake is three ordinary commands.
     WsSessionLink link(req, sendMutex_);
-    AuthGate gate(*auth_);
-    switch (gate.Handle(*conn, link, sid, payload, plen))
-    {
-        case AuthGate::Disposition::PassToMux:
-        {
-            SessionMux mux(link, *this, sessionFrame_, SESSION_WINDOW,
-                           sessionInbound_, sizeof(sessionInbound_));
-            mux.OnChunk(sid, flags, payload, plen);
-            break;
-        }
-        case AuthGate::Disposition::Handled:
-        case AuthGate::Disposition::Rejected:
-            break;
-    }
-}
+    AuthGate gate(*conn, *auth_);
 
-void WebSocketHandler::OnSessionOpened(Session& session)
-{
-    // The request's first chunk carries the header line — {"type":"...",...args}
-    // terminated by '\n' — followed (for a streamed command) by the body. Peek
-    // it (without consuming) to route on "type"; the handler then reads the same
-    // line for its own args and the body from the same session (in == out).
-    const uint8_t* head = nullptr;
-    size_t headLen = 0;
-    session.peekRequest(head, headLen);
-
-    char line[128];
-    size_t n = std::min(headLen, sizeof(line) - 1);
-    memcpy(line, head, n);
-    line[n] = '\0';
-    if (char* nl = strchr(line, '\n')) *nl = '\0';
-
-    char type[32] = {};
-    ExtractJsonString(line, "type", type, sizeof(type));
-
-    if (type[0] == '\0')
-    {
-        session.reject("missing type");
-        return;
-    }
-
-    if (!commandManager_ || !commandManager_->Execute(type, session, session))
-    {
-        session.reject(type);   // unknown command
-        return;
-    }
-    session.finish();   // FINAL — end of reply
+    Session s(sid, link, sessionFrame_, SESSION_WINDOW,
+              sessionInbound_, sizeof(sessionInbound_));
+    s.feedRequest(payload, plen, (flags & session::FLAG_FINAL) != 0);
+    protocol::RunCommandSession(s, *commandManager_, gate);
 }

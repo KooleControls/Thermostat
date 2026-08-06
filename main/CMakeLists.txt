@@ -9,8 +9,6 @@ set(SOURCE_FILES_LIST
     "Application/WebServerManager/StaticFileHandler.cpp"
     "Application/WebServerManager/WebSocketHandler.cpp"
     "Application/WebServerManager/ConnectionRegistry.cpp"
-    "Application/WebServerManager/AuthGate.cpp"
-    "Application/WebServerManager/SessionMux.cpp"
     "Application/WebServerManager/SessionTable.cpp"
     "Application/BleManager/BleManager.cpp"
     "Application/CommandManager/CommandManager.cpp"
@@ -63,6 +61,7 @@ set(INCLUDE_DIRS_LIST
     "lib/common"
     "lib/rtos"
     "lib/json"
+    "lib/protocol"
     "lib/system"
 )
 

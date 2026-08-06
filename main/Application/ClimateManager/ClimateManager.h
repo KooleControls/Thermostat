@@ -58,13 +58,13 @@ private:
     void MaybeCommitSettings();   // flush mode/setpoint to NVS once input has gone quiet
     float OutputToTSet(float output, float loBound, float hiBound);
     void  PushSafeState();
-    void  Cmd_ClimateSet(Stream &in, Stream &out);
-    void  Cmd_ClimateStatus(Stream &in, Stream &out);
+    RequestError Cmd_ClimateSet(CommandContext& ctx);
+    RequestError Cmd_ClimateStatus(CommandContext& ctx);
     void  WriteStatus(Stream &out);
 
     inline static CommandEntry commands_[] = {
-        { "climateSet",    &InvokeCommand<&ClimateManager::Cmd_ClimateSet> },
-        { "climateStatus", &InvokeCommand<&ClimateManager::Cmd_ClimateStatus> },
+        { "climate", "set",    &InvokeCommand<&ClimateManager::Cmd_ClimateSet> },
+        { "climate", "status", &InvokeCommand<&ClimateManager::Cmd_ClimateStatus> },
     };
 
     inline static UInt32Setting modeSetting_{ "climate.mode", "Climate Mode", (uint32_t)ClimateMode::Off };

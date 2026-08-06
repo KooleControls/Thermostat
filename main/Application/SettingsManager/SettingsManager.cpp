@@ -185,9 +185,11 @@ bool SettingsManager::WriteString(const char* key, const char* v)
 // knows nothing about JSON. Anyone wanting YAML writes their own.
 // ──────────────────────────────────────────────────────────────
 
-void SettingsManager::Cmd_GetSettings(Stream& in, Stream& out)
+RequestError SettingsManager::Cmd_GetSettings(CommandContext& ctx)
 {
-    JsonObject root(out);
+    RETURN_IF_ERROR(ctx.readArgs());
+
+    JsonObject root(ctx.out);
     JsonArray settings = root.array("settings");
 
     for (const Setting& s : *this)
@@ -212,24 +214,19 @@ void SettingsManager::Cmd_GetSettings(Stream& in, Stream& out)
         }
         }
     }   // each `o` closes at end of iteration; `settings` and `root` at return
+    return RequestError::Ok;
 }
 
-void SettingsManager::Cmd_SetSetting(Stream& in, Stream& out)
+RequestError SettingsManager::Cmd_SetSetting(CommandContext& ctx)
 {
-    JsonReader<512> req(in);
-    JsonObject resp(out);
-
     char key[64] = {};
     char value[128] = {};
-    req.GetString("key", key, sizeof(key));
-    req.GetString("value", value, sizeof(value));
+    RETURN_IF_ERROR(ctx.readArgs(
+        Required("key",   key),
+        Optional("value", value)
+    ));
 
-    if (key[0] == '\0')
-    {
-        resp.field("ok", false);
-        resp.field("error", "missing key");
-        return;
-    }
+    JsonObject resp(ctx.out);
 
     for (Setting& s : *this)
     {
@@ -257,15 +254,21 @@ void SettingsManager::Cmd_SetSetting(Stream& in, Stream& out)
         }
 
         resp.field("ok", ok);
-        return;
+        return RequestError::Ok;
     }
 
+    // An unrecognised setting key is MEANING, not form — the framework has no idea
+    // which keys exist. So it is a reply, not a refusal.
     resp.field("ok", false);
     resp.field("error", "unknown key");
+    return RequestError::Ok;
 }
 
-void SettingsManager::Cmd_SaveSettings(Stream& in, Stream& out)
+RequestError SettingsManager::Cmd_SaveSettings(CommandContext& ctx)
 {
-    JsonObject resp(out);
+    RETURN_IF_ERROR(ctx.readArgs());
+
+    JsonObject resp(ctx.out);
     resp.field("ok", Save());
+    return RequestError::Ok;
 }

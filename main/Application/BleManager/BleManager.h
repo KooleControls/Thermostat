@@ -6,7 +6,7 @@
 #include "CommandManager/CommandEntry.h"
 #include "TypedSettings.h"
 #include "BleSessionLink.h"
-#include "SessionMux.h"
+#include "Session.h"
 #include "Task.h"
 #include "host/ble_hs.h"
 #include "esp_timer.h"
@@ -33,9 +33,23 @@ class JsonObject;
 // Bring-up order after a connect: encrypt/pair first, then discover, so no
 // service discovery ever happens on a plaintext link.
 // ──────────────────────────────────────────────────────────────
-class BleManager : public SessionMux::Sink
+class BleManager
 {
     static constexpr const char* TAG = "BleManager";
+
+    // The gate every BLE session runs behind. There is no `auth` handshake on this
+    // transport: pairing with the install-code passkey and bonding already proved
+    // the peer at the link layer, and the link is not declared usable until both
+    // completed. So every category is allowed and the connection is authed from
+    // the start — a policy difference from the browser socket, not a second code
+    // path (see AuthGate's own note).
+    class LinkAuthedGate final : public ConnectionAuth
+    {
+    public:
+        bool Allows(const char*) const { return true; }
+        void authenticate(const char*) override {}
+        bool isAuthed() const override { return true; }
+    };
 
 public:
     static constexpr int    MaxPeers   = 8;
@@ -74,10 +88,6 @@ public:
     BleManager& operator=(BleManager&&) = delete;
 
     void Init();
-
-    /// SessionMux::Sink — a request has arrived over BLE and is ready to run.
-    /// Called on the dispatch task, never on the NimBLE host task.
-    void OnSessionOpened(Session& session) override;
 
     /// Kick a scan. False when the stack is down or a scan is already running.
     bool StartScan();
@@ -140,18 +150,18 @@ private:
     void EnqueueChunk(const struct os_mbuf* om);
     void DispatchLoop();
 
-    void Cmd_BleScan(Stream& in, Stream& out);
-    void Cmd_BleStatus(Stream& in, Stream& out);
-    void Cmd_BleConnect(Stream& in, Stream& out);
-    void Cmd_BleForget(Stream& in, Stream& out);
+    RequestError Cmd_BleScan(CommandContext& ctx);
+    RequestError Cmd_BleStatus(CommandContext& ctx);
+    RequestError Cmd_BleConnect(CommandContext& ctx);
+    RequestError Cmd_BleForget(CommandContext& ctx);
     void WritePeers(JsonObject& root);
     static const char* StateName(LinkState s);
 
     inline static CommandEntry commands_[] = {
-        { "bleScan",    &InvokeCommand<&BleManager::Cmd_BleScan> },
-        { "bleStatus",  &InvokeCommand<&BleManager::Cmd_BleStatus> },
-        { "bleConnect", &InvokeCommand<&BleManager::Cmd_BleConnect> },
-        { "bleForget",  &InvokeCommand<&BleManager::Cmd_BleForget> },
+        { "ble", "scan",    &InvokeCommand<&BleManager::Cmd_BleScan> },
+        { "ble", "status",  &InvokeCommand<&BleManager::Cmd_BleStatus> },
+        { "ble", "connect", &InvokeCommand<&BleManager::Cmd_BleConnect> },
+        { "ble", "forget",  &InvokeCommand<&BleManager::Cmd_BleForget> },
     };
 
     inline static BoolSetting   enableSetting_{ "ble.enable", "BLE Enable", true };

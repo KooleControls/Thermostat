@@ -250,23 +250,39 @@ void ThermalTestManager::WriteStatus(Stream &out)
     resp.field("otLinked", serviceProvider_.getOpenThermManager().GetState().linked);
 }
 
-void ThermalTestManager::Cmd_ThermalStatus(Stream &, Stream &out)
+RequestError ThermalTestManager::Cmd_ThermalStatus(CommandContext& ctx)
 {
-    WriteStatus(out);
+    RETURN_IF_ERROR(ctx.readArgs());
+    WriteStatus(ctx.out);
+    return RequestError::Ok;
 }
 
-void ThermalTestManager::Cmd_ThermalSet(Stream &in, Stream &out)
+RequestError ThermalTestManager::Cmd_ThermalSet(CommandContext& ctx)
 {
-    JsonReader<128> json(in);
+    // Every lever is optional and each needs "absent" to differ from a value, so the
+    // sentinels the JSON reader used to supply are now the initialisers: an absent
+    // Optional leaves its destination alone. Backlight needs one because 0 is a
+    // legitimate brightness.
+    static constexpr uint32_t kBacklightAbsent = 0xFFFFFFFFu;
 
-    char        name[16] = {};
+    char     name[16] = {};
+    char     psName[8] = {};
+    uint32_t backlightArg = kBacklightAbsent;
+    uint32_t cpuMhz = 0;
+    bool     stopRadio = false;
+    RETURN_IF_ERROR(ctx.readArgs(
+        Optional("mode",      name),
+        Optional("backlight", backlightArg),
+        Optional("cpuMhz",    cpuMhz),
+        Optional("stopRadio", stopRadio),
+        Optional("wifiPs",    psName)
+    ));
+
     ThermalMode parsed = ThermalMode::Baseline;
-    bool        haveMode = json.GetString("mode", name, sizeof(name)) && ParseMode(name, parsed);
-    int32_t     backlight = json.GetInt("backlight", -1);
-    int32_t     cpuMhz = json.GetInt("cpuMhz", 0);
-    bool        stopRadio = json.GetBool("stopRadio", false);
-    char        psName[8] = {};
-    bool        havePs = json.GetString("wifiPs", psName, sizeof(psName));
+    bool        haveMode = name[0] != '\0' && ParseMode(name, parsed);
+    bool        havePs = psName[0] != '\0';
+    int32_t     backlight = backlightArg == kBacklightAbsent
+                              ? -1 : static_cast<int32_t>(backlightArg);
 
     // -1 = leave the stored brightness alone; anything else is written to NVS
     // after the lock is released.
@@ -279,7 +295,7 @@ void ThermalTestManager::Cmd_ThermalSet(Stream &in, Stream &out)
     {
         LOCK(mutex_);
         Levers levers = levers_;
-        levers.cpuMhz = cpuMhz;
+        levers.cpuMhz = static_cast<int>(cpuMhz);
         mode_ = ThermalMode::Custom;
         ApplyLevers(levers);
         stateEnteredUs_ = esp_timer_get_time();
@@ -334,5 +350,6 @@ void ThermalTestManager::Cmd_ThermalSet(Stream &in, Stream &out)
         serviceProvider_.getSettingsManager().Save();
     }
 
-    WriteStatus(out);
+    WriteStatus(ctx.out);
+    return RequestError::Ok;
 }

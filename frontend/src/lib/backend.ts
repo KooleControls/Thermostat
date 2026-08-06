@@ -43,6 +43,23 @@ let nextSession = 1
 const FLAG_FINAL = 0x01
 const FLAG_REJECT = 0x02
 
+// The device UI runs in two places, and its WebSocket follows the page:
+//   • served by the device            → ws://<device>/ws
+//   • served through the relay server → ws://<server>/devices/<id>/ws
+//
+// Resolving "ws" against the page's own directory covers both, which keeps this
+// file ignorant that a relay exists — no device id is parsed here. `pnpm dev`
+// still talks to DEV_HOST.
+function resolveWsUrl(): string {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:"
+  if (import.meta.env.DEV) return `${proto}//${DEV_HOST}/ws`
+
+  // Drop the document name so "/devices/x/" and "/devices/x/index.html" both
+  // resolve to "/devices/x/ws".
+  const dir = location.pathname.replace(/[^/]*$/, "")
+  return `${proto}//${location.host}${dir}ws`
+}
+
 class BackendService {
   private ws: WebSocket | null = null
   private pending = new Map<number, PendingRequest>()
@@ -127,9 +144,7 @@ class BackendService {
     this.setStatus("connecting")
 
     const p = new Promise<void>((resolve, reject) => {
-      const host = import.meta.env.DEV ? DEV_HOST : location.host
-      const proto = location.protocol === "https:" ? "wss:" : "ws:"
-      const ws = new WebSocket(`${proto}//${host}/ws`)
+      const ws = new WebSocket(resolveWsUrl())
       ws.binaryType = "arraybuffer"
       let opened = false
 
@@ -183,14 +198,14 @@ class BackendService {
   // login page. Runs on every (re)connect.
   private async doHandshake() {
     try {
-      const info = await this.send<{ authRequired: boolean }>("hello")
+      const info = await this.send<{ authRequired: boolean }>("auth hello")
       if (!info.authRequired) {
         this.setAuthenticated(true)
         this.startHeartbeat()
         return
       }
       if (this.token) {
-        const res = await this.send<{ ok: boolean }>("auth", { key: this.token })
+        const res = await this.send<{ ok: boolean }>("auth resume", { key: this.token })
         if (res.ok) {
           this.setAuthenticated(true)
           this.startHeartbeat()
@@ -209,7 +224,7 @@ class BackendService {
     this.stopHeartbeat()
     this.heartbeatTimer = setInterval(() => {
       if (this.ws?.readyState !== WebSocket.OPEN) return
-      this.send("ping").catch(() => {
+      this.send("system ping").catch(() => {
         this.setStatus("disconnected")
         this.ws?.close()
       })
@@ -429,45 +444,45 @@ class BackendService {
   // ── API methods ──────────────────────────────────────────────
 
   async getInfo(): Promise<DeviceInfo> {
-    return this.send<DeviceInfo>("info")
+    return this.send<DeviceInfo>("system info")
   }
 
   async getLogs(): Promise<LogsResponse> {
-    return this.send<LogsResponse>("getLogs")
+    return this.send<LogsResponse>("log list")
   }
 
   async getUpdateStatus(): Promise<UpdateStatus> {
-    return this.send<UpdateStatus>("updateStatus")
+    return this.send<UpdateStatus>("partition status")
   }
 
   async getSettings(): Promise<SettingsResponse> {
-    return this.send<SettingsResponse>("getSettings")
+    return this.send<SettingsResponse>("settings list")
   }
 
   async setSetting(key: string, value: string): Promise<{ ok: boolean }> {
-    return this.send("setSetting", { key, value })
+    return this.send("settings set", { key, value })
   }
 
   async saveSettings(): Promise<{ ok: boolean }> {
-    return this.send("saveSettings")
+    return this.send("settings save")
   }
 
   async wifiScan(): Promise<WifiScanResponse> {
-    return this.send<WifiScanResponse>("wifiScan")
+    return this.send<WifiScanResponse>("wifi scan")
   }
 
   async getPartitions(): Promise<PartitionsResponse> {
-    return this.send<PartitionsResponse>("partitions")
+    return this.send<PartitionsResponse>("partition list")
   }
 
   async reboot(): Promise<{ ok: boolean }> {
-    return this.send("reboot")
+    return this.send("system reboot")
   }
 
   // ── Thermostat / OpenTherm ────────────────────────────────────
 
   async getClimateStatus(): Promise<ClimateStatus> {
-    return this.send<ClimateStatus>("climateStatus")
+    return this.send<ClimateStatus>("climate status")
   }
 
   /** mode and/or setpoint; reply is the full fresh climate status. */
@@ -475,11 +490,11 @@ class BackendService {
     mode?: "off" | "heat" | "cool"
     setpoint?: number
   }): Promise<ClimateStatus> {
-    return this.send<ClimateStatus>("climateSet", params)
+    return this.send<ClimateStatus>("climate set", params)
   }
 
   async getHotWaterStatus(): Promise<HotWaterStatus> {
-    return this.send<HotWaterStatus>("hotWaterStatus")
+    return this.send<HotWaterStatus>("hotwater status")
   }
 
   /** enable and/or setpoint; `enable` maps to the device's int (1/0),
@@ -491,17 +506,17 @@ class BackendService {
     const payload: Record<string, unknown> = {}
     if (params.enable !== undefined) payload.enable = params.enable ? 1 : 0
     if (params.setpoint !== undefined) payload.setpoint = params.setpoint
-    return this.send<HotWaterStatus>("hotWaterSet", payload)
+    return this.send<HotWaterStatus>("hotwater set", payload)
   }
 
   async getOtStatus(): Promise<OtStatus> {
-    return this.send<OtStatus>("otStatus")
+    return this.send<OtStatus>("ot status")
   }
 
   // ── Self-heating test rig ─────────────────────────────────────
 
   async getThermalStatus(): Promise<ThermalStatus> {
-    return this.send<ThermalStatus>("thermalStatus")
+    return this.send<ThermalStatus>("thermal status")
   }
 
   /** A named `mode` sets every lever at once; `backlight` on its own switches
@@ -515,14 +530,14 @@ class BackendService {
     /** One-way: the reply arrives, then WiFi stops. Reboot to get it back. */
     stopRadio?: boolean
   }): Promise<ThermalStatus> {
-    return this.send<ThermalStatus>("thermalSet", params)
+    return this.send<ThermalStatus>("thermal set", params)
   }
 
   /** Returns false on wrong password; throws on connection failure. On success
    *  stores the session key and marks the connection authenticated. */
   async login(password: string): Promise<boolean> {
     await this.ensureConnected()
-    const res = await this.send<{ ok: boolean; key?: string }>("login", { password })
+    const res = await this.send<{ ok: boolean; key?: string }>("auth login", { password })
     if (!res.ok) return false
     this.token = res.key ?? null
     if (this.token) sessionStorage.setItem(TOKEN_KEY, this.token)
@@ -543,6 +558,13 @@ class BackendService {
   ): Promise<UploadResult> {
     return this.enqueue(async () => {
       await this.ensureConnected()
+
+      // Erase first: `partition write` never erases, and flash bits only clear on
+      // erase, so writing over stale content would produce an image that fails
+      // validation at activate.
+      const cleared = await this.send<{ ok: boolean; error?: string }>("partition clear", { partition })
+      if (!cleared.ok) throw new Error(cleared.error ?? "partition clear failed")
+
       const session = this.allocSession()
       const total = file.size
 
@@ -578,7 +600,13 @@ class BackendService {
       if (total === 0) this.sendChunk(session, FLAG_FINAL, new Uint8Array(0))
 
       const res = await reply
-      if (!res.ok) throw new Error(res.error ?? "writePartition failed")
+      if (!res.ok) throw new Error(res.error ?? "partition write failed")
+
+      // Validate and switch the boot slot only once every byte landed. Until this
+      // point the old slot still boots, so a failed upload leaves the device intact.
+      const act = await this.send<{ ok: boolean; error?: string }>("partition activate", { partition })
+      if (!act.ok) throw new Error(act.error ?? "partition activate failed")
+
       onProgress?.(100)
       return { ok: true, size: res.size ?? sent }
     })
@@ -614,7 +642,7 @@ class BackendService {
         },
       })
       // Request = one FINAL chunk: the command envelope, no body.
-      const body = new TextEncoder().encode(JSON.stringify({ type: "downloadPartition", partition: label }) + "\n")
+      const body = new TextEncoder().encode(JSON.stringify({ type: "partition read", partition: label }) + "\n")
       this.sendChunk(session, FLAG_FINAL, body)
       return reply
     })

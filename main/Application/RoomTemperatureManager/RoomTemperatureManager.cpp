@@ -93,8 +93,10 @@ bool RoomTemperatureManager::GetRoomHumidity(float &percent) const
     return true;
 }
 
-void RoomTemperatureManager::Cmd_RoomTemp(Stream &, Stream &out)
+RequestError RoomTemperatureManager::Cmd_RoomTemp(CommandContext& ctx)
 {
+    RETURN_IF_ERROR(ctx.readArgs());
+
     float   temp;
     int64_t readUs;
     {
@@ -106,8 +108,9 @@ void RoomTemperatureManager::Cmd_RoomTemp(Stream &, Stream &out)
     bool     valid = IsValid(readUs, now);
     uint32_t ageMs = readUs < 0 ? 0 : (uint32_t)((now - readUs) / 1000);
 
-    JsonObject resp(out);
+    JsonObject resp(ctx.out);
     resp.field("valid", valid);
     resp.field("temp", temp);
     resp.field("ageMs", ageMs);
+    return RequestError::Ok;
 }

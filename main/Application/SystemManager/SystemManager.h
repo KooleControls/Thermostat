@@ -41,13 +41,13 @@ private:
     inline static StringSetting name_{ "device.name", "Device Name", "KC Thermostat" };
 
     // ── WebSocket commands (registered with CommandManager in Init) ──
-    void Cmd_Ping(Stream& in, Stream& out);
-    void Cmd_Info(Stream& in, Stream& out);
-    void Cmd_Reboot(Stream& in, Stream& out);
+    RequestError Cmd_Ping(CommandContext& ctx);
+    RequestError Cmd_Info(CommandContext& ctx);
+    RequestError Cmd_Reboot(CommandContext& ctx);
 
     inline static CommandEntry commands_[] = {
-        { "ping",   &InvokeCommand<&SystemManager::Cmd_Ping> },
-        { "info",   &InvokeCommand<&SystemManager::Cmd_Info> },
-        { "reboot", &InvokeCommand<&SystemManager::Cmd_Reboot> },
+        { "system", "ping",   &InvokeCommand<&SystemManager::Cmd_Ping> },
+        { "system", "info",   &InvokeCommand<&SystemManager::Cmd_Info> },
+        { "system", "reboot", &InvokeCommand<&SystemManager::Cmd_Reboot> },
     };
 };
