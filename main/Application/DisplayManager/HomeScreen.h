@@ -1,18 +1,23 @@
 #pragma once
 
+#include "HomeFace.h"
 #include "Screen.h"
 #include "ServiceProvider.h"
 
-// The thermostat face: big room-temperature number, − / + setpoint buttons, and
-// a gear in the top-right corner that leads into the service menu.
+// The thermostat face's data half.
 //
-// Touching − / + shows the setpoint for a few seconds, then reverts to the room
-// temperature. The control surface is ClimateManager::NudgeSetpoint() — this
-// screen holds no control state of its own.
+// The drawing lives in HomeFace, which knows nothing about managers; this class
+// is the seam to the rest of the firmware: once a second it reads the setpoint,
+// the room temperature, the boiler's status bits and the gateway link into a
+// HomeView, and it turns the intents a finger raises back into manager calls.
+//
+// The big number is the **setpoint** — the value you are setting is the value
+// you steer with -/+ — and the measured temperature sits under it. There is no
+// transient setpoint view any more.
 class HomeScreen final : public Screen
 {
-    static constexpr uint32_t kRevertMs = 4000;    // setpoint shown, then revert
-    static constexpr uint32_t kRefreshMs = 1000;   // room-temp refresh cadence
+    static constexpr uint32_t kRefreshMs = 1000;
+    static constexpr float    kNudgeStep = 0.5f;
 
 public:
     HomeScreen(ServiceProvider& serviceProvider, Navigator& navigator)
@@ -23,19 +28,13 @@ protected:
     void OnShow() override;
 
 private:
-    void ShowRoomTemp();
-    void OnNudge(float deltaC);
+    void Refresh();
+    void OnIntent(HomeIntent intent);
 
     static void RefreshTimerCb(lv_timer_t* t);
-    static void RevertTimerCb(lv_timer_t* t);
-    static void MinusCb(lv_event_t* e);
-    static void PlusCb(lv_event_t* e);
-    static void GearCb(lv_event_t* e);
+    static void IntentTrampoline(void* user, HomeIntent intent);
 
     ServiceProvider& serviceProvider_;
     Navigator& navigator_;
-    lv_obj_t* bigLabel_ = nullptr;     // the temperature/setpoint number
-    lv_obj_t* stateLabel_ = nullptr;   // "" (temp) or "SET" (setpoint)
-    lv_timer_t* revertTimer_ = nullptr;
-    bool showingSetpoint_ = false;
+    HomeFace face_;
 };

@@ -51,6 +51,8 @@ public:
     // On-screen UI control surface (calls, not JSON commands).
     float GetUserSetpoint() const;
     void  NudgeSetpoint(float deltaC);   // ±, clamped to [5,30]; persisted lazily (see MaybeCommitSettings)
+    ClimateMode GetMode() const;
+    void  SetMode(ClimateMode mode);     // persisted lazily, same as the setpoint
 
 private:
     void Loop();

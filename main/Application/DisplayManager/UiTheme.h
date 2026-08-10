@@ -18,6 +18,12 @@ namespace UiTheme
     inline lv_color_t Accent()  { return lv_color_hex(0x2F80ED); }
     inline lv_color_t Danger()  { return lv_color_hex(0xE5484D); }
 
+    // Climate hues — heating and cooling read as warm/cold everywhere they
+    // appear (badge, ring, nudge buttons, mode tiles), so they live here rather
+    // than being re-picked per widget.
+    inline lv_color_t Heat()    { return lv_color_hex(0xE03A3A); }
+    inline lv_color_t Cool()    { return lv_color_hex(0x3B82F6); }
+
     /// A style selector is a part OR'd with a state, but the build is gnu++26,
     /// where a bitwise OR between two different enum types is an error — go
     /// through the selector type instead.

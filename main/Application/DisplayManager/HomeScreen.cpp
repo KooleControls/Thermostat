@@ -1,117 +1,99 @@
 #include "HomeScreen.h"
+#include "BleManager/BleManager.h"
 #include "ClimateManager/ClimateManager.h"
+#include "OpenThermManager/OpenThermManager.h"
 #include "RoomTemperatureManager/RoomTemperatureManager.h"
-#include <cstdio>
-
-extern "C" const lv_font_t font_temp_96;
 
 void HomeScreen::Build(lv_obj_t* root)
 {
-    lv_obj_t* gear = AddIconButton(root, LV_SYMBOL_SETTINGS);
-    lv_obj_align(gear, LV_ALIGN_TOP_RIGHT, -UiTheme::Pad / 2, UiTheme::Pad / 2);
-    lv_obj_add_event_cb(gear, GearCb, LV_EVENT_CLICKED, this);
-
-    stateLabel_ = lv_label_create(root);
-    lv_obj_set_style_text_color(stateLabel_, UiTheme::TextDim(), 0);
-    lv_obj_set_style_text_font(stateLabel_, &lv_font_montserrat_28, 0);
-    lv_label_set_text(stateLabel_, "");
-    lv_obj_align(stateLabel_, LV_ALIGN_TOP_MID, 0, 60);
-
-    bigLabel_ = lv_label_create(root);
-    lv_obj_set_style_text_color(bigLabel_, UiTheme::Text(), 0);
-    lv_obj_set_style_text_font(bigLabel_, &font_temp_96, 0);
-    lv_obj_align(bigLabel_, LV_ALIGN_CENTER, 0, -20);
-
-    lv_obj_t* minus = lv_button_create(root);
-    lv_obj_set_size(minus, 200, 130);
-    lv_obj_align(minus, LV_ALIGN_BOTTOM_LEFT, 20, -20);
-    lv_obj_add_event_cb(minus, MinusCb, LV_EVENT_CLICKED, this);
-    lv_obj_t* ml = lv_label_create(minus);
-    lv_obj_set_style_text_font(ml, &lv_font_montserrat_48, 0);
-    lv_label_set_text(ml, "-");
-    lv_obj_center(ml);
-
-    lv_obj_t* plus = lv_button_create(root);
-    lv_obj_set_size(plus, 200, 130);
-    lv_obj_align(plus, LV_ALIGN_BOTTOM_RIGHT, -20, -20);
-    lv_obj_add_event_cb(plus, PlusCb, LV_EVENT_CLICKED, this);
-    lv_obj_t* pl = lv_label_create(plus);
-    lv_obj_set_style_text_font(pl, &lv_font_montserrat_48, 0);
-    lv_label_set_text(pl, "+");
-    lv_obj_center(pl);
-
+    face_.Build(root, IntentTrampoline, this);
     lv_timer_create(RefreshTimerCb, kRefreshMs, this);
 }
 
 void HomeScreen::OnShow()
 {
-    // Coming back from the menu always lands on the room temperature, never on
-    // a stale "SET" view.
-    if (revertTimer_)
+    Refresh();   // never load the face with whatever was on it minutes ago
+}
+
+void HomeScreen::Refresh()
+{
+    HomeView view;
+
+    view.roomValid = serviceProvider_.getRoomTemperatureManager()
+                         .GetRoomTemperature(view.roomTemp);
+    view.setpoint = serviceProvider_.getClimateManager().GetUserSetpoint();
+
+    switch (serviceProvider_.getClimateManager().GetMode())
     {
-        lv_timer_delete(revertTimer_);
-        revertTimer_ = nullptr;
+    case ClimateMode::Heat: view.mode = HomeMode::Heat; break;
+    case ClimateMode::Cool: view.mode = HomeMode::Cool; break;
+    default:                view.mode = HomeMode::Off;  break;
     }
-    showingSetpoint_ = false;
-    ShowRoomTemp();
+
+    // Activity is what the boiler reports (OT ID 0 status bits), not what we
+    // asked for — the difference between the two is exactly the "ramping"
+    // state, so the arrow means "called for, not running yet".
+    OtBoilerState boiler = serviceProvider_.getOpenThermManager().GetState();
+    OtDemand      demand = serviceProvider_.getOpenThermManager().GetDemand();
+
+    bool heating = boiler.chActive && boiler.flame;   // flame alone could be DHW
+    bool cooling = boiler.coolingActive;
+
+    if (heating)      view.activity = HomeActivity::Heating;
+    else if (cooling) view.activity = HomeActivity::Cooling;
+    else              view.activity = HomeActivity::Idle;
+
+    // Only meaningful while the OT link is up; with no boiler talking to us we
+    // have no idea whether it caught up, so we claim nothing.
+    view.ramping = boiler.linked &&
+                   ((demand.chEnable && !heating) || (demand.coolEnable && !cooling));
+
+    view.linked = serviceProvider_.getBleManager().GetLinkState() ==
+                  BleManager::LinkState::Ready;
+
+    face_.Apply(view);
 }
 
-void HomeScreen::ShowRoomTemp()
+void HomeScreen::OnIntent(HomeIntent intent)
 {
-    float t = 0;
-    bool valid = serviceProvider_.getRoomTemperatureManager().GetRoomTemperature(t);
-    char buf[16];
-    if (valid) snprintf(buf, sizeof(buf), "%.1f\xC2\xB0", t);   // UTF-8 degree
-    else       snprintf(buf, sizeof(buf), "--.-\xC2\xB0");
+    switch (intent)
+    {
+    case HomeIntent::NudgeDown:
+        serviceProvider_.getClimateManager().NudgeSetpoint(-kNudgeStep);
+        break;
+    case HomeIntent::NudgeUp:
+        serviceProvider_.getClimateManager().NudgeSetpoint(+kNudgeStep);
+        break;
+    case HomeIntent::SetHeat:
+        serviceProvider_.getClimateManager().SetMode(ClimateMode::Heat);
+        break;
+    case HomeIntent::SetCool:
+        serviceProvider_.getClimateManager().SetMode(ClimateMode::Cool);
+        break;
+    case HomeIntent::SetOff:
+        serviceProvider_.getClimateManager().SetMode(ClimateMode::Off);
+        break;
+    case HomeIntent::SetAuto:
+        // No auto mode behind the tile yet — the face draws it inert.
+        return;
+    case HomeIntent::OpenSettings:
+        navigator_.Go(ScreenId::Pin);   // shell skips the pad when no PIN is set
+        return;
+    }
 
-    // Guarded: this runs once a second and the reading rarely moves.
-    SetLabelText(stateLabel_, "");
-    SetLabelText(bigLabel_, buf);
-    showingSetpoint_ = false;
-}
-
-void HomeScreen::OnNudge(float deltaC)
-{
-    serviceProvider_.getClimateManager().NudgeSetpoint(deltaC);
-    float sp = serviceProvider_.getClimateManager().GetUserSetpoint();
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%.1f\xC2\xB0", sp);
-
-    SetLabelText(stateLabel_, "SET");
-    SetLabelText(bigLabel_, buf);
-    if (revertTimer_) lv_timer_reset(revertTimer_);
-    else revertTimer_ = lv_timer_create(RevertTimerCb, kRevertMs, this);
-    showingSetpoint_ = true;
+    // Setpoint and mode both take effect on the control loop's next step, but
+    // the face must answer the finger now, not a second from now.
+    Refresh();
 }
 
 void HomeScreen::RefreshTimerCb(lv_timer_t* t)
 {
     auto* self = static_cast<HomeScreen*>(lv_timer_get_user_data(t));
-    if (!self->IsActive()) return;           // menu is on screen — nothing to refresh
-    if (self->showingSetpoint_) return;      // don't clobber the setpoint view
-    self->ShowRoomTemp();
+    if (!self->IsActive()) return;   // built, but a menu is on the panel
+    self->Refresh();
 }
 
-void HomeScreen::RevertTimerCb(lv_timer_t* t)
+void HomeScreen::IntentTrampoline(void* user, HomeIntent intent)
 {
-    auto* self = static_cast<HomeScreen*>(lv_timer_get_user_data(t));
-    lv_timer_delete(t);
-    self->revertTimer_ = nullptr;
-    self->ShowRoomTemp();
-}
-
-void HomeScreen::MinusCb(lv_event_t* e)
-{
-    static_cast<HomeScreen*>(lv_event_get_user_data(e))->OnNudge(-0.5f);
-}
-
-void HomeScreen::PlusCb(lv_event_t* e)
-{
-    static_cast<HomeScreen*>(lv_event_get_user_data(e))->OnNudge(+0.5f);
-}
-
-void HomeScreen::GearCb(lv_event_t* e)
-{
-    auto* self = static_cast<HomeScreen*>(lv_event_get_user_data(e));
-    self->navigator_.Go(ScreenId::Pin);   // shell skips the pad when no PIN is set
+    static_cast<HomeScreen*>(user)->OnIntent(intent);
 }

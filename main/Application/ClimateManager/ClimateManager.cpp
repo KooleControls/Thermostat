@@ -70,6 +70,22 @@ void ClimateManager::NudgeSetpoint(float deltaC)
     // Takes effect on the next ControlStep; persisted later by MaybeCommitSettings.
 }
 
+ClimateMode ClimateManager::GetMode() const
+{
+    LOCK(mutex_);
+    return mode_;
+}
+
+void ClimateManager::SetMode(ClimateMode mode)
+{
+    LOCK(mutex_);
+    if (mode == mode_) return;
+    mode_ = mode;
+    settingsDirty_ = true;
+    lastChangeUs_ = esp_timer_get_time();
+    // Takes effect on the next ControlStep; persisted later by MaybeCommitSettings.
+}
+
 void ClimateManager::MaybeCommitSettings()
 {
     ClimateMode mode;
