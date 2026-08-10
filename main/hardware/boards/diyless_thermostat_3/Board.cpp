@@ -157,32 +157,3 @@ void Board::SetBacklightPercent(uint8_t percent)
     ledc_update_duty(LEDC_LOW_SPEED_MODE, kBacklightChannel);
 }
 
-void Board::HoldPanelInReset()
-{
-    if (panelInReset_) return;
-
-    // Active-low reset (the panel config leaves reset_active_high false), so
-    // pulling it down holds the ST7701 in reset. The RGB peripheral keeps
-    // scanning into a panel that is no longer listening — harmless, and the
-    // backlight is off in every case where we do this.
-    ESP_LOGW(TAG, "Holding the ST7701 in reset — display gone until reboot");
-    gpio_set_level((gpio_num_t)BoardConfig::LCD_PIN_RESET, 0);
-    panelInReset_ = true;
-}
-
-bool Board::SetPanelPclk(uint32_t hz)
-{
-    if (!panel_.ok() || hz == 0) return false;
-
-    esp_err_t err = esp_lcd_rgb_panel_set_pclk(panel_.panel(), hz);
-    if (err != ESP_OK)
-    {
-        ESP_LOGW(TAG, "set pclk %lu Hz failed: %s", (unsigned long)hz, esp_err_to_name(err));
-        return false;
-    }
-    panelPclkHz_ = hz;
-    // The driver picks the new clock up on the next VSYNC; a big step can leave
-    // the DMA and the panel out of phase, which shows as a shifted image.
-    esp_lcd_rgb_panel_restart(panel_.panel());
-    return true;
-}

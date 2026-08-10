@@ -12,7 +12,6 @@ class OpenThermManager;
 class RoomTemperatureManager;
 class SettingsManager;
 class SystemManager;
-class ThermalTestManager;
 class TimeManager;
 class UpdateManager;
 class WebServerManager;
@@ -32,7 +31,6 @@ public:
     virtual RoomTemperatureManager& getRoomTemperatureManager() = 0;
     virtual SettingsManager& getSettingsManager() = 0;
     virtual SystemManager& getSystemManager() = 0;
-    virtual ThermalTestManager& getThermalTestManager() = 0;
     virtual TimeManager& getTimeManager() = 0;
     virtual UpdateManager& getUpdateManager() = 0;
     virtual WebServerManager& getWebServerManager() = 0;

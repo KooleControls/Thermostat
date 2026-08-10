@@ -171,19 +171,6 @@ void NetworkManager::StartAccessPoint()
     FallbackToAP();
 }
 
-void NetworkManager::StopRadio()
-{
-    if (radioStopped_) return;
-
-    ESP_LOGW(TAG, "Stopping the radio — no web UI until the unit is rebooted "
-                  "(OpenTherm keeps running)");
-    connectTimer_.Stop();   // nothing may resurrect the link behind our back
-    wifi_interface_.Stop();
-    staConnected_ = false;
-    staConnecting_ = false;
-    radioStopped_ = true;
-}
-
 void NetworkManager::GetStaSsid(char* out, size_t maxLen) const
 {
     snprintf(out, maxLen, "%s", staSsid_);

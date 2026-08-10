@@ -16,13 +16,6 @@ CONFIG_SPIRAM_SPEED_80M=y
 # 240 MHz CPU.
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
-# Power management, for the runtime CPU-frequency lever in ThermalTestManager
-# (esp_pm_configure needs it; without it the lever reports itself unavailable).
-# Light sleep stays OFF: this board's RGB panel needs a continuously scanning
-# DMA and the OpenTherm master needs its UART timing, so tickless idle is not
-# an option here — DFS never runs either, since the rig pins max == min.
-CONFIG_PM_ENABLE=y
-
 # ── RGB panel: do NOT enable CONFIG_LCD_RGB_RESTART_IN_VSYNC ────
 # Tried 2026-07-29 against the vertical-shift glitch and it made things
 # strictly worse: occasional shifts became continuous ones.

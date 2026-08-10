@@ -1,7 +1,6 @@
 #include "DisplayManager.h"
 #include "SettingsManager/SettingsManager.h"
 #include "CommandManager/CommandManager.h"
-#include "ThermalTestManager/ThermalTestManager.h"
 #include "Board.h"
 #include "JsonScope.h"
 #include "JsonReader.h"
@@ -62,9 +61,7 @@ void DisplayManager::Init()
     }
 
     // Full brightness once there is something to look at; the tick dims it
-    // once the panel has been left alone. Brightness is also a lever in the
-    // self-heating test rig (ThermalTestManager, which initializes after this
-    // and may darken the panel again on purpose — see ServiceBacklight).
+    // once the panel has been left alone.
     serviceProvider_.getBoard().SetBacklightPercent(
         static_cast<uint8_t>(fullPercent_.Get() > 100 ? 100 : fullPercent_.Get()));
     backlightFull_ = true;
@@ -228,11 +225,6 @@ RequestError DisplayManager::Cmd_UiGo(CommandContext& ctx)
 // press to "just wake the screen" would cost a second press every time.
 void DisplayManager::ServiceBacklight(uint32_t idleMs)
 {
-    // A self-heating run owns the levers while it is up. Without this the
-    // screen timeout would quietly pull a DarkScreen test back to 30 % and the
-    // gateway's log could not tell that from a real temperature change.
-    if (serviceProvider_.getThermalTestManager().OverridesBacklight()) return;
-
     // Capped before the ×1000: an out-of-range setting overflowing to a tiny
     // timeout would dim the panel instantly and read as a broken backlight.
     uint32_t afterS = dimAfterS_.Get();

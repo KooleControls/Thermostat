@@ -63,7 +63,7 @@ void WiFiInterface::ConnectSta(const char* ssid, const char* password)
     // every request/response waits for the next one — ~100 ms per round trip —
     // and this unit is mains-powered, so latency is worth more than the
     // milliamps. It is a lever rather than a constant because the radio being
-    // awake continuously also heats the board (see ThermalTestManager).
+    // awake continuously also heats the board.
     ESP_ERROR_CHECK(esp_wifi_set_ps(powerSave_));
 
     esp_wifi_connect();

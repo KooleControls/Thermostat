@@ -12,7 +12,6 @@
 #include "RoomTemperatureManager/RoomTemperatureManager.h"
 #include "SettingsManager/SettingsManager.h"
 #include "SystemManager/SystemManager.h"
-#include "ThermalTestManager/ThermalTestManager.h"
 #include "TimeManager/TimeManager.h"
 #include "UpdateManager/UpdateManager.h"
 #include "WebServerManager/WebServerManager.h"
@@ -37,7 +36,6 @@ public:
     RoomTemperatureManager& getRoomTemperatureManager() override { return m_roomTemperatureManager; }
     SettingsManager& getSettingsManager() override { return m_settingsManager; }
     SystemManager& getSystemManager() override { return m_systemManager; }
-    ThermalTestManager& getThermalTestManager() override { return m_thermalTestManager; }
     TimeManager& getTimeManager() override { return m_timeManager; }
     UpdateManager& getUpdateManager() override { return m_updateManager; }
     WebServerManager& getWebServerManager() override { return m_webServerManager; }
@@ -55,7 +53,6 @@ private:
     ClimateManager m_climateManager{*this};
     HotWaterManager m_hotWaterManager{*this};
     DisplayManager m_displayManager{*this};
-    ThermalTestManager m_thermalTestManager{*this};
     UpdateManager m_updateManager{*this};
     WebServerManager m_webServerManager{*this};
     BleManager m_bleManager{*this};

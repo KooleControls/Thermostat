@@ -6,7 +6,6 @@ import {
   DownloadIcon,
   ThermometerIcon,
   ActivityIcon,
-  FlameIcon,
 } from "lucide-react"
 import {
   Sidebar,
@@ -26,7 +25,6 @@ import { PreReleaseBadge } from "@/components/PreReleaseBadge"
 const navItems = [
   { title: "Thermostat", icon: ThermometerIcon, page: "thermostat" as const },
   { title: "Diagnostics", icon: ActivityIcon, page: "diagnostics" as const },
-  { title: "Thermal", icon: FlameIcon, page: "thermal" as const },
   { title: "Console", icon: TerminalIcon, page: "console" as const },
   { title: "Settings", icon: SettingsIcon, page: "settings" as const },
   { title: "Firmware", icon: DownloadIcon, page: "firmware" as const },

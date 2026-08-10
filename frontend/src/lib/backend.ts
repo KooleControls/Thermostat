@@ -513,25 +513,6 @@ class BackendService {
     return this.send<OtStatus>("ot status")
   }
 
-  // ── Self-heating test rig ─────────────────────────────────────
-
-  async getThermalStatus(): Promise<ThermalStatus> {
-    return this.send<ThermalStatus>("thermal status")
-  }
-
-  /** A named `mode` sets every lever at once; `backlight` on its own switches
-   *  the device to "custom". Reply is the full fresh status. */
-  async setThermal(params: {
-    mode?: ThermalModeName
-    backlight?: number
-    cpuMhz?: 80 | 160 | 240
-    /** Modem sleep: keeps the connection, costs round-trip latency. Reversible. */
-    wifiPs?: WifiPowerSave
-    /** One-way: the reply arrives, then WiFi stops. Reboot to get it back. */
-    stopRadio?: boolean
-  }): Promise<ThermalStatus> {
-    return this.send<ThermalStatus>("thermal set", params)
-  }
 
   /** Returns false on wrong password; throws on connection failure. On success
    *  stores the session key and marks the connection authenticated. */
@@ -767,39 +748,6 @@ export interface HotWaterStatus {
   dhwActive: boolean
   dhwTemp: number
   dhwPresent: boolean
-}
-
-/** "none" keeps the receiver awake permanently; "min" parks it between beacons,
- *  "max" for several beacons. All three keep the association. */
-export type WifiPowerSave = "none" | "min" | "max"
-
-export type ThermalModeName =
-  | "baseline"
-  | "dark"
-  | "panelidle"
-  | "paneloff"
-  | "custom"
-
-export interface ThermalStatus {
-  mode: ThermalModeName
-  backlight: number
-  pclkHz: number
-  cpuMhz: number
-  /** false when the firmware was built without CONFIG_PM_ENABLE. */
-  cpuControl: boolean
-  /** True once the panel has been held in reset — only a reboot brings it back. */
-  panelDead: boolean
-  /** True once WiFi has been stopped — likewise reboot-only. */
-  radioStopped: boolean
-  wifiPs: WifiPowerSave
-  secondsInState: number
-  room: number
-  roomValid: boolean
-  humidity: number
-  humidityValid: boolean
-  die: number
-  dieValid: boolean
-  otLinked: boolean
 }
 
 export interface OtStatus {
