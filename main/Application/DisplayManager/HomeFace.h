@@ -19,18 +19,24 @@ enum class HomeMode : uint8_t { Auto, Heat, Cool, Off };
 /// What the system is doing right now — the top-left badge.
 enum class HomeActivity : uint8_t { Idle, Heating, Cooling };
 
+/// Called for, but not running yet — the little arrow beside the badge, and
+/// which way it points. None once the flame (or the cooling stage) catches up.
+enum class HomeRamp : uint8_t { None, Up, Down };
+
 struct HomeView
 {
-    float setpoint  = 20.0f;   // the big number
-    float roomTemp  = 0.0f;    // the "Current:" line
+    float setpoint  = 20.0f;
+    float roomTemp  = 0.0f;
     bool  roomValid = false;
+
+    /// The big number is the room temperature, except while the setpoint is
+    /// being nudged — then the two swap, and the line beneath always carries
+    /// whichever value the centre is not showing.
+    bool showSetpoint = false;
 
     HomeMode     mode     = HomeMode::Off;
     HomeActivity activity = HomeActivity::Idle;
-
-    /// Demand is on but the boiler has not caught up yet — draws the arrow next
-    /// to the badge. Off once the flame (or the cooling stage) actually runs.
-    bool ramping = false;
+    HomeRamp     ramp     = HomeRamp::None;
 
     /// BLE link to the gateway is up — lights the bluetooth glyph.
     bool linked = false;
@@ -62,11 +68,14 @@ public:
 
 private:
     // ── Geometry (480x480) ───────────────────────────────────────
-    static constexpr int32_t kRingSize  = 270;   // outer diameter
-    static constexpr int32_t kRingCx    = 240;
-    static constexpr int32_t kRingCy    = 198;
-    static constexpr int32_t kRingWidth = 6;
-    static constexpr int32_t kSegments  = 24;    // gradient is built from arcs
+    static constexpr int32_t kDiscSize = 236;    // the dark disc behind the number
+    static constexpr int32_t kDiscCx   = 240;
+    static constexpr int32_t kDiscCy   = 208;
+
+    /// How far the unit's box drops below the number's box so the two glyph
+    /// tops line up. The 96 px font's ascent is much taller than the 28 px
+    /// one's, so equal boxes are not equal glyphs — measured, not derived.
+    static constexpr int32_t kUnitDrop = 5;
 
     static constexpr int32_t kNudgeSize = 76;    // -/+ circle diameter
     static constexpr int32_t kTileW     = 100;
@@ -82,7 +91,7 @@ private:
         lv_color_t hue{};
     };
 
-    void BuildRing(lv_obj_t* root);
+    void BuildDisc(lv_obj_t* root);
     void BuildBadge(lv_obj_t* root);
     void BuildReadout(lv_obj_t* root);
     void BuildNudge(lv_obj_t* root);
@@ -92,6 +101,7 @@ private:
                         lv_align_t align, HomeIntent intent);
     void      MakeTile(lv_obj_t* root, Tile& tile, int index, const char* glyph,
                        const char* text, lv_color_t hue, HomeIntent intent);
+    static void SetTileEnabled(Tile& tile, bool enabled);
 
     static void IntentCb(lv_event_t* e);
     static void FormatTemp(char* out, size_t cap, float value, bool valid);
@@ -99,12 +109,12 @@ private:
     IntentHandler handler_ = nullptr;
     void*         user_    = nullptr;
 
-    lv_obj_t* badgeIcon_  = nullptr;
-    lv_obj_t* badgeText_  = nullptr;
-    lv_obj_t* badgeArrow_ = nullptr;
-    lv_obj_t* bleIcon_    = nullptr;
-    lv_obj_t* bigLabel_   = nullptr;
-    lv_obj_t* roomLabel_  = nullptr;
+    lv_obj_t* badgeIcon_    = nullptr;
+    lv_obj_t* badgeArrow_   = nullptr;
+    lv_obj_t* bleIcon_      = nullptr;
+    lv_obj_t* bigLabel_     = nullptr;
+    lv_obj_t* unitLabel_    = nullptr;
+    lv_obj_t* captionLabel_ = nullptr;
 
     Tile tiles_[4];   // Auto, Heat, Cool, Off — indexed by HomeMode
 };

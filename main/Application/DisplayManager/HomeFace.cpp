@@ -23,60 +23,34 @@ void HomeFace::Build(lv_obj_t* root, IntentHandler handler, void* user)
     handler_ = handler;
     user_    = user;
 
-    BuildRing(root);      // behind everything — the readout sits inside it
+    BuildDisc(root);      // behind everything — the readout sits on it
     BuildBadge(root);
     BuildReadout(root);
     BuildNudge(root);
     BuildTiles(root);
 }
 
-// The blue→red gradient ring.
+// The dark disc the readout sits on.
 //
-// LVGL's arc stroke takes a single colour, so the gradient is built from a ring
-// of short arc segments with the colour interpolated per segment. They are
-// static: built once, never touched by Apply(), and non-clickable so they cost
-// nothing but pixels.
-void HomeFace::BuildRing(lv_obj_t* root)
+// A filled circle rather than an outline: it lifts the number off the
+// background without drawing a line around it. The vertical gradient is what
+// stops it reading as a flat grey hole — top edge slightly lit, bottom sinking
+// back into the background. Static, and not clickable.
+void HomeFace::BuildDisc(lv_obj_t* root)
 {
-    constexpr float kStep = 360.0f / kSegments;
+    lv_obj_t* disc = lv_obj_create(root);
+    lv_obj_remove_style_all(disc);
+    lv_obj_set_size(disc, kDiscSize, kDiscSize);
+    lv_obj_align(disc, LV_ALIGN_TOP_LEFT,
+                 kDiscCx - kDiscSize / 2, kDiscCy - kDiscSize / 2);
+    lv_obj_remove_flag(disc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(disc, LV_OBJ_FLAG_SCROLLABLE);
 
-    for (int i = 0; i < kSegments; ++i)
-    {
-        float a0  = i * kStep;
-        float mid = (a0 + kStep * 0.5f) * 3.14159265f / 180.0f;
-
-        // 0 deg is 3 o'clock and angles run clockwise with y down, so cos()
-        // is the horizontal position: red on the right, blue on the left,
-        // blended through purple at top and bottom.
-        float warm = (1.0f + cosf(mid)) * 0.5f;
-        lv_color_t colour = lv_color_mix(UiTheme::Heat(), UiTheme::Cool(),
-                                         (uint8_t)(warm * 255.0f));
-
-        // The bottom of the ring sinks back into the background, which is what
-        // keeps the readout the brightest thing on the screen.
-        float below = sinf(mid);
-        lv_opa_t opa = (lv_opa_t)(255.0f - (below > 0.0f ? below * 130.0f : 0.0f));
-
-        lv_obj_t* seg = lv_arc_create(root);
-        lv_obj_set_size(seg, kRingSize, kRingSize);
-        lv_obj_align(seg, LV_ALIGN_TOP_LEFT,
-                     kRingCx - kRingSize / 2, kRingCy - kRingSize / 2);
-        lv_obj_remove_flag(seg, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_remove_flag(seg, LV_OBJ_FLAG_SCROLLABLE);
-
-        // Only the background arc is drawn; indicator and knob are the parts
-        // that would make this look like a slider.
-        lv_obj_set_style_arc_opa(seg, LV_OPA_TRANSP, LV_PART_INDICATOR);
-        lv_obj_set_style_opa(seg, LV_OPA_TRANSP, LV_PART_KNOB);
-        lv_obj_set_style_bg_opa(seg, LV_OPA_TRANSP, LV_PART_MAIN);
-
-        // Half a degree of overlap — without it the seams show as dark hairlines.
-        lv_arc_set_bg_angles(seg, (int32_t)a0, (int32_t)(a0 + kStep + 0.5f));
-        lv_obj_set_style_arc_width(seg, kRingWidth, LV_PART_MAIN);
-        lv_obj_set_style_arc_rounded(seg, false, LV_PART_MAIN);
-        lv_obj_set_style_arc_color(seg, colour, LV_PART_MAIN);
-        lv_obj_set_style_arc_opa(seg, opa, LV_PART_MAIN);
-    }
+    lv_obj_set_style_radius(disc, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(disc, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(disc, lv_color_hex(0x24262B), 0);
+    lv_obj_set_style_bg_grad_color(disc, lv_color_hex(0x141519), 0);
+    lv_obj_set_style_bg_grad_dir(disc, LV_GRAD_DIR_VER, 0);
 }
 
 // Top-left activity badge + the top-right bluetooth/gear pair.
@@ -87,15 +61,12 @@ void HomeFace::BuildBadge(lv_obj_t* root)
     lv_label_set_text(badgeIcon_, ICON_FIRE);
     lv_obj_align(badgeIcon_, LV_ALIGN_TOP_LEFT, 26, 20);
 
+    // No word under the badge: the colour already says idle-or-running and the
+    // glyph already says which way, so the label was only repeating them.
     badgeArrow_ = lv_label_create(root);
     lv_obj_set_style_text_font(badgeArrow_, &lv_font_montserrat_20, 0);
     lv_label_set_text(badgeArrow_, LV_SYMBOL_UP);
     lv_obj_align(badgeArrow_, LV_ALIGN_TOP_LEFT, 64, 26);
-
-    badgeText_ = lv_label_create(root);
-    lv_obj_set_style_text_font(badgeText_, &lv_font_montserrat_20, 0);
-    lv_label_set_text(badgeText_, "");
-    lv_obj_align(badgeText_, LV_ALIGN_TOP_LEFT, 24, 60);
 
     bleIcon_ = lv_label_create(root);
     lv_obj_set_style_text_font(bleIcon_, &lv_font_montserrat_28, 0);
@@ -120,41 +91,37 @@ void HomeFace::BuildBadge(lv_obj_t* root)
     lv_obj_set_user_data(gearHit, (void*)(uintptr_t)HomeIntent::OpenSettings);
 }
 
-// The big setpoint, its unit, and the measured-temperature line under it.
+// The big number, its unit, and the caption that names what is being shown.
+//
+// The **digits** are what gets centred in the disc, not the digits-plus-unit
+// pair: a "°C" wide enough to shift the number off centre is a "°C" that is too
+// loud. It hangs off the top-right corner instead, small, and is re-hung by
+// Apply() whenever the number changes width.
 void HomeFace::BuildReadout(lv_obj_t* root)
 {
-    // Number and unit live in a content-sized flex row so the pair stays
-    // centred in the ring when the text goes from "22" to "22.5".
-    lv_obj_t* row = lv_obj_create(root);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_align(row, LV_ALIGN_CENTER, kRingCx - 240, kRingCy - 240 - 14);
-
-    bigLabel_ = lv_label_create(row);
+    bigLabel_ = lv_label_create(root);
     lv_obj_set_style_text_color(bigLabel_, UiTheme::Text(), 0);
     lv_obj_set_style_text_font(bigLabel_, &font_temp_96, 0);
+    lv_obj_set_style_text_align(bigLabel_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(bigLabel_, "--");
+    lv_obj_align(bigLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 - 8);
 
-    lv_obj_t* unit = lv_label_create(row);
-    lv_obj_set_style_text_color(unit, UiTheme::Text(), 0);
-    lv_obj_set_style_text_font(unit, &lv_font_montserrat_48, 0);
-    // Both labels are top-aligned by the flex row, but the 96 px font carries a
-    // far taller ascent than the 48 px one, so equal tops are not equal glyph
-    // tops. Measured against the 96 px digits: 2 px lands "°C" level with them.
-    lv_obj_set_style_pad_top(unit, 2, 0);
-    lv_obj_set_style_pad_left(unit, 6, 0);
-    lv_label_set_text(unit, "\xC2\xB0" "C");    // UTF-8 degree
+    unitLabel_ = lv_label_create(root);
+    lv_obj_set_style_text_color(unitLabel_, UiTheme::Text(), 0);
+    lv_obj_set_style_text_font(unitLabel_, &lv_font_montserrat_20, 0);
+    lv_label_set_text(unitLabel_, "\xC2\xB0" "C");   // UTF-8 degree
 
-    roomLabel_ = lv_label_create(root);
-    lv_obj_set_style_text_color(roomLabel_, UiTheme::TextDim(), 0);
-    // Kept small enough to stay inside the ring at "Current: -22.5°C" — at 28 px
-    // it runs out through the stroke on both sides.
-    lv_obj_set_style_text_font(roomLabel_, &lv_font_montserrat_20, 0);
-    lv_label_set_text(roomLabel_, "");
-    lv_obj_align(roomLabel_, LV_ALIGN_CENTER, kRingCx - 240, kRingCy - 240 + 72);
+    // Only shown while the setpoint is on the dial. At rest the disc holds the
+    // room temperature and nothing else, exactly as the design has it — the
+    // caption exists so the one moment the number means something else is not
+    // silent about it.
+    captionLabel_ = lv_label_create(root);
+    lv_obj_set_style_text_color(captionLabel_, UiTheme::TextDim(), 0);
+    lv_obj_set_style_text_font(captionLabel_, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_align(captionLabel_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(captionLabel_, "Setpoint");
+    lv_obj_align(captionLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 + 74);
+    lv_obj_add_flag(captionLabel_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void HomeFace::BuildNudge(lv_obj_t* root)
@@ -181,8 +148,8 @@ lv_obj_t* HomeFace::MakeNudge(lv_obj_t* root, bool plus, lv_color_t hue,
     lv_obj_set_style_shadow_width(btn, 0, 0);
     lv_obj_set_style_border_width(btn, 0, 0);
     lv_obj_set_style_pad_all(btn, 0, 0);
-    lv_obj_align(btn, align, align == LV_ALIGN_LEFT_MID ? 14 : -14,
-                 kRingCy - 240);
+    lv_obj_align(btn, align, align == LV_ALIGN_LEFT_MID ? 22 : -22,
+                 kDiscCy - 240);
     lv_obj_add_event_cb(btn, IntentCb, LV_EVENT_CLICKED, this);
     lv_obj_set_user_data(btn, (void*)(uintptr_t)intent);
 
@@ -203,8 +170,11 @@ lv_obj_t* HomeFace::MakeNudge(lv_obj_t* root, bool plus, lv_color_t hue,
 
 void HomeFace::BuildTiles(lv_obj_t* root)
 {
+    // Auto is neutral white rather than a climate hue: it is a mode, not a
+    // direction, and it is the tile that has to look switched-on while the
+    // other three are dimmed.
     MakeTile(root, tiles_[(int)HomeMode::Auto], 0, ICON_FAN,       "Auto",
-             UiTheme::TextDim(), HomeIntent::SetAuto);
+             UiTheme::Text(), HomeIntent::SetAuto);
     MakeTile(root, tiles_[(int)HomeMode::Heat], 1, ICON_FIRE,      "Heating",
              UiTheme::Heat(), HomeIntent::SetHeat);
     MakeTile(root, tiles_[(int)HomeMode::Cool], 2, ICON_SNOWFLAKE, "Cooling",
@@ -212,10 +182,22 @@ void HomeFace::BuildTiles(lv_obj_t* root)
     MakeTile(root, tiles_[(int)HomeMode::Off],  3, ICON_POWER,     "Power",
              UiTheme::TextDim(), HomeIntent::SetOff);
 
-    // Auto has no control logic behind it yet, so it is drawn but inert —
-    // dimmed rather than hidden, so the row keeps the layout it will ship with.
-    lv_obj_set_style_opa(tiles_[(int)HomeMode::Auto].box, LV_OPA_50, 0);
-    lv_obj_remove_flag(tiles_[(int)HomeMode::Auto].box, LV_OBJ_FLAG_CLICKABLE);
+    // The gateway owns the heat/cool decision today and only offers automatic
+    // mode, so the thermostat has nothing to choose: Auto is the mode, and the
+    // other three are drawn but dead. Dimmed rather than hidden, because the
+    // row keeps the layout it will ship with once the gateway grows the rest.
+    // When it does, this is the one block to delete.
+    SetTileEnabled(tiles_[(int)HomeMode::Auto], true);
+    SetTileEnabled(tiles_[(int)HomeMode::Heat], false);
+    SetTileEnabled(tiles_[(int)HomeMode::Cool], false);
+    SetTileEnabled(tiles_[(int)HomeMode::Off],  false);
+}
+
+void HomeFace::SetTileEnabled(Tile& tile, bool enabled)
+{
+    lv_obj_set_style_opa(tile.box, enabled ? LV_OPA_COVER : LV_OPA_40, 0);
+    if (enabled) lv_obj_add_flag(tile.box, LV_OBJ_FLAG_CLICKABLE);
+    else         lv_obj_remove_flag(tile.box, LV_OBJ_FLAG_CLICKABLE);
 }
 
 void HomeFace::MakeTile(lv_obj_t* root, Tile& tile, int index, const char* glyph,
@@ -266,65 +248,74 @@ void HomeFace::MakeTile(lv_obj_t* root, Tile& tile, int index, const char* glyph
 // Apply
 // ─────────────────────────────────────────────────────────────
 
-// The setpoint moves in halves, so a trailing ".0" is noise on the big number —
-// but ".5" is not. The measured temperature keeps its decimal either way: it is
-// a reading, and a reading that silently drops a digit reads as less precise
-// than it is.
+// Whole degrees everywhere on this face. A thermostat that reads 21 and a
+// thermostat that reads 21.4 are the same thermostat; the decimal is precision
+// nobody is steering by, and dropping it is what lets the number sit big and
+// centred. The tenth is still there in `climate status` for anyone debugging.
 void HomeFace::FormatTemp(char* out, size_t cap, float value, bool valid)
 {
-    if (!valid) { snprintf(out, cap, "--.-"); return; }
-
-    if (fabsf(value - roundf(value)) < 0.05f) snprintf(out, cap, "%d", (int)lroundf(value));
-    else                                      snprintf(out, cap, "%.1f", value);
+    if (!valid) { snprintf(out, cap, "--"); return; }
+    snprintf(out, cap, "%d", (int)lroundf(value));
 }
 
 void HomeFace::Apply(const HomeView& v)
 {
-    // ── The number and the measured line ─────────────────────
+    // ── The number ───────────────────────────────────────────
+    // The disc holds the room temperature; nudging swaps it for the setpoint
+    // and the caption appears to say so, until the revert puts it back.
     char buf[24];
-    FormatTemp(buf, sizeof(buf), v.setpoint, true);
-    if (strcmp(lv_label_get_text(bigLabel_), buf) != 0)
-        lv_label_set_text(bigLabel_, buf);
+    if (v.showSetpoint) FormatTemp(buf, sizeof(buf), v.setpoint, true);
+    else                FormatTemp(buf, sizeof(buf), v.roomTemp, v.roomValid);
 
-    char line[40];
-    if (v.roomValid) snprintf(line, sizeof(line), "Current: %.1f\xC2\xB0" "C", v.roomTemp);
-    else             snprintf(line, sizeof(line), "Current: --.-\xC2\xB0" "C");
-    if (strcmp(lv_label_get_text(roomLabel_), line) != 0)
-        lv_label_set_text(roomLabel_, line);
+    if (strcmp(lv_label_get_text(bigLabel_), buf) != 0)
+    {
+        lv_label_set_text(bigLabel_, buf);
+        // The unit is anchored to the number, and the number just changed
+        // width ("9" to "22"), so the anchor has to be recomputed. align_to is
+        // a one-shot calculation, not a standing relationship.
+        lv_obj_update_layout(bigLabel_);
+        lv_obj_align_to(unitLabel_, bigLabel_, LV_ALIGN_OUT_RIGHT_TOP, 2, kUnitDrop);
+    }
+
+    if (v.showSetpoint) lv_obj_remove_flag(captionLabel_, LV_OBJ_FLAG_HIDDEN);
+    else                lv_obj_add_flag(captionLabel_, LV_OBJ_FLAG_HIDDEN);
 
     // ── Activity badge ───────────────────────────────────────
+    // Colour carries running-or-idle; the glyph carries which way. Grey with a
+    // flame is "idle, and heat is the direction it would move in".
     const char* icon = ICON_FIRE;
-    const char* text = "Idle";
     lv_color_t  hue  = UiTheme::TextDim();
 
     switch (v.activity)
     {
     case HomeActivity::Heating:
-        icon = ICON_FIRE;      text = "Heating"; hue = UiTheme::Heat(); break;
+        icon = ICON_FIRE;      hue = UiTheme::Heat(); break;
     case HomeActivity::Cooling:
-        icon = ICON_SNOWFLAKE; text = "Cooling"; hue = UiTheme::Cool(); break;
+        icon = ICON_SNOWFLAKE; hue = UiTheme::Cool(); break;
     case HomeActivity::Idle:
-        // Idle still shows which way the system would move, in grey.
-        icon = (v.mode == HomeMode::Cool) ? ICON_SNOWFLAKE : ICON_FIRE;
+        icon = (v.ramp == HomeRamp::Down) ? ICON_SNOWFLAKE : ICON_FIRE;
         break;
     }
 
     if (strcmp(lv_label_get_text(badgeIcon_), icon) != 0)
         lv_label_set_text(badgeIcon_, icon);
-    if (strcmp(lv_label_get_text(badgeText_), text) != 0)
-        lv_label_set_text(badgeText_, text);
     lv_obj_set_style_text_color(badgeIcon_, hue, 0);
-    lv_obj_set_style_text_color(badgeText_, hue, 0);
 
-    // Called for, not running yet — the little arrow.
-    const char* arrow = (v.activity == HomeActivity::Cooling ||
-                         (v.activity == HomeActivity::Idle && v.mode == HomeMode::Cool))
-                            ? LV_SYMBOL_DOWN : LV_SYMBOL_UP;
-    if (strcmp(lv_label_get_text(badgeArrow_), arrow) != 0)
-        lv_label_set_text(badgeArrow_, arrow);
-    lv_obj_set_style_text_color(badgeArrow_, hue, 0);
-    if (v.ramping) lv_obj_remove_flag(badgeArrow_, LV_OBJ_FLAG_HIDDEN);
-    else           lv_obj_add_flag(badgeArrow_, LV_OBJ_FLAG_HIDDEN);
+    // Called for, not running yet — the little arrow. Its direction comes from
+    // which demand is outstanding, not from the mode, because the mode no
+    // longer says anything about direction once the gateway decides.
+    if (v.ramp == HomeRamp::None)
+    {
+        lv_obj_add_flag(badgeArrow_, LV_OBJ_FLAG_HIDDEN);
+    }
+    else
+    {
+        const char* arrow = (v.ramp == HomeRamp::Down) ? LV_SYMBOL_DOWN : LV_SYMBOL_UP;
+        if (strcmp(lv_label_get_text(badgeArrow_), arrow) != 0)
+            lv_label_set_text(badgeArrow_, arrow);
+        lv_obj_set_style_text_color(badgeArrow_, hue, 0);
+        lv_obj_remove_flag(badgeArrow_, LV_OBJ_FLAG_HIDDEN);
+    }
 
     // ── Gateway link ─────────────────────────────────────────
     lv_obj_set_style_text_color(bleIcon_, v.linked ? UiTheme::Accent()
