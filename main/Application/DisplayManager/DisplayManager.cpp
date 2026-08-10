@@ -48,8 +48,11 @@ void DisplayManager::Init()
         lvgl_port_touch_cfg_t tcfg = {};
         tcfg.disp = lvDisplay_;
         tcfg.handle = serviceProvider_.getBoard().GetTouch();
-        if (lvgl_port_add_touch(&tcfg) == nullptr)
+        lv_indev_t* indev = lvgl_port_add_touch(&tcfg);
+        if (indev == nullptr)
             ESP_LOGW(TAG, "lvgl_port_add_touch failed — touch disabled");
+        else
+            ArmTouchBackstop(indev);
     }
 
     Go(ScreenId::Home);
@@ -131,6 +134,30 @@ bool DisplayManager::InitLvgl()
         return false;
     }
     return true;
+}
+
+// Because the board hands esp_lvgl_port a real INT pin, the port puts the input
+// device in LV_INDEV_MODE_EVENT: the controller is read when the interrupt says
+// there is something to read, rather than every LV_DEF_REFR_PERIOD (33 ms).
+// That deletes up to 33 ms of pure waiting from the front of every press, which
+// is the largest single term in the touch-to-visible latency we measured.
+//
+// Event mode pauses LVGL's read timer, and that is the part worth guarding.
+// LVGL's idea of "pressed" only changes when a read happens, so one lost
+// release edge — a missed interrupt, an ISR that lands while the pin is being
+// reconfigured — leaves a button held down until someone touches the glass
+// again. Resuming the timer at a slow period puts a floor under that: a lost
+// release clears within kTouchBackstopMs instead of never. It is still a third
+// of the polling this board did before, and it costs one I2C transaction.
+void DisplayManager::ArmTouchBackstop(lv_indev_t* indev)
+{
+    if (!lvgl_port_lock(0)) return;
+    if (lv_timer_t* readTimer = lv_indev_get_read_timer(indev))
+    {
+        lv_timer_set_period(readTimer, kTouchBackstopMs);
+        lv_timer_resume(readTimer);
+    }
+    lvgl_port_unlock();
 }
 
 Screen* DisplayManager::Resolve(ScreenId id)

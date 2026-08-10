@@ -28,8 +28,8 @@ namespace BoardConfig
 
     // ── GT911 capacitive touch (I2C, shared bus) ───────────────────
     // Address is auto-probed (0x5D default, 0x14 backup) in Touch.h; this unit
-    // reports 0x14. INT is wired to GPIO10 but we poll (handled by esp_lvgl_port),
-    // and there is no ESP-controlled touch reset line.
+    // reports 0x14. INT drives an interrupt (esp_lvgl_port then runs the input
+    // device in event mode); there is no ESP-controlled touch reset line.
     static constexpr int TOUCH_PIN_INT = 10;
 
     // ── RGB LCD panel (ST7701S) ────────────────────────────────────

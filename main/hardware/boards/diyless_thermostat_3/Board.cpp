@@ -126,6 +126,13 @@ void Board::Init()
         tcfg.bus = i2cBus_;
         tcfg.x_max = BoardConfig::LCD_H_RES;
         tcfg.y_max = BoardConfig::LCD_V_RES;
+        // INT is wired, so LVGL can be told about a touch instead of asking
+        // every 33 ms. There is no ESP-controlled touch reset line, which also
+        // means the driver skips the INT-level address-select dance during
+        // reset (it needs both pins) — so claiming INT cannot move the GT911
+        // off the address we probed for.
+        tcfg.intr = (gpio_num_t)BoardConfig::TOUCH_PIN_INT;
+        tcfg.intr_any_edge = true;
         if (!touch_.Init(tcfg))
             ESP_LOGW(TAG, "GT911 touch init failed (continuing without touch)");
     }

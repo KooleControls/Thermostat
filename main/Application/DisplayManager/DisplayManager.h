@@ -32,6 +32,10 @@ class DisplayManager final : public Navigator
     static constexpr uint32_t kTickMs = 100;
     static constexpr uint32_t kIdleTimeoutMs = 60000;   // menu → home when untouched
 
+    /// Backstop poll for the touch controller once INT drives the reads.
+    /// Not the press path — see ArmTouchBackstop().
+    static constexpr uint32_t kTouchBackstopMs = 100;
+
 public:
     explicit DisplayManager(ServiceProvider& serviceProvider);
 
@@ -49,6 +53,7 @@ public:
 
 private:
     bool InitLvgl();
+    static void ArmTouchBackstop(lv_indev_t* indev);
     Screen* Resolve(ScreenId id);
     void ServiceBacklight(uint32_t idleMs);
     static void TickCb(lv_timer_t* t);
