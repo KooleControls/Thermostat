@@ -39,26 +39,44 @@ void HomeScreen::Refresh()
     view.mode = HomeMode::Auto;
 
     // Activity is what the boiler reports (OT ID 0 status bits), not what we
-    // asked for.
+    // asked for — but only for a stage we actually enabled. We are the master:
+    // a stage we never switched on cannot be running, so a slave reporting it
+    // active is reporting a bit it does not maintain rather than a fact about
+    // the system. Bench case: a gateway that advertises cooling-active
+    // permanently, having never written that bit in its life, would otherwise
+    // paint a blue snowflake on a house that is heating.
+    //
+    // The cost is that a stage reads idle the moment we stop asking for it,
+    // while the boiler is still winding down. That is a second or two of
+    // understatement, against a permanent falsehood.
     OtBoilerState boiler = serviceProvider_.getOpenThermManager().GetState();
     OtDemand      demand = serviceProvider_.getOpenThermManager().GetDemand();
 
-    bool heating = boiler.chActive && boiler.flame;   // flame alone could be DHW
-    bool cooling = boiler.coolingActive;
+    // flame alone could be DHW, so heating needs the CH bit with it.
+    bool heating = demand.chEnable   && boiler.chActive && boiler.flame;
+    bool cooling = demand.coolEnable && boiler.coolingActive;
 
     if (heating)      view.activity = HomeActivity::Heating;
     else if (cooling) view.activity = HomeActivity::Cooling;
     else              view.activity = HomeActivity::Idle;
 
-    // Where it is headed is our own demand: we ask for the new stage the moment
-    // the control loop decides, while the boiler keeps reporting the old one
-    // until the gateway's changeover timers let it follow. That gap is exactly
-    // the changeover the badge spells out. With the OT link down we know
-    // nothing about either side, so we claim nothing.
-    if (!boiler.linked)             view.movingTo = view.activity;
-    else if (demand.chEnable)       view.movingTo = HomeActivity::Heating;
-    else if (demand.coolEnable)     view.movingTo = HomeActivity::Cooling;
-    else                            view.movingTo = HomeActivity::Idle;
+    // No changeover is claimed, so the badge stays a single icon.
+    //
+    // This was inferred once, by comparing our demand against the boiler's
+    // reported state and calling any direction mismatch a changeover. That is
+    // wrong. The two disagree constantly for reasons that are not transitions
+    // at all — a demand raised before the other end acts on it, a status bit
+    // the other end never updates — and the badge then asserts a mode change
+    // that is not happening. Seen on the bench within minutes: cooling-active
+    // reported while we were demanding heat, and the face drew snowflake →
+    // flame at a system that was doing neither.
+    //
+    // A changeover is something only the side running the timers knows it is
+    // doing. Standard OpenTherm has no data-ID that says so, so until the
+    // gateway tells us over a KC extension there is nothing to draw — and
+    // guessing is worse than staying quiet. HomeFace keeps the three-glyph
+    // rendering ready for the day that signal exists.
+    view.movingTo = view.activity;
 
     view.linked = serviceProvider_.getBleManager().GetLinkState() ==
                   BleManager::LinkState::Ready;
