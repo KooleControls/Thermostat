@@ -78,6 +78,20 @@ bool DisplayManager::InitLvgl()
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_stack = 8192;
     port_cfg.task_affinity = 1;   // pin to core 1, leave core 0 for WiFi
+
+    // Above the managers, deliberately. The port defaults to 4 and every task
+    // this application starts — opentherm, climate, roomtemp, ble_dispatch,
+    // ConsoleBroadcast, wifi_scan — runs at 5, so by default a fingertip waited
+    // behind whichever of them happened to be awake. The work they do between
+    // sleeps is short, but a press that lands during one inherits its whole
+    // remaining slice, and that is the jitter you feel rather than the average.
+    //
+    // 6 is above the managers and far below the stacks that must not be starved
+    // (WiFi 23, esp_timer 22, NimBLE host ~21, lwIP 18). The exposure runs the
+    // other way now: a full-screen redraw is ~47 ms of render, and the managers
+    // wait that out. They are all multi-second loops or blocked on a UART reply,
+    // so none of them can miss a deadline it actually has.
+    port_cfg.task_priority = 6;
     if (lvgl_port_init(&port_cfg) != ESP_OK)
     {
         ESP_LOGE(TAG, "lvgl_port_init failed");

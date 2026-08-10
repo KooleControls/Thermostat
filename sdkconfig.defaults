@@ -77,3 +77,20 @@ CONFIG_ESP_WIFI_RX_BA_WIN=4
 # default means every medium allocation lands in internal DRAM first, which is
 # exactly the memory BLE needs.
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=2048
+
+# ── UI latency ──────────────────────────────────────────────────
+# How long LVGL waits before it looks at what has been invalidated. The Kconfig
+# default of 33 ms sat in front of every press: the touch interrupt marks a
+# button dirty immediately, then nothing is drawn until this timer next fires.
+#
+# It no longer has a second job. It is also the default period for an input
+# device's read timer, so while touch was polled this single number set the
+# input rate too and lowering it meant paying for extra I2C reads. The GT911's
+# INT line now drives the reads, so this only governs drawing.
+#
+# 16 ms rather than lower because the panel is the floor underneath it: 10 MHz
+# pclk over 522x518 total is ~37 Hz, so a frame cannot become visible faster
+# than ~27 ms no matter how often LVGL looks. Refreshing much below the frame
+# time buys latency that the scanout then throws away, and with avoid_tearing
+# the flush blocks on VSYNC anyway.
+CONFIG_LV_DEF_REFR_PERIOD=16
