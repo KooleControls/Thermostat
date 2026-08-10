@@ -88,11 +88,16 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=2048
 # input rate too and lowering it meant paying for extra I2C reads. The GT911's
 # INT line now drives the reads, so this only governs drawing.
 #
-# 16 ms rather than lower because the panel is the floor underneath it: at the
-# 16 MHz pclk the board now runs, 522x518 total is ~59 Hz, so a frame cannot
-# become visible faster than ~17 ms no matter how often LVGL looks. Refreshing
-# much below the frame time buys latency that the scanout then throws away, and
-# with avoid_tearing the flush blocks on VSYNC anyway. Refresh period and frame
-# time are deliberately in the same neighbourhood — if the pclk goes back to the
-# vendor's 10 MHz (~27 ms), this wants to go back up with it.
+# 16 ms rather than lower because of what is underneath: the panel runs at
+# 10 MHz pclk over 522x518 total, ~37 Hz, so nothing becomes visible faster than
+# ~27 ms however often LVGL looks, and with avoid_tearing the flush blocks on
+# VSYNC regardless. Below the frame time this buys latency the scanout discards.
+#
+# It is still worth having at 16 rather than 33 even though the frame is 27 ms,
+# and an earlier version of this comment had that wrong — it claimed the two
+# numbers should track each other. They govern different waits. This one is how
+# long an invalidated button sits before LVGL starts drawing it; the frame time
+# is how long the finished pixels then wait for the scanout. Halving the first
+# is a real saving whatever the second is doing. The cost of a period shorter
+# than the frame is an occasional wasted wakeup, which is CPU, not latency.
 CONFIG_LV_DEF_REFR_PERIOD=16

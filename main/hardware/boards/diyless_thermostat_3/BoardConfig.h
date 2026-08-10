@@ -36,21 +36,24 @@ namespace BoardConfig
     static constexpr int LCD_H_RES = 480;
     static constexpr int LCD_V_RES = 480;
 
-    // Timing from diyless-thermostat-3.yaml, except the pixel clock.
+    // Timing from diyless-thermostat-3.yaml. Do not raise the pixel clock.
     //
-    // DIYLESS run this panel at 10 MHz. Over the 522x518 total below that is
-    // ~37 Hz, so a rendered frame waits up to ~27 ms for the scanout to show it
-    // — and once the touch INT and the LVGL refresh period were dealt with,
-    // that swap was the largest thing left between a fingertip and a lit pixel.
-    // 16 MHz makes it ~59 Hz and ~17 ms. PLL160M divides by exactly 10 at this
-    // rate, so the clock stays jitter-free; 480x480x2 B at 59 Hz is ~27 MB/s of
-    // PSRAM read, which octal PSRAM at 80 MHz does not notice.
+    // 16 MHz was tried, to buy latency: over the 522x518 total below, 10 MHz is
+    // ~37 Hz, so a rendered frame waits up to ~27 ms for the VSYNC swap that
+    // avoid_tearing makes it wait for — the largest remaining term once the
+    // touch INT and the LVGL refresh period had been dealt with. 16 MHz would
+    // have made it ~59 Hz and ~17 ms, PLL160M divides by exactly 10 there, and
+    // ~27 MB/s of PSRAM read is nothing to octal PSRAM at 80 MHz.
     //
-    // This is the one place we knowingly leave the vendor's numbers, so it is
-    // also the first thing to put back if the panel ever misbehaves: the
-    // failure mode is visual (tearing, shimmer, colour noise on a redraw), not
-    // a crash, and it would show up here before anywhere else.
-    static constexpr int LCD_PIXEL_CLOCK_HZ = 16000000;  // 16 MHz (vendor: 10)
+    // On real hardware it tore the picture apart. So the bandwidth arithmetic
+    // was not what constrained this: something in the panel, the flex, or the
+    // ST7701's own tolerance sets the ceiling, and 10 MHz is not a conservative
+    // number DIYLESS picked with room above it. Treat the vendor timing as
+    // measured rather than nominal.
+    //
+    // The bound this leaves is real and worth knowing: ~27 ms of scanout that
+    // no amount of rendering sooner can recover.
+    static constexpr int LCD_PIXEL_CLOCK_HZ = 10000000;  // 10 MHz
     static constexpr bool LCD_PCLK_ACTIVE_NEG = false;   // pclk_inverted: false
     static constexpr bool LCD_PCLK_IDLE_HIGH  = false;
 
