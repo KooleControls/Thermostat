@@ -1,6 +1,7 @@
 #include "DisplayManager.h"
 #include "SettingsManager/SettingsManager.h"
 #include "CommandManager/CommandManager.h"
+#include "ThermalTestManager/ThermalTestManager.h"
 #include "Board.h"
 #include "JsonScope.h"
 #include "JsonReader.h"
@@ -25,6 +26,8 @@ void DisplayManager::Init()
     // Registered even when headless: the PIN is also editable over the web
     // settings UI, and that must not depend on a panel being present.
     pinGate_.Register(serviceProvider_.getSettingsManager());
+    serviceProvider_.getSettingsManager().Register(
+        { &dimPercent_, &fullPercent_, &dimAfterS_ });
 
     // Likewise for uiGo — headless it reports the shell's idea of the current
     // screen and navigates nothing, which is a truthful answer rather than a
@@ -54,14 +57,17 @@ void DisplayManager::Init()
 
     if (lvgl_port_lock(0))
     {
-        lv_timer_create(IdleTimerCb, kIdleTickMs, this);
+        lv_timer_create(TickCb, kTickMs, this);
         lvgl_port_unlock();
     }
 
-    // Full brightness once there is something to look at. Brightness is a lever
-    // in the self-heating test rig too (ThermalTestManager, which initializes
-    // after this and may darken the panel again on purpose).
-    serviceProvider_.getBoard().SetBacklightPercent(100);
+    // Full brightness once there is something to look at; the tick dims it
+    // once the panel has been left alone. Brightness is also a lever in the
+    // self-heating test rig (ThermalTestManager, which initializes after this
+    // and may darken the panel again on purpose — see ServiceBacklight).
+    serviceProvider_.getBoard().SetBacklightPercent(
+        static_cast<uint8_t>(fullPercent_.Get() > 100 ? 100 : fullPercent_.Get()));
+    backlightFull_ = true;
 
     init.SetReady();
     ESP_LOGI(TAG, "Initialized");
@@ -213,11 +219,43 @@ RequestError DisplayManager::Cmd_UiGo(CommandContext& ctx)
     return RequestError::Ok;
 }
 
-void DisplayManager::IdleTimerCb(lv_timer_t *t)
+// Dim when the panel is left alone, full the moment it is touched.
+//
+// "Touched" is LVGL's own inactivity counter, which every input device resets,
+// so this needs no hook into the touch driver and cannot disagree with it about
+// what counts as use. The waking touch is still delivered to the widget under
+// it: on a thermostat the finger is usually already on -/+, and swallowing that
+// press to "just wake the screen" would cost a second press every time.
+void DisplayManager::ServiceBacklight(uint32_t idleMs)
+{
+    // A self-heating run owns the levers while it is up. Without this the
+    // screen timeout would quietly pull a DarkScreen test back to 30 % and the
+    // gateway's log could not tell that from a real temperature change.
+    if (serviceProvider_.getThermalTestManager().OverridesBacklight()) return;
+
+    // Capped before the ×1000: an out-of-range setting overflowing to a tiny
+    // timeout would dim the panel instantly and read as a broken backlight.
+    uint32_t afterS = dimAfterS_.Get();
+    if (afterS > 3600) afterS = 3600;
+
+    bool full = idleMs < afterS * 1000;
+    if (full == backlightFull_) return;
+
+    uint32_t pct = full ? fullPercent_.Get() : dimPercent_.Get();
+    if (pct > 100) pct = 100;
+    serviceProvider_.getBoard().SetBacklightPercent(static_cast<uint8_t>(pct));
+    backlightFull_ = full;
+}
+
+void DisplayManager::TickCb(lv_timer_t *t)
 {
     auto *self = static_cast<DisplayManager *>(lv_timer_get_user_data(t));
+    uint32_t idleMs = lv_display_get_inactive_time(self->lvDisplay_);
+
+    self->ServiceBacklight(idleMs);
+
     if (self->current_ == ScreenId::Home) return;
-    if (lv_display_get_inactive_time(self->lvDisplay_) < kIdleTimeoutMs) return;
+    if (idleMs < kIdleTimeoutMs) return;
 
     // Never leave a unit sitting in the service menu, unlocked, in someone's
     // hallway. Already inside the LVGL task, so load directly.

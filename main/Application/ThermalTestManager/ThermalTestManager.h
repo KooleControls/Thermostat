@@ -77,6 +77,13 @@ public:
 
     void Init();
 
+    /// True while a test mode is holding the levers, i.e. anything but
+    /// Baseline. DisplayManager's automatic dimming stands down while it is
+    /// set, so a multi-hour run is not quietly overwritten by a screen timeout.
+    /// Safe before Init(): the mode starts at Baseline and the mutex is live
+    /// from construction.
+    bool OverridesBacklight() const;
+
 private:
     // A mode is exactly these three lever positions, plus whether it kills the
     // panel outright. pclkHz == 0 means "the board's own default".

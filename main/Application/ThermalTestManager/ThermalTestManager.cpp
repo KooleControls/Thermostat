@@ -100,6 +100,12 @@ bool ThermalTestManager::ParseMode(const char *name, ThermalMode &out)
     return false;
 }
 
+bool ThermalTestManager::OverridesBacklight() const
+{
+    LOCK(mutex_);
+    return mode_ != ThermalMode::Baseline;
+}
+
 ThermalTestManager::Levers ThermalTestManager::LeversFor(ThermalMode mode)
 {
     switch (mode)
@@ -199,9 +205,13 @@ void ThermalTestManager::LogSample()
     if (haveRoom) snprintf(roomStr, sizeof(roomStr), "%.2f", room);
     if (haveRh)   snprintf(rhStr, sizeof(rhStr), "%.1f", rh);
 
+    // The *actual* duty on the panel, not the lever this manager last asked
+    // for. In Baseline the display's own idle dimming owns the backlight, so
+    // the two differ — and a self-heating log that misreports its largest heat
+    // source is worse than no log.
     ThermalMode mode;
-    uint8_t backlight;
-    { LOCK(mutex_); mode = mode_; backlight = levers_.backlight; }
+    { LOCK(mutex_); mode = mode_; }
+    uint8_t backlight = serviceProvider_.getBoard().GetBacklightPercent();
 
     ESP_LOGI(TAG, "THERMAL,%lu,%s,%u,%lu,%d,%s,%s,%d",
              (unsigned long)(esp_timer_get_time() / 1000000),
@@ -226,7 +236,9 @@ void ThermalTestManager::WriteStatus(Stream &out)
 
     JsonObject resp(out);
     resp.field("mode", ModeName(mode_));
-    resp.field("backlight", static_cast<int32_t>(levers_.backlight));
+    // Actual duty, not the requested lever — see LogSample().
+    resp.field("backlight",
+               static_cast<int32_t>(serviceProvider_.getBoard().GetBacklightPercent()));
     resp.field("pclkHz", static_cast<uint32_t>(serviceProvider_.getBoard().GetPanelPclk()));
     resp.field("cpuMhz", static_cast<int32_t>(cpuMhzActual_));
     resp.field("cpuControl", cpuControl_);

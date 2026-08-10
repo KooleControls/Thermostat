@@ -11,6 +11,7 @@
 #include "BleScreen.h"
 #include "InfoScreen.h"
 #include "CommandManager/CommandEntry.h"
+#include "TypedSettings.h"
 #include "lvgl.h"
 
 // Owns LVGL (via esp_lvgl_port) and is the navigation shell: it holds every
@@ -23,7 +24,12 @@
 class DisplayManager final : public Navigator
 {
     static constexpr const char* TAG = "DisplayManager";
-    static constexpr uint32_t kIdleTickMs = 1000;
+
+    /// The housekeeping tick drives both the menu timeout and the backlight.
+    /// It runs ten times a second not because either deadline is tight, but
+    /// because the *wake* is: a panel that takes a second to brighten after a
+    /// touch feels broken, and the tick is a counter read and a comparison.
+    static constexpr uint32_t kTickMs = 100;
     static constexpr uint32_t kIdleTimeoutMs = 60000;   // menu → home when untouched
 
 public:
@@ -44,7 +50,8 @@ public:
 private:
     bool InitLvgl();
     Screen* Resolve(ScreenId id);
-    static void IdleTimerCb(lv_timer_t* t);
+    void ServiceBacklight(uint32_t idleMs);
+    static void TickCb(lv_timer_t* t);
 
     static const char* ScreenName(ScreenId id);
     static bool ParseScreen(const char* name, ScreenId& out);
@@ -65,6 +72,15 @@ private:
         { "ui", "go", &InvokeCommand<&DisplayManager::Cmd_UiGo> },
     };
 
+    // The panel rests dim and comes up full when someone is at it. The motive
+    // is thermal as much as it is power: the backlight is the largest single
+    // contributor to the self-heating that skews the room sensor, so the state
+    // the unit spends its life in is the one the calibration has to hold for.
+    // NVS keys are capped at 15 characters.
+    inline static UInt32Setting dimPercent_{ "ui.dimPct",  "Backlight Dim (%)",   30 };
+    inline static UInt32Setting fullPercent_{ "ui.fullPct", "Backlight Full (%)", 100 };
+    inline static UInt32Setting dimAfterS_{ "ui.dimSec",   "Backlight Dim After (s)", 30 };
+
     ServiceProvider& serviceProvider_;
     InitState initState_;
     lv_display_t* lvDisplay_ = nullptr;
@@ -80,4 +96,8 @@ private:
     InfoScreen infoScreen_{serviceProvider_, *this};
 
     ScreenId current_ = ScreenId::Home;
+
+    /// Which of the two levels is currently on the panel. Tracked so the tick
+    /// only writes LEDC on a transition rather than ten times a second.
+    bool backlightFull_ = true;
 };
