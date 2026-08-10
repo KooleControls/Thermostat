@@ -36,8 +36,21 @@ namespace BoardConfig
     static constexpr int LCD_H_RES = 480;
     static constexpr int LCD_V_RES = 480;
 
-    // Timing from diyless-thermostat-3.yaml.
-    static constexpr int LCD_PIXEL_CLOCK_HZ = 10000000;  // 10 MHz
+    // Timing from diyless-thermostat-3.yaml, except the pixel clock.
+    //
+    // DIYLESS run this panel at 10 MHz. Over the 522x518 total below that is
+    // ~37 Hz, so a rendered frame waits up to ~27 ms for the scanout to show it
+    // — and once the touch INT and the LVGL refresh period were dealt with,
+    // that swap was the largest thing left between a fingertip and a lit pixel.
+    // 16 MHz makes it ~59 Hz and ~17 ms. PLL160M divides by exactly 10 at this
+    // rate, so the clock stays jitter-free; 480x480x2 B at 59 Hz is ~27 MB/s of
+    // PSRAM read, which octal PSRAM at 80 MHz does not notice.
+    //
+    // This is the one place we knowingly leave the vendor's numbers, so it is
+    // also the first thing to put back if the panel ever misbehaves: the
+    // failure mode is visual (tearing, shimmer, colour noise on a redraw), not
+    // a crash, and it would show up here before anywhere else.
+    static constexpr int LCD_PIXEL_CLOCK_HZ = 16000000;  // 16 MHz (vendor: 10)
     static constexpr bool LCD_PCLK_ACTIVE_NEG = false;   // pclk_inverted: false
     static constexpr bool LCD_PCLK_IDLE_HIGH  = false;
 

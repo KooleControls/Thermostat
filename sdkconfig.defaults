@@ -88,9 +88,11 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=2048
 # input rate too and lowering it meant paying for extra I2C reads. The GT911's
 # INT line now drives the reads, so this only governs drawing.
 #
-# 16 ms rather than lower because the panel is the floor underneath it: 10 MHz
-# pclk over 522x518 total is ~37 Hz, so a frame cannot become visible faster
-# than ~27 ms no matter how often LVGL looks. Refreshing much below the frame
-# time buys latency that the scanout then throws away, and with avoid_tearing
-# the flush blocks on VSYNC anyway.
+# 16 ms rather than lower because the panel is the floor underneath it: at the
+# 16 MHz pclk the board now runs, 522x518 total is ~59 Hz, so a frame cannot
+# become visible faster than ~17 ms no matter how often LVGL looks. Refreshing
+# much below the frame time buys latency that the scanout then throws away, and
+# with avoid_tearing the flush blocks on VSYNC anyway. Refresh period and frame
+# time are deliberately in the same neighbourhood — if the pclk goes back to the
+# vendor's 10 MHz (~27 ms), this wants to go back up with it.
 CONFIG_LV_DEF_REFR_PERIOD=16

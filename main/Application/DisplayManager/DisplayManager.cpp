@@ -152,9 +152,9 @@ bool DisplayManager::InitLvgl()
 
 // Because the board hands esp_lvgl_port a real INT pin, the port puts the input
 // device in LV_INDEV_MODE_EVENT: the controller is read when the interrupt says
-// there is something to read, rather than every LV_DEF_REFR_PERIOD (33 ms).
-// That deletes up to 33 ms of pure waiting from the front of every press, which
-// is the largest single term in the touch-to-visible latency we measured.
+// there is something to read, rather than once per LV_DEF_REFR_PERIOD — which
+// was the Kconfig default of 33 ms when this landed, and is the largest single
+// term this removed from the touch-to-visible latency we measured.
 //
 // Event mode pauses LVGL's read timer, and that is the part worth guarding.
 // LVGL's idea of "pressed" only changes when a read happens, so one lost

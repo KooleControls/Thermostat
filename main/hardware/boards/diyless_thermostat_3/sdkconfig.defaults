@@ -41,10 +41,15 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # ── Settings taken from the DIYLESS/ESPHome reference config ─────
-# diyless-thermostat-3.yaml runs this exact panel with the SAME esp_lcd config
-# we build (num_fbs 1, 10-line bounce buffers, framebuffer in PSRAM, PLL160M,
-# 10 MHz) and with BLE enabled alongside it. So the panel setup is not what
-# separates a smooth board from a glitchy one — the build settings are.
+# diyless-thermostat-3.yaml runs this exact panel with BLE enabled alongside it,
+# and once ran the same esp_lcd config we did (num_fbs 1, 10-line bounce buffers,
+# framebuffer in PSRAM, PLL160M, 10 MHz). That is what established the point
+# below: the panel setup is not what separates a smooth board from a glitchy one,
+# the build settings are. We have since left the vendor config in two places —
+# direct mode into two PSRAM framebuffers (see DisplayManager::InitLvgl) and a
+# 16 MHz pixel clock (see BoardConfig.h) — so it is no longer a like-for-like
+# comparison, and a glitch that appears now is worth blaming on those before
+# blaming these.
 #
 # A screen change is a full-screen redraw: 230400 px of software blending plus
 # font rendering, flushed to PSRAM in 48 chunks. For that whole window core 1
