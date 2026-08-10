@@ -19,10 +19,6 @@ enum class HomeMode : uint8_t { Auto, Heat, Cool, Off };
 /// What the system is doing right now — the top-left badge.
 enum class HomeActivity : uint8_t { Idle, Heating, Cooling };
 
-/// Called for, but not running yet — the little arrow beside the badge, and
-/// which way it points. None once the flame (or the cooling stage) catches up.
-enum class HomeRamp : uint8_t { None, Up, Down };
-
 struct HomeView
 {
     float setpoint  = 20.0f;
@@ -35,8 +31,14 @@ struct HomeView
     bool showSetpoint = false;
 
     HomeMode     mode     = HomeMode::Off;
+
+    /// What is running right now, and what it is on its way to. When the two
+    /// differ and neither is Idle the badge spells the changeover out —
+    /// flame → snowflake — because the gateway holds a system on its old mode
+    /// while its timers run, and "why is it still heating" deserves an answer
+    /// on the panel. Equal values mean no changeover, and the badge is one icon.
     HomeActivity activity = HomeActivity::Idle;
-    HomeRamp     ramp     = HomeRamp::None;
+    HomeActivity movingTo = HomeActivity::Idle;
 
     /// BLE link to the gateway is up — lights the bluetooth glyph.
     bool linked = false;
@@ -105,12 +107,16 @@ private:
 
     static void IntentCb(lv_event_t* e);
     static void FormatTemp(char* out, size_t cap, float value, bool valid);
+    static void SetBadgeGlyph(lv_obj_t* label, HomeActivity what, bool live);
 
     IntentHandler handler_ = nullptr;
     void*         user_    = nullptr;
 
-    lv_obj_t* badgeIcon_    = nullptr;
-    lv_obj_t* badgeArrow_   = nullptr;
+    // The badge is a flex row: one icon at rest, three during a changeover.
+    lv_obj_t* badgeRow_     = nullptr;
+    lv_obj_t* badgeIcon_    = nullptr;   // what is running (or would)
+    lv_obj_t* badgeArrow_   = nullptr;   // shown only during a changeover
+    lv_obj_t* badgeNext_    = nullptr;   // what it is moving to
     lv_obj_t* bleIcon_      = nullptr;
     lv_obj_t* bigLabel_     = nullptr;
     lv_obj_t* unitLabel_    = nullptr;

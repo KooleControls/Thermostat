@@ -39,8 +39,7 @@ void HomeScreen::Refresh()
     view.mode = HomeMode::Auto;
 
     // Activity is what the boiler reports (OT ID 0 status bits), not what we
-    // asked for — the difference between the two is exactly the ramp state, so
-    // the arrow means "called for, not running yet".
+    // asked for.
     OtBoilerState boiler = serviceProvider_.getOpenThermManager().GetState();
     OtDemand      demand = serviceProvider_.getOpenThermManager().GetDemand();
 
@@ -51,12 +50,15 @@ void HomeScreen::Refresh()
     else if (cooling) view.activity = HomeActivity::Cooling;
     else              view.activity = HomeActivity::Idle;
 
-    // Only meaningful while the OT link is up; with no boiler talking to us we
-    // have no idea whether it caught up, so we claim nothing.
-    if (!boiler.linked)                        view.ramp = HomeRamp::None;
-    else if (demand.chEnable   && !heating)    view.ramp = HomeRamp::Up;
-    else if (demand.coolEnable && !cooling)    view.ramp = HomeRamp::Down;
-    else                                       view.ramp = HomeRamp::None;
+    // Where it is headed is our own demand: we ask for the new stage the moment
+    // the control loop decides, while the boiler keeps reporting the old one
+    // until the gateway's changeover timers let it follow. That gap is exactly
+    // the changeover the badge spells out. With the OT link down we know
+    // nothing about either side, so we claim nothing.
+    if (!boiler.linked)             view.movingTo = view.activity;
+    else if (demand.chEnable)       view.movingTo = HomeActivity::Heating;
+    else if (demand.coolEnable)     view.movingTo = HomeActivity::Cooling;
+    else                            view.movingTo = HomeActivity::Idle;
 
     view.linked = serviceProvider_.getBleManager().GetLinkState() ==
                   BleManager::LinkState::Ready;

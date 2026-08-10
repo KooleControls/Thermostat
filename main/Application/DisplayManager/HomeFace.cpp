@@ -9,10 +9,11 @@ extern "C" const lv_font_t font_icons_32;
 
 // FontAwesome glyphs carried by font_icons_32 (see the fonts/ folder for the
 // lv_font_conv line that generated it).
-#define ICON_FIRE      "\xEF\x81\xAD"   // U+F06D
-#define ICON_SNOWFLAKE "\xEF\x8B\x9C"   // U+F2DC
-#define ICON_FAN       "\xEF\xA1\xA3"   // U+F863
-#define ICON_POWER     "\xEF\x80\x91"   // U+F011
+#define ICON_POWER     "\xEF\x80\x91"   // U+F011  power-off
+#define ICON_AUTO      "\xEF\x80\xA1"   // U+F021  arrows-rotate — auto changeover
+#define ICON_ARROW     "\xEF\x81\xA1"   // U+F061  arrow-right
+#define ICON_FIRE      "\xEF\x81\xAD"   // U+F06D  fire
+#define ICON_SNOWFLAKE "\xEF\x8B\x9C"   // U+F2DC  snowflake
 
 // ─────────────────────────────────────────────────────────────
 // Build
@@ -56,17 +57,34 @@ void HomeFace::BuildDisc(lv_obj_t* root)
 // Top-left activity badge + the top-right bluetooth/gear pair.
 void HomeFace::BuildBadge(lv_obj_t* root)
 {
-    badgeIcon_ = lv_label_create(root);
+    // At rest this is one icon, coloured when that stage is running and grey
+    // when it is not — no word beside it, the colour is the whole message.
+    // During a changeover the row grows to three: what is running, an arrow,
+    // and what it is moving to. A flex row so the two extra glyphs cost the
+    // layout nothing when hidden.
+    badgeRow_ = lv_obj_create(root);
+    lv_obj_remove_style_all(badgeRow_);
+    lv_obj_set_size(badgeRow_, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(badgeRow_, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(badgeRow_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(badgeRow_, 10, 0);
+    lv_obj_align(badgeRow_, LV_ALIGN_TOP_LEFT, 24, 20);
+
+    badgeIcon_ = lv_label_create(badgeRow_);
     lv_obj_set_style_text_font(badgeIcon_, &font_icons_32, 0);
     lv_label_set_text(badgeIcon_, ICON_FIRE);
-    lv_obj_align(badgeIcon_, LV_ALIGN_TOP_LEFT, 26, 20);
 
-    // No word under the badge: the colour already says idle-or-running and the
-    // glyph already says which way, so the label was only repeating them.
-    badgeArrow_ = lv_label_create(root);
-    lv_obj_set_style_text_font(badgeArrow_, &lv_font_montserrat_20, 0);
-    lv_label_set_text(badgeArrow_, LV_SYMBOL_UP);
-    lv_obj_align(badgeArrow_, LV_ALIGN_TOP_LEFT, 64, 26);
+    badgeArrow_ = lv_label_create(badgeRow_);
+    lv_obj_set_style_text_font(badgeArrow_, &font_icons_32, 0);
+    lv_obj_set_style_text_color(badgeArrow_, UiTheme::TextDim(), 0);
+    lv_label_set_text(badgeArrow_, ICON_ARROW);
+    lv_obj_add_flag(badgeArrow_, LV_OBJ_FLAG_HIDDEN);
+
+    badgeNext_ = lv_label_create(badgeRow_);
+    lv_obj_set_style_text_font(badgeNext_, &font_icons_32, 0);
+    lv_label_set_text(badgeNext_, ICON_SNOWFLAKE);
+    lv_obj_add_flag(badgeNext_, LV_OBJ_FLAG_HIDDEN);
 
     bleIcon_ = lv_label_create(root);
     lv_obj_set_style_text_font(bleIcon_, &lv_font_montserrat_28, 0);
@@ -104,7 +122,10 @@ void HomeFace::BuildReadout(lv_obj_t* root)
     lv_obj_set_style_text_font(bigLabel_, &font_temp_96, 0);
     lv_obj_set_style_text_align(bigLabel_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(bigLabel_, "--");
-    lv_obj_align(bigLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 - 8);
+    // Sits a touch below the disc's centre. Optically centring digits is not
+    // the same as centring their box: the box reserves descender room the
+    // digits never use, so a box-centred number reads high.
+    lv_obj_align(bigLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 + 6);
 
     unitLabel_ = lv_label_create(root);
     lv_obj_set_style_text_color(unitLabel_, UiTheme::Text(), 0);
@@ -173,7 +194,7 @@ void HomeFace::BuildTiles(lv_obj_t* root)
     // Auto is neutral white rather than a climate hue: it is a mode, not a
     // direction, and it is the tile that has to look switched-on while the
     // other three are dimmed.
-    MakeTile(root, tiles_[(int)HomeMode::Auto], 0, ICON_FAN,       "Auto",
+    MakeTile(root, tiles_[(int)HomeMode::Auto], 0, ICON_AUTO,      "Auto",
              UiTheme::Text(), HomeIntent::SetAuto);
     MakeTile(root, tiles_[(int)HomeMode::Heat], 1, ICON_FIRE,      "Heating",
              UiTheme::Heat(), HomeIntent::SetHeat);
@@ -258,6 +279,17 @@ void HomeFace::FormatTemp(char* out, size_t cap, float value, bool valid)
     snprintf(out, cap, "%d", (int)lroundf(value));
 }
 
+// One badge glyph: which stage it names, and whether that stage is live.
+void HomeFace::SetBadgeGlyph(lv_obj_t* label, HomeActivity what, bool live)
+{
+    const char* icon = (what == HomeActivity::Cooling) ? ICON_SNOWFLAKE : ICON_FIRE;
+    lv_color_t  hue  = UiTheme::TextDim();
+    if (live) hue = (what == HomeActivity::Cooling) ? UiTheme::Cool() : UiTheme::Heat();
+
+    if (strcmp(lv_label_get_text(label), icon) != 0) lv_label_set_text(label, icon);
+    lv_obj_set_style_text_color(label, hue, 0);
+}
+
 void HomeFace::Apply(const HomeView& v)
 {
     // ── The number ───────────────────────────────────────────
@@ -281,40 +313,34 @@ void HomeFace::Apply(const HomeView& v)
     else                lv_obj_add_flag(captionLabel_, LV_OBJ_FLAG_HIDDEN);
 
     // ── Activity badge ───────────────────────────────────────
-    // Colour carries running-or-idle; the glyph carries which way. Grey with a
-    // flame is "idle, and heat is the direction it would move in".
-    const char* icon = ICON_FIRE;
-    lv_color_t  hue  = UiTheme::TextDim();
+    // Grey means that stage is not running; the colour means it is. A grey
+    // flame is "not heating", nothing more.
+    //
+    // A changeover — running one stage while the other is already called for —
+    // is the one case a single icon cannot say, so it becomes three glyphs:
+    // what is running (in colour), an arrow, and what it is moving to (grey,
+    // because it has not started).
+    bool changeover = v.movingTo != v.activity &&
+                      v.activity != HomeActivity::Idle &&
+                      v.movingTo != HomeActivity::Idle;
 
-    switch (v.activity)
+    // With nothing running, the badge still shows the stage that is called for
+    // if there is one, so an idle system that is about to heat looks different
+    // from one that is about to cool.
+    HomeActivity shown = (v.activity != HomeActivity::Idle) ? v.activity : v.movingTo;
+
+    SetBadgeGlyph(badgeIcon_, shown, v.activity != HomeActivity::Idle);
+
+    if (changeover)
     {
-    case HomeActivity::Heating:
-        icon = ICON_FIRE;      hue = UiTheme::Heat(); break;
-    case HomeActivity::Cooling:
-        icon = ICON_SNOWFLAKE; hue = UiTheme::Cool(); break;
-    case HomeActivity::Idle:
-        icon = (v.ramp == HomeRamp::Down) ? ICON_SNOWFLAKE : ICON_FIRE;
-        break;
-    }
-
-    if (strcmp(lv_label_get_text(badgeIcon_), icon) != 0)
-        lv_label_set_text(badgeIcon_, icon);
-    lv_obj_set_style_text_color(badgeIcon_, hue, 0);
-
-    // Called for, not running yet — the little arrow. Its direction comes from
-    // which demand is outstanding, not from the mode, because the mode no
-    // longer says anything about direction once the gateway decides.
-    if (v.ramp == HomeRamp::None)
-    {
-        lv_obj_add_flag(badgeArrow_, LV_OBJ_FLAG_HIDDEN);
+        SetBadgeGlyph(badgeNext_, v.movingTo, false);
+        lv_obj_remove_flag(badgeArrow_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(badgeNext_,  LV_OBJ_FLAG_HIDDEN);
     }
     else
     {
-        const char* arrow = (v.ramp == HomeRamp::Down) ? LV_SYMBOL_DOWN : LV_SYMBOL_UP;
-        if (strcmp(lv_label_get_text(badgeArrow_), arrow) != 0)
-            lv_label_set_text(badgeArrow_, arrow);
-        lv_obj_set_style_text_color(badgeArrow_, hue, 0);
-        lv_obj_remove_flag(badgeArrow_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(badgeArrow_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(badgeNext_,  LV_OBJ_FLAG_HIDDEN);
     }
 
     // ── Gateway link ─────────────────────────────────────────
