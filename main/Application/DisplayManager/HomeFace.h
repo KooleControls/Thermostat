@@ -16,8 +16,11 @@
 /// Which of the four bottom tiles is lit.
 enum class HomeMode : uint8_t { Auto, Heat, Cool, Off };
 
-/// What the system is doing right now — the top-left badge.
-enum class HomeActivity : uint8_t { Idle, Heating, Cooling };
+/// Which stage the system is in — the top-left badge. None means neither, i.e.
+/// off. Whether that stage is *running* is a separate bit (HomeView::running),
+/// because "in heating, not currently burning" is standby, not off, and the two
+/// look different on the panel.
+enum class HomeStage : uint8_t { None, Heating, Cooling };
 
 struct HomeView
 {
@@ -32,13 +35,16 @@ struct HomeView
 
     HomeMode     mode     = HomeMode::Off;
 
-    /// What is running right now, and what it is on its way to. When the two
-    /// differ and neither is Idle the badge spells the changeover out —
-    /// flame → snowflake — because the gateway holds a system on its old mode
-    /// while its timers run, and "why is it still heating" deserves an answer
-    /// on the panel. Equal values mean no changeover, and the badge is one icon.
-    HomeActivity activity = HomeActivity::Idle;
-    HomeActivity movingTo = HomeActivity::Idle;
+    /// The stage the system is in, and whether it is firing rather than
+    /// standing by. Colour says running; the glyph says which stage.
+    HomeStage stage   = HomeStage::None;
+    bool      running = false;
+
+    /// What the stage is on its way to. When it differs from `stage` and
+    /// neither is None the badge spells the changeover out — flame → snowflake
+    /// — because a system held on its old mode while timers run should say so.
+    /// Equal values mean no changeover, and the badge stays one icon.
+    HomeStage movingTo = HomeStage::None;
 
     /// BLE link to the gateway is up — lights the bluetooth glyph.
     bool linked = false;
@@ -107,7 +113,7 @@ private:
 
     static void IntentCb(lv_event_t* e);
     static void FormatTemp(char* out, size_t cap, float value, bool valid);
-    static void SetBadgeGlyph(lv_obj_t* label, HomeActivity what, bool live);
+    static void SetBadgeGlyph(lv_obj_t* label, HomeStage what, bool running);
 
     IntentHandler handler_ = nullptr;
     void*         user_    = nullptr;

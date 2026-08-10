@@ -279,12 +279,25 @@ void HomeFace::FormatTemp(char* out, size_t cap, float value, bool valid)
     snprintf(out, cap, "%d", (int)lroundf(value));
 }
 
-// One badge glyph: which stage it names, and whether that stage is live.
-void HomeFace::SetBadgeGlyph(lv_obj_t* label, HomeActivity what, bool live)
+// One badge glyph: which stage it names, and whether that stage is running.
+// Grey is standby, colour is running, and no stage at all is the power glyph —
+// a grey flame on a system that is set to cool would be a lie, so "none" gets
+// its own icon rather than borrowing heating's.
+void HomeFace::SetBadgeGlyph(lv_obj_t* label, HomeStage what, bool running)
 {
-    const char* icon = (what == HomeActivity::Cooling) ? ICON_SNOWFLAKE : ICON_FIRE;
+    const char* icon = ICON_POWER;
     lv_color_t  hue  = UiTheme::TextDim();
-    if (live) hue = (what == HomeActivity::Cooling) ? UiTheme::Cool() : UiTheme::Heat();
+
+    if (what == HomeStage::Heating)
+    {
+        icon = ICON_FIRE;
+        if (running) hue = UiTheme::Heat();
+    }
+    else if (what == HomeStage::Cooling)
+    {
+        icon = ICON_SNOWFLAKE;
+        if (running) hue = UiTheme::Cool();
+    }
 
     if (strcmp(lv_label_get_text(label), icon) != 0) lv_label_set_text(label, icon);
     lv_obj_set_style_text_color(label, hue, 0);
@@ -320,16 +333,11 @@ void HomeFace::Apply(const HomeView& v)
     // is the one case a single icon cannot say, so it becomes three glyphs:
     // what is running (in colour), an arrow, and what it is moving to (grey,
     // because it has not started).
-    bool changeover = v.movingTo != v.activity &&
-                      v.activity != HomeActivity::Idle &&
-                      v.movingTo != HomeActivity::Idle;
+    bool changeover = v.movingTo != v.stage &&
+                      v.stage    != HomeStage::None &&
+                      v.movingTo != HomeStage::None;
 
-    // With nothing running, the badge still shows the stage that is called for
-    // if there is one, so an idle system that is about to heat looks different
-    // from one that is about to cool.
-    HomeActivity shown = (v.activity != HomeActivity::Idle) ? v.activity : v.movingTo;
-
-    SetBadgeGlyph(badgeIcon_, shown, v.activity != HomeActivity::Idle);
+    SetBadgeGlyph(badgeIcon_, v.stage, v.running);
 
     if (changeover)
     {

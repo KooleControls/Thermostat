@@ -38,45 +38,62 @@ void HomeScreen::Refresh()
     // When the gateway grows real modes, this reads GetMode() again.
     view.mode = HomeMode::Auto;
 
-    // Activity is what the boiler reports (OT ID 0 status bits), not what we
-    // asked for — but only for a stage we actually enabled. We are the master:
-    // a stage we never switched on cannot be running, so a slave reporting it
-    // active is reporting a bit it does not maintain rather than a fact about
-    // the system. Bench case: a gateway that advertises cooling-active
-    // permanently, having never written that bit in its life, would otherwise
-    // paint a blue snowflake on a house that is heating.
+    // The badge reads the slave's own ID 0 status bits, and reads them as the
+    // spec defines them:
     //
-    // The cost is that a stage reads idle the moment we stop asking for it,
-    // while the boiler is still winding down. That is a second or two of
-    // understatement, against a permanent falsehood.
+    //   bit 1 (chActive)      the CH stage is on        — heating
+    //   bit 4 (coolingActive) the cooling stage is on   — cooling
+    //   bit 3 (flame)         it is burning right now
+    //
+    // The stage bits and the flame bit answer different questions, which is
+    // what makes standby visible: CH on with no flame is a system in heating
+    // that is not currently burning, and the same shape holds for cooling. An
+    // earlier version folded the two together and could only ever say "on" or
+    // "off", which is why a system sitting in cooling standby drew a flame.
+    //
+    // Nothing KC-specific here — a real boiler sets the same bits with the same
+    // meanings; this is just no longer throwing the distinction away.
     OtBoilerState boiler = serviceProvider_.getOpenThermManager().GetState();
-    OtDemand      demand = serviceProvider_.getOpenThermManager().GetDemand();
 
-    // flame alone could be DHW, so heating needs the CH bit with it.
-    bool heating = demand.chEnable   && boiler.chActive && boiler.flame;
-    bool cooling = demand.coolEnable && boiler.coolingActive;
-
-    if (heating)      view.activity = HomeActivity::Heating;
-    else if (cooling) view.activity = HomeActivity::Cooling;
-    else              view.activity = HomeActivity::Idle;
+    if (boiler.chActive && !boiler.coolingActive)
+    {
+        view.stage   = HomeStage::Heating;
+        view.running = boiler.flame;   // flame alone could be DHW; with CH on it is not
+    }
+    else if (boiler.coolingActive && !boiler.chActive)
+    {
+        view.stage = HomeStage::Cooling;
+        // There is no "cooling is running" bit in OT — the flame bit only
+        // speaks for the burner. So cooling shows as standby throughout, which
+        // understates an active cooler rather than inventing a state.
+        view.running = false;
+    }
+    else if (boiler.flame)
+    {
+        // Both stage bits set, or neither, and yet it is burning. Seen at
+        // startup before the gateway has picked a mode. The flame is the one
+        // fact not in doubt.
+        view.stage   = HomeStage::Heating;
+        view.running = true;
+    }
+    else
+    {
+        view.stage   = HomeStage::None;
+        view.running = false;
+    }
 
     // No changeover is claimed, so the badge stays a single icon.
     //
-    // This was inferred once, by comparing our demand against the boiler's
-    // reported state and calling any direction mismatch a changeover. That is
-    // wrong. The two disagree constantly for reasons that are not transitions
-    // at all — a demand raised before the other end acts on it, a status bit
-    // the other end never updates — and the badge then asserts a mode change
-    // that is not happening. Seen on the bench within minutes: cooling-active
-    // reported while we were demanding heat, and the face drew snowflake →
-    // flame at a system that was doing neither.
+    // This was inferred once, by comparing our demand against the slave's
+    // reported state and calling any direction mismatch a changeover. The two
+    // disagree constantly for reasons that are not transitions at all, and the
+    // badge then asserted a mode change that was not happening.
     //
     // A changeover is something only the side running the timers knows it is
-    // doing. Standard OpenTherm has no data-ID that says so, so until the
-    // gateway tells us over a KC extension there is nothing to draw — and
-    // guessing is worse than staying quiet. HomeFace keeps the three-glyph
-    // rendering ready for the day that signal exists.
-    view.movingTo = view.activity;
+    // doing, and OT ID 0 has no bit for "about to swap stages" — both stage
+    // bits are simply set to the new one when it happens. HomeFace keeps the
+    // three-glyph rendering ready for a signal that actually carries it.
+    view.movingTo = view.stage;
 
     view.linked = serviceProvider_.getBleManager().GetLinkState() ==
                   BleManager::LinkState::Ready;
