@@ -202,16 +202,6 @@ void HomeFace::BuildTiles(lv_obj_t* root)
              UiTheme::Cool(), HomeIntent::SetCool);
     MakeTile(root, tiles_[(int)HomeMode::Off],  3, ICON_POWER,     "Power",
              UiTheme::TextDim(), HomeIntent::SetOff);
-
-    // The gateway owns the heat/cool decision today and only offers automatic
-    // mode, so the thermostat has nothing to choose: Auto is the mode, and the
-    // other three are drawn but dead. Dimmed rather than hidden, because the
-    // row keeps the layout it will ship with once the gateway grows the rest.
-    // When it does, this is the one block to delete.
-    SetTileEnabled(tiles_[(int)HomeMode::Auto], true);
-    SetTileEnabled(tiles_[(int)HomeMode::Heat], false);
-    SetTileEnabled(tiles_[(int)HomeMode::Cool], false);
-    SetTileEnabled(tiles_[(int)HomeMode::Off],  false);
 }
 
 void HomeFace::SetTileEnabled(Tile& tile, bool enabled)
@@ -356,6 +346,10 @@ void HomeFace::Apply(const HomeView& v)
                                                    : UiTheme::Surface(), 0);
 
     // ── Mode tiles ───────────────────────────────────────────
+    // Cooling is the only tile that can be unavailable, and it is dimmed
+    // rather than hidden so the row keeps its shape on every installation.
+    SetTileEnabled(tiles_[(int)HomeMode::Cool], v.coolingAvailable);
+
     for (int i = 0; i < 4; ++i)
     {
         bool selected = (i == (int)v.mode);

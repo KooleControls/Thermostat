@@ -69,7 +69,7 @@ private:
         { "climate", "status", &InvokeCommand<&ClimateManager::Cmd_ClimateStatus> },
     };
 
-    inline static UInt32Setting modeSetting_{ "climate.mode", "Climate Mode", (uint32_t)ClimateMode::Off };
+    inline static UInt32Setting modeSetting_{ "climate.mode", "Climate Mode", (uint32_t)ClimateMode::Auto };
     inline static FloatSetting  setpointSetting_{ "climate.setpt", "Setpoint", 20.0f };   // NVS key ≤15 chars
 
     ServiceProvider &serviceProvider_;
@@ -79,7 +79,7 @@ private:
     PidController pid_;
 
     // live config + last-step snapshot (guarded by mutex_)
-    ClimateMode mode_ = ClimateMode::Off;
+    ClimateMode mode_ = ClimateMode::Auto;
     float userSetpoint_ = 20.0f;
     ClimateStatus status_;
 

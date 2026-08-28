@@ -5,6 +5,25 @@
 #include "RoomTemperatureManager/RoomTemperatureManager.h"
 #include <cmath>
 
+namespace {
+
+// The two enums are ordered for different reasons — ClimateMode by the wire
+// value the gateway reads, HomeMode by where the tile sits on the row — so
+// they are mapped, never cast.
+HomeMode ToHomeMode(ClimateMode m)
+{
+    switch (m)
+    {
+    case ClimateMode::Heat: return HomeMode::Heat;
+    case ClimateMode::Cool: return HomeMode::Cool;
+    case ClimateMode::Off:  return HomeMode::Off;
+    case ClimateMode::Auto: return HomeMode::Auto;
+    }
+    return HomeMode::Auto;
+}
+
+}   // namespace
+
 void HomeScreen::Build(lv_obj_t* root)
 {
     face_.Build(root, IntentTrampoline, this);
@@ -33,10 +52,7 @@ void HomeScreen::Refresh()
     view.setpoint     = serviceProvider_.getClimateManager().GetUserSetpoint();
     view.showSetpoint = showingSetpoint_;
 
-    // The gateway owns the heat/cool decision and only offers automatic mode,
-    // so the face reports Auto regardless of what ClimateManager has stored.
-    // When the gateway grows real modes, this reads GetMode() again.
-    view.mode = HomeMode::Auto;
+    view.mode = ToHomeMode(serviceProvider_.getClimateManager().GetMode());
 
     // The badge reads the slave's own ID 0 status bits, and reads them as the
     // spec defines them:
@@ -54,6 +70,8 @@ void HomeScreen::Refresh()
     // Nothing KC-specific here — a real boiler sets the same bits with the same
     // meanings; this is just no longer throwing the distinction away.
     OtBoilerState boiler = serviceProvider_.getOpenThermManager().GetState();
+
+    view.coolingAvailable = boiler.coolingSupported;
 
     if (boiler.chActive && !boiler.coolingActive)
     {
@@ -126,10 +144,11 @@ void HomeScreen::OnIntent(HomeIntent intent)
     case HomeIntent::NudgeDown: Nudge(-1.0f); break;
     case HomeIntent::NudgeUp:   Nudge(+1.0f); break;
 
-    // Mode selection is the gateway's today, and the face draws all four tiles
-    // locked, so no mode intent can reach here. They stay wired for the day it
-    // unlocks.
-    case HomeIntent::SetAuto: return;
+    // The mode is the guest's choice; the thermostat only stores it and lets
+    // the gateway read it. Acting on it is the gateway's job.
+    case HomeIntent::SetAuto:
+        serviceProvider_.getClimateManager().SetMode(ClimateMode::Auto);
+        break;
     case HomeIntent::SetHeat:
         serviceProvider_.getClimateManager().SetMode(ClimateMode::Heat);
         break;

@@ -48,6 +48,12 @@ struct HomeView
 
     /// BLE link to the gateway is up — lights the bluetooth glyph.
     bool linked = false;
+
+    /// Whether the installation can cool at all — the gateway says so over
+    /// OpenTherm (slave config), exactly as it would to any thermostat. False
+    /// dims the Cooling tile and makes it untouchable, so a guest is not
+    /// offered a mode the building cannot deliver.
+    bool coolingAvailable = true;
 };
 
 /// What a touch means. The face raises these; it never acts on them.

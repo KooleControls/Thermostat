@@ -165,20 +165,15 @@ void ClimateManager::ControlStep()
     if (overrideActive && !status_.overrideActive)
         ESP_LOGI(TAG, "Remote override adopted: setpoint %.1f", activeSp);
 
-    bool  ch = false, cool = false;
-    float tset = 0.0f, output = 0.0f;
-
-    if (mode == ClimateMode::Cool)
-    {
-        cool = boiler.coolingSupported && (room > activeSp + 0.5f);
-        pid_.Reset();   // PID unused for cooling; keep it clean for next Heat
-    }
-    else   // Heat, or Off (frost) — both run the heating PID
-    {
-        output = pid_.Update(activeSp, room, dt);
-        tset = OutputToTSet(output, boiler.maxTSetLower, boiler.maxTSetUpper);
-        ch = (mode == ClimateMode::Heat) ? true : (tset > 0.0f);
-    }
+    // Demand does not depend on the mode. The panel's four buttons are
+    // forwarded to the gateway, not acted on here, so we report what the room
+    // needs in both directions and the gateway decides which one it is willing
+    // to run — exactly what it already does with a third-party thermostat.
+    // Mode reaches the demand only through activeSp, which Off pins to frost.
+    float output = pid_.Update(activeSp, room, dt);
+    float tset   = OutputToTSet(output, boiler.maxTSetLower, boiler.maxTSetUpper);
+    bool  ch     = tset > 0.0f;
+    bool  cool   = boiler.coolingSupported && (room > activeSp + 0.5f);
 
     serviceProvider_.getOpenThermManager().SetHeatingDemand(ch, cool, activeSp, tset);
 
