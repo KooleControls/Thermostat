@@ -70,6 +70,17 @@ void ClimateManager::NudgeSetpoint(float deltaC)
     // Takes effect on the next ControlStep; persisted later by MaybeCommitSettings.
 }
 
+void ClimateManager::SetUserSetpoint(float celsius)
+{
+    LOCK(mutex_);
+    if (celsius < kSetpointMin) celsius = kSetpointMin;
+    if (celsius > kSetpointMax) celsius = kSetpointMax;
+    if (fabsf(celsius - userSetpoint_) < 0.001f) return;
+    userSetpoint_ = celsius;
+    settingsDirty_ = true;
+    lastChangeUs_ = esp_timer_get_time();
+}
+
 ClimateMode ClimateManager::GetMode() const
 {
     LOCK(mutex_);
