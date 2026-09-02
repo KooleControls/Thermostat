@@ -99,6 +99,7 @@ private:
     inline static UInt32Setting enableSetting_{ "sim.enable",  "Room Sim Enable", 0 };
     inline static UInt32Setting driveSetting_{  "sim.drive",   "Room Sim Drive (0=self,1=boiler)", 0 };
     inline static UInt32Setting scenarioSetting_{ "sim.scen",  "Room Sim Scenario (0=off,1=modes)", 1 };
+    inline static UInt32Setting loopSetting_{   "sim.loop",    "Room Sim Loop Scenario", 1 };
     inline static FloatSetting  startSetting_{  "sim.start",   "Room Sim Start Air C", 17.0f };
     // Capacities in kJ/K, conductances in W/K -- a small, lightly furnished,
     // well-insulated room. Air node time constant works out near 15 minutes,
@@ -146,6 +147,9 @@ private:
     float lastQCool_ = 0.0f;
     float lastOutdoor_ = 5.0f;
     size_t nextEvent_ = 0;
+    bool loop_ = true;
+    int32_t lastCycleS_ = 0;
+    uint32_t cycleCount_ = 0;
     uint32_t stepCount_ = 0;
     int64_t startedUs_ = 0;
 };

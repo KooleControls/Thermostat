@@ -24,16 +24,19 @@ namespace {
 constexpr RoomSimManager::Event kScenario[] = {
     {   60, RoomSimManager::Event::Kind::Setpoint,      21.0f, "heat to 21" },
     {   60, RoomSimManager::Event::Kind::Mode,   (float)(int)ClimateMode::Heat, "HEAT phase" },
-    { 1500, RoomSimManager::Event::Kind::Setpoint,      23.0f, "setpoint step 21->23" },
-    { 2100, RoomSimManager::Event::Kind::OutdoorOffset, -8.0f, "cold snap / window open" },
-    { 2700, RoomSimManager::Event::Kind::OutdoorOffset,   0.0f, "window shut" },
-    { 3000, RoomSimManager::Event::Kind::Setpoint,      19.0f, "cool to 19" },
-    { 3000, RoomSimManager::Event::Kind::Mode,   (float)(int)ClimateMode::Cool, "COOL phase" },
-    { 4500, RoomSimManager::Event::Kind::Setpoint,      21.0f, "auto at 21" },
-    { 4500, RoomSimManager::Event::Kind::Mode,   (float)(int)ClimateMode::Auto, "AUTO phase" },
-    { 6300, RoomSimManager::Event::Kind::End,            0.0f, "run complete" },
+    { 1800, RoomSimManager::Event::Kind::Setpoint,      23.0f, "setpoint step 21->23" },
+    { 2700, RoomSimManager::Event::Kind::OutdoorOffset, -8.0f, "cold snap / window open" },
+    { 3300, RoomSimManager::Event::Kind::OutdoorOffset,   0.0f, "window shut" },
+    { 3600, RoomSimManager::Event::Kind::Setpoint,      19.0f, "cool to 19" },
+    { 3600, RoomSimManager::Event::Kind::Mode,   (float)(int)ClimateMode::Cool, "COOL phase" },
+    { 5100, RoomSimManager::Event::Kind::Setpoint,      21.0f, "auto at 21" },
+    { 5100, RoomSimManager::Event::Kind::Mode,   (float)(int)ClimateMode::Auto, "AUTO phase" },
+    { 7200, RoomSimManager::Event::Kind::End,            0.0f, "cycle complete" },
 };
 constexpr size_t kScenarioCount = sizeof(kScenario) / sizeof(kScenario[0]);
+// The End event's time is the cycle length, so the table stays the only place
+// the schedule is written down.
+constexpr int32_t kCycleSeconds = kScenario[kScenarioCount - 1].atSeconds;
 
 }   // namespace
 
@@ -63,6 +66,7 @@ void RoomSimManager::Init()
         enabled_  = enableSetting_.Get() != 0 || ROOM_SIM_FORCE_ENABLE;
         drive_    = driveSetting_.Get() == 1 ? Drive::Boiler : Drive::Self;
         scenario_ = scenarioSetting_.Get() != 0;
+        loop_     = loopSetting_.Get() != 0;
 
         cAirJ_    = cAirSetting_.Get() * 1000.0f;
         cMassJ_   = cMassSetting_.Get() * 1000.0f;
@@ -87,6 +91,8 @@ void RoomSimManager::Init()
         tWater_ = tAir_;
         lastOutdoor_ = outMean_;
         nextEvent_ = 0;
+        lastCycleS_ = 0;
+        cycleCount_ = 0;
         startedUs_ = esp_timer_get_time();
     }
 
@@ -99,7 +105,7 @@ void RoomSimManager::Init()
 
     serviceProvider_.getRoomTemperatureManager().SetExternalTemperature(tAir_);
 
-    task_.Init("roomsim", 5, 4096);
+    task_.Init("roomsim", 5, 8192);   // the trace line is float-heavy; 4096 left little headroom
     task_.SetHandler([this]() { Loop(); });
     task_.Run();
 
@@ -109,7 +115,11 @@ void RoomSimManager::Init()
                   "loss %.0f W/K, rad %.0f W, cool %.0f W, drive %s, scenario %s",
              tAir_, tMass_, airTauMin, lossWk_, radW_, coolW_,
              drive_ == Drive::Boiler ? "boiler" : "self",
-             scenario_ ? "on" : "off");
+             scenario_ ? (loop_ ? "looping" : "once") : "off");
+    if (scenario_ && loop_)
+        ESP_LOGW(TAG, "Scenario cycle is %d min (heat, setpoint step, cold snap, "
+                      "cool, auto) and repeats until the board is reflashed",
+                 (int)(kCycleSeconds / 60));
 }
 
 float RoomSimManager::OutdoorAt(int32_t elapsedS) const
@@ -133,7 +143,20 @@ void RoomSimManager::ApplyDueEvents(int32_t elapsedS)
 {
     if (!scenario_) return;
 
-    while (nextEvent_ < kScenarioCount && kScenario[nextEvent_].atSeconds <= elapsedS)
+    // The scenario runs on its own clock so it can repeat, while the outdoor
+    // sine and the occupancy gain keep using absolute time -- the simulated day
+    // should carry on across a cycle boundary rather than restarting with it.
+    int32_t cycleS = loop_ ? (elapsedS % kCycleSeconds) : elapsedS;
+    if (cycleS < lastCycleS_)
+    {
+        nextEvent_ = 0;
+        cycleCount_++;
+        ESP_LOGW(TAG, "=== cycle %u complete, starting again (t=%ds absolute) ===",
+                 (unsigned)cycleCount_, (int)elapsedS);
+    }
+    lastCycleS_ = cycleS;
+
+    while (nextEvent_ < kScenarioCount && kScenario[nextEvent_].atSeconds <= cycleS)
     {
         const Event &e = kScenario[nextEvent_++];
         switch (e.kind)
@@ -159,8 +182,9 @@ void RoomSimManager::ApplyDueEvents(int32_t elapsedS)
             break;
 
         case Event::Kind::End:
-            ESP_LOGW(TAG, "=== t=%ds SCENARIO: %s — holding, room stays simulated ===",
-                     (int)elapsedS, e.note);
+            if (!loop_)
+                ESP_LOGW(TAG, "=== t=%ds SCENARIO: %s — holding, room stays "
+                              "simulated ===", (int)elapsedS, e.note);
             break;
         }
     }
@@ -330,4 +354,6 @@ void RoomSimManager::WriteStatus(Stream &out)
     resp.field("coolW", qc);
     resp.field("drive", drive == Drive::Boiler ? "boiler" : "self");
     resp.field("elapsedS", (uint32_t)((esp_timer_get_time() - startedUs_) / 1000000));
+    resp.field("cycleSeconds", (uint32_t)kCycleSeconds);
+    resp.field("cyclesDone", cycleCount_);
 }
