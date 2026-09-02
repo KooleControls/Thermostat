@@ -56,7 +56,8 @@ void RoomSimManager::Init()
 
     serviceProvider_.getCommandManager().Register(this, commands_);
     serviceProvider_.getSettingsManager().Register({
-        &enableSetting_, &driveSetting_, &scenarioSetting_, &startSetting_,
+        &enableSetting_, &driveSetting_, &scenarioSetting_, &loopSetting_,
+        &startSetting_,
         &cAirSetting_, &cMassSetting_, &lossSetting_, &couplSetting_,
         &radSetting_, &coolSetting_, &outMeanSetting_, &outSwingSetting_,
         &dayLenSetting_, &gainSetting_ });
