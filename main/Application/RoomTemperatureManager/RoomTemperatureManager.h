@@ -51,6 +51,17 @@ public:
     /// of local self-heating — a warmed sensor reads RH low.
     bool GetRoomHumidity(float &percent) const;
 
+    // Push a value into the external source, selecting it if it was not
+    // already selected. Same thing `room external -temp` does, for a caller
+    // inside the firmware (the room simulation).
+    void SetExternalTemperature(float celsius);
+
+    /// Hand the room back to the board sensor.
+    void ClearExternalSource();
+
+    /// Which source GetRoomTemperature() is currently answering from.
+    RoomTempSource GetSource() const;
+
 private:
     void Loop();
     RequestError Cmd_RoomTemp(CommandContext& ctx);       // room temp

@@ -14,6 +14,7 @@ set(SOURCE_FILES_LIST
     "Application/CommandManager/CommandManager.cpp"
     "Application/OpenThermManager/OpenThermManager.cpp"
     "Application/RoomTemperatureManager/RoomTemperatureManager.cpp"
+    "Application/RoomSimManager/RoomSimManager.cpp"
     "Application/ClimateManager/ClimateManager.cpp"
     "Application/HotWaterManager/HotWaterManager.cpp"
     "Application/DisplayManager/DisplayManager.cpp"
@@ -51,6 +52,7 @@ set(INCLUDE_DIRS_LIST
     "Application/HotWaterManager"
     "Application/DisplayManager"
     "Application/RoomTemperatureManager"
+    "Application/RoomSimManager"
     "Application/UpdateManager"
     "Application/SettingsManager"
     "Application/SystemManager"
@@ -139,6 +141,15 @@ idf_component_register(
 # Board identity define for the (rare) code-level conditionals.
 string(TOUPPER "${BOARD}" BOARD_UPPER)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE BOARD_${BOARD_UPPER})
+
+# Force the room simulation on at build time: `idf.py build -DROOM_SIM_FORCE_ENABLE=1`.
+# For a board with no route to it -- no network, and no serial command path --
+# where the sim.enable setting cannot be written. Leaves the setting alone, so
+# a later build without the flag comes back off.
+if(ROOM_SIM_FORCE_ENABLE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE ROOM_SIM_FORCE_ENABLE=1)
+    message(WARNING "ROOM SIMULATION FORCED ON -- the room temperature is fake")
+endif()
 
 # Switches over enums (e.g. SettingType) deliberately have no default case
 # so that adding an enum value flags every converter that wasn't updated.

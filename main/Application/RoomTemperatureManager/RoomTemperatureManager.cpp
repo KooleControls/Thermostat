@@ -56,6 +56,27 @@ bool RoomTemperatureManager::GetRoomTemperature(float &celsius) const
     return true;
 }
 
+void RoomTemperatureManager::SetExternalTemperature(float celsius)
+{
+    LOCK(mutex_);
+    source_ = RoomTempSource::External;
+    externalTemp_ = celsius;
+    externalUs_ = esp_timer_get_time();
+}
+
+void RoomTemperatureManager::ClearExternalSource()
+{
+    LOCK(mutex_);
+    source_ = RoomTempSource::Sensor;
+    externalUs_ = -1;
+}
+
+RoomTempSource RoomTemperatureManager::GetSource() const
+{
+    LOCK(mutex_);
+    return source_;
+}
+
 void RoomTemperatureManager::Loop()
 {
     TemperatureSensor &sensor = serviceProvider_.getBoard().GetTemperatureSensor();
@@ -143,23 +164,11 @@ RequestError RoomTemperatureManager::Cmd_RoomExternal(CommandContext& ctx)
         Optional("off",  off)
     ));
 
-    {
-        LOCK(mutex_);
-        if (off)
-        {
-            source_ = RoomTempSource::Sensor;
-            externalUs_ = -1;
-        }
-        else if (!std::isnan(temp))
-        {
-            // One call both selects the source and refreshes it, so a simulator
-            // needs exactly one command per tick.
-            source_ = RoomTempSource::External;
-            externalTemp_ = temp;
-            externalUs_ = esp_timer_get_time();
-        }
-        // Neither given: a pure read, handled by WriteExternalStatus below.
-    }
+    if (off)
+        ClearExternalSource();
+    else if (!std::isnan(temp))
+        SetExternalTemperature(temp);   // one call selects the source and refreshes it
+    // Neither given: a pure read, handled by WriteExternalStatus below.
 
     WriteExternalStatus(ctx.out);
     return RequestError::Ok;

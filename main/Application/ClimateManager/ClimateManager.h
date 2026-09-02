@@ -54,6 +54,10 @@ public:
     ClimateMode GetMode() const;
     void  SetMode(ClimateMode mode);     // persisted lazily, same as the setpoint
 
+    /// What the last control step computed. Same snapshot the climateStatus
+    /// command reports; a copy, so the caller holds no lock.
+    ClimateStatus GetStatus() const;
+
 private:
     void Loop();
     void ControlStep();

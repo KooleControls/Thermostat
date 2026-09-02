@@ -9,6 +9,7 @@ class DisplayManager;
 class HotWaterManager;
 class NetworkManager;
 class OpenThermManager;
+class RoomSimManager;
 class RoomTemperatureManager;
 class SettingsManager;
 class SystemManager;
@@ -28,6 +29,7 @@ public:
     virtual HotWaterManager& getHotWaterManager() = 0;
     virtual NetworkManager& getNetworkManager() = 0;
     virtual OpenThermManager& getOpenThermManager() = 0;
+    virtual RoomSimManager& getRoomSimManager() = 0;
     virtual RoomTemperatureManager& getRoomTemperatureManager() = 0;
     virtual SettingsManager& getSettingsManager() = 0;
     virtual SystemManager& getSystemManager() = 0;

@@ -21,6 +21,7 @@ extern "C" void app_main(void)
     g_appContext.getRoomTemperatureManager().Init();
     g_appContext.getOpenThermManager().Init();
     g_appContext.getClimateManager().Init();
+    g_appContext.getRoomSimManager().Init();
     g_appContext.getHotWaterManager().Init();
     g_appContext.getDisplayManager().Init();
     g_appContext.getUpdateManager().Init();

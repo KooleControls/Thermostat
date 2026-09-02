@@ -86,6 +86,12 @@ void ClimateManager::SetMode(ClimateMode mode)
     // Takes effect on the next ControlStep; persisted later by MaybeCommitSettings.
 }
 
+ClimateStatus ClimateManager::GetStatus() const
+{
+    LOCK(mutex_);
+    return status_;
+}
+
 void ClimateManager::MaybeCommitSettings()
 {
     ClimateMode mode;
