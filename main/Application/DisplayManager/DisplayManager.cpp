@@ -26,7 +26,14 @@ void DisplayManager::Init()
     // settings UI, and that must not depend on a panel being present.
     pinGate_.Register(serviceProvider_.getSettingsManager());
     serviceProvider_.getSettingsManager().Register(
-        { &dimPercent_, &fullPercent_, &dimAfterS_ });
+        { &dimPercent_, &fullPercent_, &dimAfterS_,
+          &SettingsMenuScreen::lightTheme_ });
+
+    // Before anything is built: every screen copies the palette into per-widget
+    // local styles as it goes, so the mode has to be settled first. Registered
+    // and applied even when headless — the setting is editable over the web UI
+    // whether or not this unit has a panel to show it on.
+    UiTheme::SetMode(SettingsMenuScreen::ThemeMode());
 
     // Likewise for uiGo — headless it reports the shell's idea of the current
     // screen and navigates nothing, which is a truthful answer rather than a
@@ -205,6 +212,40 @@ void DisplayManager::Go(ScreenId id)
     lvgl_port_unlock();
 }
 
+void DisplayManager::Restyle()
+{
+    if (lvDisplay_ == nullptr) return;   // headless — the setting still persists
+
+    if (!lvgl_port_lock(0))
+    {
+        ESP_LOGW(TAG, "Could not take the LVGL lock — restyle skipped");
+        return;
+    }
+
+    UiTheme::SetMode(SettingsMenuScreen::ThemeMode());
+
+    // The screen on the panel is swapped, not dropped and rebuilt in place:
+    // lv_obj_delete() on the active screen nulls the display's own pointer to
+    // it (and says so, loudly, in the log), so the replacement is loaded first
+    // and the outgoing tree freed once it is no longer the one being shown.
+    Screen* current = Resolve(current_);
+    lv_obj_t* outgoing = current->Detach();
+
+    // Every other screen too, not just the visible one: they are already built
+    // and would otherwise come back in the old palette when navigated to.
+    for (ScreenId id : kAllScreens)
+    {
+        Screen* screen = Resolve(id);
+        if (screen != current) screen->Rebuild();
+    }
+
+    current->Load();
+    if (outgoing) lv_obj_delete(outgoing);
+
+    lvgl_port_unlock();
+    ESP_LOGI(TAG, "Restyled — %s theme", UiTheme::IsLight() ? "light" : "dark");
+}
+
 const char* DisplayManager::ScreenName(ScreenId id)
 {
     switch (id)
@@ -221,11 +262,7 @@ const char* DisplayManager::ScreenName(ScreenId id)
 
 bool DisplayManager::ParseScreen(const char *name, ScreenId &out)
 {
-    static constexpr ScreenId kAll[] = {
-        ScreenId::Home, ScreenId::Pin, ScreenId::Settings,
-        ScreenId::Wifi, ScreenId::Ble, ScreenId::Info,
-    };
-    for (ScreenId id : kAll)
+    for (ScreenId id : kAllScreens)
     {
         if (strcmp(name, ScreenName(id)) == 0)
         {

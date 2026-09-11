@@ -101,7 +101,7 @@ void BleScreen::Build(lv_obj_t* root)
     lv_obj_add_event_cb(connect, ConnectCb, LV_EVENT_CLICKED, this);
     lv_obj_t* connectLabel = lv_label_create(connect);
     lv_obj_set_style_text_font(connectLabel, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(connectLabel, UiTheme::Text(), 0);
+    lv_obj_set_style_text_color(connectLabel, UiTheme::OnAccent(), 0);
     lv_label_set_text(connectLabel, "Pair");
     lv_obj_center(connectLabel);
 
@@ -113,7 +113,9 @@ void BleScreen::Build(lv_obj_t* root)
     lv_obj_add_event_cb(keypad, ConnectCb, LV_EVENT_READY, this);
     lv_obj_add_event_cb(keypad, CodeBackCb, LV_EVENT_CANCEL, this);
 
-    lv_timer_create(RefreshTimerCb, kRefreshMs, this);
+    // Once for the life of the screen — see HomeScreen::Build.
+    if (refreshTimer_ == nullptr)
+        refreshTimer_ = lv_timer_create(RefreshTimerCb, kRefreshMs, this);
 }
 
 void BleScreen::OnShow()

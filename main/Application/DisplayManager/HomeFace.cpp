@@ -31,12 +31,14 @@ void HomeFace::Build(lv_obj_t* root, IntentHandler handler, void* user)
     BuildTiles(root);
 }
 
-// The dark disc the readout sits on.
+// The disc the readout sits on.
 //
 // A filled circle rather than an outline: it lifts the number off the
 // background without drawing a line around it. The vertical gradient is what
-// stops it reading as a flat grey hole — top edge slightly lit, bottom sinking
-// back into the background. Static, and not clickable.
+// stops it reading as a flat hole — top edge lit, bottom settling back toward
+// the background. Both ends come from the palette, so on the light theme it is
+// a white disc rising off grey rather than a dark one sinking into black.
+// Static, and not clickable.
 void HomeFace::BuildDisc(lv_obj_t* root)
 {
     lv_obj_t* disc = lv_obj_create(root);
@@ -49,8 +51,8 @@ void HomeFace::BuildDisc(lv_obj_t* root)
 
     lv_obj_set_style_radius(disc, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(disc, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(disc, lv_color_hex(0x24262B), 0);
-    lv_obj_set_style_bg_grad_color(disc, lv_color_hex(0x141519), 0);
+    lv_obj_set_style_bg_color(disc, UiTheme::DiscTop(), 0);
+    lv_obj_set_style_bg_grad_color(disc, UiTheme::DiscBottom(), 0);
     lv_obj_set_style_bg_grad_dir(disc, LV_GRAD_DIR_VER, 0);
 }
 

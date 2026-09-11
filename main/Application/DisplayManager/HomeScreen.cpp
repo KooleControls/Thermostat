@@ -27,7 +27,26 @@ HomeMode ToHomeMode(ClimateMode m)
 void HomeScreen::Build(lv_obj_t* root)
 {
     face_.Build(root, IntentTrampoline, this);
-    lv_timer_create(RefreshTimerCb, kRefreshMs, this);
+
+    // Once for the life of the screen, not once per build: an lv_timer is not a
+    // child of the tree, so a rebuild would leave the previous one running.
+    // Its callback keys off IsActive(), which is false while the tree is gone.
+    if (refreshTimer_ == nullptr)
+        refreshTimer_ = lv_timer_create(RefreshTimerCb, kRefreshMs, this);
+}
+
+// The revert timer is the one piece of state that can outlive the tree with a
+// reason to touch it: it is armed by a nudge and survives a walk into the menu,
+// so a rebuild from there would land it on a deleted face. Drop it — a rebuild
+// re-enters through OnShow(), which clears it anyway.
+void HomeScreen::OnDestroy()
+{
+    if (revertTimer_)
+    {
+        lv_timer_delete(revertTimer_);
+        revertTimer_ = nullptr;
+    }
+    showingSetpoint_ = false;
 }
 
 void HomeScreen::OnShow()

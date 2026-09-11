@@ -35,6 +35,7 @@ private:
     void Connect();
 
     static void RefreshTimerCb(lv_timer_t* t);
+    lv_timer_t* refreshTimer_ = nullptr;
     static void BackCb(lv_event_t* e);
     static void RescanCb(lv_event_t* e);
     static void ForgetCb(lv_event_t* e);

@@ -16,8 +16,11 @@ lv_obj_t* Screen::AddIconButton(lv_obj_t* parent, const char* icon)
     lv_obj_t* btn = lv_button_create(parent);
     lv_obj_set_size(btn, UiTheme::IconBtn, UiTheme::IconBtn);
     lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
+    // Press() and not Surface(): a tint of the card colour over a background
+    // the card colour already resembles is no feedback at all — on the dark
+    // palette #1C1C1E at 20 % over black lands on #050506.
     lv_obj_set_style_bg_opa(btn, LV_OPA_20, LV_STATE_PRESSED);
-    lv_obj_set_style_bg_color(btn, UiTheme::Surface(), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, UiTheme::Press(), LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(btn, 0, 0);
     lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
 

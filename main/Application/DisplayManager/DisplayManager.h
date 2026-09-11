@@ -51,6 +51,12 @@ public:
     /// gate policy stays here with the PinGate rather than in the home screen.
     void Go(ScreenId id) override;
 
+    /// Re-read the palette from the theme setting and rebuild every screen.
+    /// Safe to call from any task and from inside an LVGL event callback on the
+    /// screen being rebuilt — the port lock is recursive and LVGL marks an
+    /// in-flight event dead when its target is destroyed.
+    void Restyle() override;
+
 private:
     bool InitLvgl();
     static void ArmTouchBackstop(lv_indev_t* indev);
@@ -60,6 +66,13 @@ private:
 
     static const char* ScreenName(ScreenId id);
     static bool ParseScreen(const char* name, ScreenId& out);
+
+    /// Every id exactly once — the name lookup walks it, and so does the
+    /// rebuild, which must not miss a screen or it would keep a stale palette.
+    static constexpr ScreenId kAllScreens[] = {
+        ScreenId::Home, ScreenId::Pin, ScreenId::Settings,
+        ScreenId::Wifi, ScreenId::Ble, ScreenId::Info,
+    };
 
     /// `uiGo` — drive navigation from a bench client instead of a fingertip.
     ///   {"screen":"home"|"pin"|"settings"|"wifi"|"ble"|"info"}
@@ -85,6 +98,10 @@ private:
     inline static UInt32Setting dimPercent_{ "ui.dimPct",  "Backlight Dim (%)",   30 };
     inline static UInt32Setting fullPercent_{ "ui.fullPct", "Backlight Full (%)", 100 };
     inline static UInt32Setting dimAfterS_{ "ui.dimSec",   "Backlight Dim After (s)", 30 };
+
+    // The theme setting itself lives on the settings screen that carries its
+    // toggle; the shell only registers it and reads it, because the palette has
+    // to be chosen before the first screen is built.
 
     ServiceProvider& serviceProvider_;
     InitState initState_;

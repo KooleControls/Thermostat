@@ -27,6 +27,7 @@ public:
 protected:
     void Build(lv_obj_t* root) override;
     void OnShow() override;
+    void OnDestroy() override;
 
 private:
     void Refresh();
@@ -40,6 +41,7 @@ private:
     ServiceProvider& serviceProvider_;
     Navigator& navigator_;
     HomeFace face_;
+    lv_timer_t* refreshTimer_ = nullptr;
     lv_timer_t* revertTimer_ = nullptr;
     bool showingSetpoint_ = false;
 };

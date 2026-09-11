@@ -1,5 +1,6 @@
 #include "SettingsMenuScreen.h"
 #include "NetworkManager/NetworkManager.h"
+#include "SettingsManager/SettingsManager.h"
 
 void SettingsMenuScreen::Build(lv_obj_t* root)
 {
@@ -21,6 +22,7 @@ void SettingsMenuScreen::Build(lv_obj_t* root)
     // (docs/backlog/2026-07-27-wifi-update-ui.md).
     AddPendingRow(list, LV_SYMBOL_DOWNLOAD, "Firmware");
     AddRow(list, LV_SYMBOL_LIST, "Info", ScreenId::Info);
+    AddToggleRow(list, LV_SYMBOL_EYE_OPEN, "Light theme", lightTheme_.Get());
 }
 
 void SettingsMenuScreen::OnShow()
@@ -56,14 +58,18 @@ lv_obj_t* SettingsMenuScreen::MakeRow(lv_obj_t* list, const char* icon, const ch
     lv_label_set_text_fmt(label, "%s  %s", icon, text);
     lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
 
-    lv_obj_t* tail = lv_label_create(row);
-    lv_obj_set_style_text_font(tail, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(tail, UiTheme::TextDim(), 0);
-    lv_obj_set_width(tail, 200);
-    lv_label_set_long_mode(tail, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_style_text_align(tail, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_label_set_text(tail, trailing);
-    lv_obj_align(tail, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_t* tail = nullptr;
+    if (trailing != nullptr)
+    {
+        tail = lv_label_create(row);
+        lv_obj_set_style_text_font(tail, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_color(tail, UiTheme::TextDim(), 0);
+        lv_obj_set_width(tail, 200);
+        lv_label_set_long_mode(tail, LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_set_style_text_align(tail, LV_TEXT_ALIGN_RIGHT, 0);
+        lv_label_set_text(tail, trailing);
+        lv_obj_align(tail, LV_ALIGN_RIGHT_MID, 0, 0);
+    }
 
     if (trailingLabel) *trailingLabel = tail;
     return row;
@@ -84,6 +90,46 @@ void SettingsMenuScreen::AddPendingRow(lv_obj_t* list, const char* icon, const c
 {
     lv_obj_t* row = MakeRow(list, icon, text, "soon", nullptr);
     lv_obj_add_state(row, LV_STATE_DISABLED);
+}
+
+void SettingsMenuScreen::AddToggleRow(lv_obj_t* list, const char* icon, const char* text,
+                                      bool on)
+{
+    lv_obj_t* row = MakeRow(list, icon, text, nullptr, nullptr);
+
+    lv_obj_t* sw = lv_switch_create(row);
+    lv_obj_set_size(sw, 72, 38);
+    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    // Off track, on track, knob. Grey reads as "off" against either palette,
+    // and the knob is white in both — on light it sits on grey or on blue,
+    // never on white.
+    lv_obj_set_style_bg_color(sw, UiTheme::TextDim(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, UiTheme::Accent(), UiTheme::Sel(LV_PART_INDICATOR, LV_STATE_CHECKED));
+    lv_obj_set_style_bg_color(sw, UiTheme::OnAccent(), LV_PART_KNOB);
+
+    // Display-only: the row owns the gesture, so the switch must not also
+    // answer the same tap, and it will never pick up CHECKED on its own.
+    lv_obj_remove_flag(sw, LV_OBJ_FLAG_CLICKABLE);
+    if (on) lv_obj_add_state(sw, LV_STATE_CHECKED);
+
+    lv_obj_add_event_cb(row, ThemeCb, LV_EVENT_CLICKED, this);
+}
+
+// Persist, then hand the shell the rebuild. Saving first is what makes the
+// toggle survive the power cycle that a customer is most likely to try right
+// after flipping it.
+void SettingsMenuScreen::ThemeCb(lv_event_t* e)
+{
+    auto* self = static_cast<SettingsMenuScreen*>(lv_event_get_user_data(e));
+
+    lightTheme_.Set(!lightTheme_.Get());
+    self->serviceProvider_.getSettingsManager().Save();
+
+    // Deletes this screen's tree — and with it the row whose event is still on
+    // the stack — then loads the rebuilt one. Nothing below may touch `self`'s
+    // widgets, which is why this is the last statement.
+    self->navigator_.Restyle();
 }
 
 void SettingsMenuScreen::RowCb(lv_event_t* e)
