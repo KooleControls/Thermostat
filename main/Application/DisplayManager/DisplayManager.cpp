@@ -260,6 +260,26 @@ const char* DisplayManager::ScreenName(ScreenId id)
     return "home";
 }
 
+RequestError DisplayManager::Cmd_UiTheme(CommandContext& ctx)
+{
+    const bool was = SettingsMenuScreen::lightTheme_.Get();
+    bool want = was;   // absent "light" leaves this alone — a plain read
+    RETURN_IF_ERROR(ctx.readArgs(Optional("light", want)));
+
+    if (want != was)
+    {
+        SettingsMenuScreen::lightTheme_.Set(want);
+        serviceProvider_.getSettingsManager().Save();
+        Restyle();   // takes the LVGL lock itself; this runs on the command task
+    }
+
+    JsonObject resp(ctx.out);
+    resp.field("ok", true);
+    resp.field("light", SettingsMenuScreen::lightTheme_.Get());
+    resp.field("headless", lvDisplay_ == nullptr);
+    return RequestError::Ok;
+}
+
 bool DisplayManager::ParseScreen(const char *name, ScreenId &out)
 {
     for (ScreenId id : kAllScreens)

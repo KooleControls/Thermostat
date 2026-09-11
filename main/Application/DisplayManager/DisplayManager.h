@@ -86,8 +86,20 @@ private:
     /// a headless or remote unit.
     RequestError Cmd_UiGo(CommandContext& ctx);
 
+    /// `uiTheme` — flip the palette from a bench client instead of the glass.
+    ///   {"light":true|false}
+    /// Takes the same path the on-screen toggle does, persistence included, so
+    /// it exercises the restyle rather than shortcutting around it. Omitting
+    /// "light" just reads the setting back.
+    ///
+    /// Here for the same reason as uiGo: a rebuild of every screen is the
+    /// heaviest thing the shell does, and verifying it had meant asking someone
+    /// to stand at the panel and tap.
+    RequestError Cmd_UiTheme(CommandContext& ctx);
+
     inline static CommandEntry commands_[] = {
-        { "ui", "go", &InvokeCommand<&DisplayManager::Cmd_UiGo> },
+        { "ui", "go",    &InvokeCommand<&DisplayManager::Cmd_UiGo> },
+        { "ui", "theme", &InvokeCommand<&DisplayManager::Cmd_UiTheme> },
     };
 
     // The panel rests dim and comes up full when someone is at it. The motive
