@@ -5,6 +5,7 @@
 #include "Mutex.h"
 #include "Task.h"
 #include "CommandManager/CommandEntry.h"
+#include "TypedSettings.h"
 #include <cstdint>
 
 // Owns "the measured room temperature": samples the board's ambient
@@ -32,6 +33,24 @@ class RoomTemperatureManager
     static constexpr int     SampleIntervalMs = 5000;
     static constexpr int64_t ValidityUs = 30LL * 1000 * 1000;  // 6 missed samples
 
+    // ── Smoothing ─────────────────────────────────────────────────────────
+    //
+    // What leaves this manager is a first-order lag over the sensor, not the
+    // raw reading. The AHT20 dithers by a few hundredths between samples and
+    // the room does not: at 5 s a piece that noise is the only thing moving,
+    // and everything downstream reacts to it -- the PID sees it as error, the
+    // OT link ships it to the gateway, and the gateway writes a log record for
+    // every twitch.
+    //
+    // A first-order lag rather than a sliding window: one float of state
+    // instead of a ring, no step when a sample is dropped, and a time constant
+    // that means something physical. Tau is how long it takes to cover 63 % of
+    // a step -- and it is also the lag this adds, which is why it is seconds
+    // rather than minutes. A room's own response is tens of minutes, so a
+    // minute of filter is invisible to the control loop; five would start to be
+    // real dead time in front of a door being opened.
+    static constexpr float DefaultFilterTauS = 60.0f;
+
 public:
     explicit RoomTemperatureManager(ServiceProvider &serviceProvider);
 
@@ -43,6 +62,8 @@ public:
     void Init();
 
     // false = no valid recent measurement (never read, or stale > 30 s).
+    // Smoothed (see DefaultFilterTauS) when the answer comes from the sensor;
+    // an external value is passed through untouched.
     bool GetRoomTemperature(float &celsius) const;
 
     /// Relative humidity from the same sensor, same cadence and validity rule.
@@ -82,12 +103,22 @@ private:
     mutable Mutex mutex_;
     Task task_;
 
-    float   lastTemp_ = 0.0f;     // last successful reading
+    float   lastTemp_ = 0.0f;     // the filter's output -- what consumers read
+    float   rawTemp_ = 0.0f;      // the last reading as the sensor gave it
     int64_t lastReadUs_ = -1;     // esp_timer time of it; -1 = never read
     bool    lastValid_ = false;   // loop-task-only edge detector for the fault log
 
     float   lastHumidity_ = 0.0f;
     int64_t lastHumidityUs_ = -1;
+
+    // Read once at Init rather than per sample: Setting::Get() goes to NVS, and
+    // this is a tuning knob, not a live input. A change therefore takes effect
+    // at the next boot. Zero or less turns the filter off, which is how you see
+    // what it was doing.
+    float filterTauS_ = DefaultFilterTauS;
+
+    inline static FloatSetting filterTauSetting_{
+        "room.tau", "Room Temp Filter s", DefaultFilterTauS };   // NVS key <= 15 chars
 
     // External source (guarded by mutex_). Deliberately not persisted: a reboot
     // always comes back on the real sensor, so a forgotten simulation cannot

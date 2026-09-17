@@ -1,5 +1,6 @@
 #include "RoomTemperatureManager.h"
 #include "CommandManager/CommandManager.h"
+#include "SettingsManager.h"
 #include "Board.h"
 #include "interfaces/TemperatureSensor.h"
 #include "JsonScope.h"
@@ -22,13 +23,18 @@ void RoomTemperatureManager::Init()
     }
 
     serviceProvider_.getCommandManager().Register(this, commands_);
+    serviceProvider_.getSettingsManager().Register({ &filterTauSetting_ });
+
+    filterTauS_ = filterTauSetting_.Get();
+    if (!(filterTauS_ > 0.0f)) filterTauS_ = 0.0f;   // NAN and negatives mean off
 
     task_.Init("roomtemp", 5, 4096);
     task_.SetHandler([this]() { Loop(); });
     task_.Run();
 
     init.SetReady();
-    ESP_LOGI(TAG, "Initialized (sampling every %d ms)", SampleIntervalMs);
+    ESP_LOGI(TAG, "Initialized (sampling every %d ms, filter %.0f s)",
+             SampleIntervalMs, filterTauS_);
 }
 
 bool RoomTemperatureManager::IsValid(int64_t readUs, int64_t now)
@@ -88,8 +94,31 @@ void RoomTemperatureManager::Loop()
         if (sensor.ReadTemperature(t))
         {
             LOCK(mutex_);
-            lastTemp_ = t;
-            lastReadUs_ = esp_timer_get_time();
+            const int64_t now = esp_timer_get_time();
+
+            rawTemp_ = t;
+
+            // Seeded, not ramped: with no valid previous value there is nothing
+            // to average against, and a filter carrying on from before a gap
+            // would walk the room in from wherever it was when the sensor went
+            // quiet -- slowly, and looking like a real measurement all the way.
+            if (filterTauS_ <= 0.0f || !IsValid(lastReadUs_, now))
+            {
+                lastTemp_ = t;
+            }
+            else
+            {
+                // dt measured rather than assumed. A read that fails is skipped
+                // rather than substituted, so the gap to the next accepted one
+                // can be two intervals or six -- and a sample that stands for
+                // more time has to weigh more, or the filter silently slows
+                // down exactly when the sensor is struggling.
+                const float dt = (float)(now - lastReadUs_) / 1000000.0f;
+                const float alpha = dt / (filterTauS_ + dt);
+                lastTemp_ += alpha * (t - lastTemp_);
+            }
+
+            lastReadUs_ = now;
         }
 
         // Humidity rides along on the same cadence deliberately: the AHT20 is a
@@ -137,11 +166,12 @@ RequestError RoomTemperatureManager::Cmd_RoomTemp(CommandContext& ctx)
 {
     RETURN_IF_ERROR(ctx.readArgs());
 
-    float   temp;
+    float   temp, raw;
     int64_t readUs;
     {
         LOCK(mutex_);
         temp   = lastTemp_;
+        raw    = rawTemp_;
         readUs = lastReadUs_;
     }
     int64_t now = esp_timer_get_time();
@@ -151,6 +181,11 @@ RequestError RoomTemperatureManager::Cmd_RoomTemp(CommandContext& ctx)
     JsonObject resp(ctx.out);
     resp.field("valid", valid);
     resp.field("temp", temp);
+    // Both, because the filter is otherwise invisible: one number that lags and
+    // one that does not is the only way to see it working -- or to see that it
+    // is off.
+    resp.field("raw", raw);
+    resp.field("tauS", filterTauS_);
     resp.field("ageMs", ageMs);
     return RequestError::Ok;
 }
