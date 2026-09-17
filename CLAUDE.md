@@ -27,7 +27,7 @@ Frontend (React 19 + TypeScript + Vite + Tailwind + shadcn/ui, package manager i
 ```bash
 cd frontend
 pnpm dev          # hot-reload dev server, proxies WebSocket to a running device
-pnpm build        # tsc -b && vite build && gzip into ../www (embedded in flash as FAT image)
+pnpm build        # tsc -b && vite build into ../www (packed + embedded in the app image)
 pnpm typecheck    # tsc --noEmit
 ```
 
@@ -97,8 +97,9 @@ piece costs one retry instead of the whole image. Progress on a long write comes
 back device-side as non-final `{"p":<bytesWritten>}` chunks — bytes actually in
 flash, not bytes queued. App partitions go through `esp_ota_*` (image validation,
 running slot refused); data partitions are raw erase+write. The built frontend is
-gzipped into `www/` and flashed as a FAT partition, updatable independently of
-the app.
+not one of them: it is packed into a blob and embedded in the app image
+(`components/web_assets`), so firmware and UI are one artifact that updates in
+one step.
 
 > **Bench-testing note:** there is no HTTP command route, so `curl` cannot drive
 > commands — use a WS session client (`scratchpad/ws_cmd.py`) that speaks the

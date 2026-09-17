@@ -80,8 +80,7 @@ set(COMPONENT_REQUIRES
     app_update
     esp_partition
     spi_flash
-    fatfs
-    wear_levelling
+    web_assets
     esp_driver_gpio
     esp_driver_ledc
     esp_driver_tsens

@@ -50,7 +50,7 @@ private:
     // webPassword_ live by reference — see Authenticator.h.
     Authenticator auth_{ webPassword_ };
 
-    void MountFatPartition();
+    void LogWebAssets();
     void StartServer();
     void RegisterRoutes();
 
@@ -58,7 +58,7 @@ private:
 
     // Serve one frontend file by logical path. This is the whole of the relay's
     // access to the device's frontend: the server asks for "/index.html" and
-    // never learns that it lives gzipped on a FAT partition called www. Reply is
+    // never learns that it lives gzipped inside the firmware image. Reply is
     // a header line then the raw bytes:
     //
     //   {"ok":true,"status":200,"contentType":"...","contentEncoding":"gzip"}\n<bytes>

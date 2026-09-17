@@ -4,7 +4,7 @@
 # on conflicts. Target: ESP32-S3 (build dir configured with set-target esp32s3).
 # ──────────────────────────────────────────────────────────────
 
-# 8 MB flash with our 8 MB partition layout (two 3 MB OTA slots + www).
+# 8 MB flash with our 8 MB partition layout (two ~3.9 MB OTA slots, no www).
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_8mb.csv"
 
