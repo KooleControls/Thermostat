@@ -111,6 +111,43 @@ protected:
     /// Borderless, transparent icon button — the gear, close and back affordances.
     static lv_obj_t* AddIconButton(lv_obj_t* parent, const char* icon);
 
+    /// The one card shape: a rounded surface with a hairline, full list width,
+    /// lifting a step under a finger. Every tappable thing in a list starts
+    /// here, which is what makes a WiFi row and a menu row look like the same
+    /// product rather than two screens that happened to agree on a colour.
+    ///
+    /// Note what this is NOT: an lv_list. lv_list draws one flat surface with
+    /// dividers, and there is no seam in it to put a gap or a per-row radius
+    /// into. A plain flex column of these costs a builder function and buys
+    /// back control of every row.
+    static lv_obj_t* AddCard(lv_obj_t* parent, int32_t height);
+
+    /// What AddMenuRow hands back. The card is what a caller attaches its
+    /// handler to; the subtitle is kept only by the rows whose second line is
+    /// live (the WiFi row's connection state).
+    struct MenuRow
+    {
+        lv_obj_t* card;
+        lv_obj_t* subtitle;
+    };
+
+    /// A menu row in the house style: the icon in a tinted rounded square, the
+    /// title over a dim second line, and a chevron at the right when the row
+    /// leads somewhere.
+    ///
+    /// The subtitle is not decoration. A column of bare nouns — WiFi, Gateway,
+    /// Firmware — makes the reader open a screen to find out whether it is the
+    /// one they wanted; the second line answers that from the menu. A row with
+    /// genuinely nothing to say passes nullptr and keeps its title centred.
+    ///
+    /// `reserveRight` is how much of the card's right edge the text must stop
+    /// short of. The default clears a chevron; a row carrying a switch says so,
+    /// because a subtitle running under the switch is the kind of thing that
+    /// only shows up on the one device whose SSID is long.
+    static MenuRow AddMenuRow(lv_obj_t* list, const char* icon, const char* title,
+                              const char* subtitle, bool chevron = true,
+                              int32_t reserveRight = 44);
+
     /// lv_label_set_text() that skips identical text.
     ///
     /// LVGL invalidates a label on every set_text, whether or not the string

@@ -40,9 +40,28 @@ namespace UiTheme
     inline lv_color_t TextDim() { return Pick(0x888888, 0x8A8A8E); }
     inline lv_color_t Danger()  { return Pick(0xE5484D, 0xD70015); }
 
+    /// A card under a finger. One step of lift off Surface(), not a colour
+    /// change: a row that flashes the accent reads as "this row is now
+    /// selected", which is a lie — it was tapped and it is already gone.
+    inline lv_color_t SurfacePressed() { return Pick(0x2A2A2C, 0xEAEAEF); }
+
+    /// The hairline around a card. What separates one row from the next is the
+    /// gap between them; the border is what stops a dark card from dissolving
+    /// into a dark ground at the top and bottom edges of a list.
+    inline lv_color_t Line()    { return Pick(0x323234, 0xE3E3E8); }
+
+    /// The tinted square a menu row's icon sits in — the accent at low
+    /// strength, so a column of icons carries colour without five saturated
+    /// blue blocks competing with the one blue thing that is actually a button.
+    inline lv_color_t AccentSoft() { return Pick(0x16304D, 0xE1ECFB); }
+
     // Deeper on light so a white label still clears 4.5:1 on a filled button —
     // the dark palette's blue is tuned against black and washes out on white.
     inline lv_color_t Accent()  { return Pick(0x2F80ED, 0x0A68D8); }
+
+    /// An Accent() fill under a finger. A filled action that does not move when
+    /// pressed reads as disabled, which is the opposite of what it is.
+    inline lv_color_t AccentPressed() { return Pick(0x1F62C4, 0x0850A8); }
 
     /// Label/icon colour for text sitting *on* an Accent() fill, which is not
     /// the same thing as Text(). On dark the two coincide and the distinction is
@@ -79,4 +98,7 @@ namespace UiTheme
     constexpr int32_t HeaderH = 72;   // title bar height on non-home screens
     constexpr int32_t RowH = 76;      // menu row height — a comfortable touch target
     constexpr int32_t IconBtn = 64;   // gear / close / back hit area
+    constexpr int32_t Radius = 14;    // every card, everywhere
+    constexpr int32_t Gap = 8;        // between cards in a list
+    constexpr int32_t IconBox = 48;   // the tinted square holding a menu row's icon
 }

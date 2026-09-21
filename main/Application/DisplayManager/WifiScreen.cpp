@@ -34,12 +34,9 @@ void WifiScreen::Build(lv_obj_t* root)
     lv_obj_set_style_pad_all(listView_, UiTheme::Pad, 0);
     lv_obj_remove_flag(listView_, LV_OBJ_FLAG_SCROLLABLE);
 
-    rescanButton_ = lv_button_create(listView_);
-    lv_obj_set_size(rescanButton_, 200, 56);
+    rescanButton_ = AddCard(listView_, 56);
+    lv_obj_set_width(rescanButton_, 200);
     lv_obj_align(rescanButton_, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_obj_set_style_bg_color(rescanButton_, UiTheme::Surface(), 0);
-    lv_obj_set_style_bg_color(rescanButton_, UiTheme::Accent(), LV_STATE_PRESSED);
-    lv_obj_set_style_shadow_width(rescanButton_, 0, 0);
     lv_obj_add_event_cb(rescanButton_, RescanCb, LV_EVENT_CLICKED, this);
     lv_obj_t* rescanLabel = lv_label_create(rescanButton_);
     lv_obj_set_style_text_font(rescanLabel, &lv_font_montserrat_20, 0);
@@ -50,12 +47,9 @@ void WifiScreen::Build(lv_obj_t* root)
     // Host our own AP instead of joining one: the way in when the house network
     // is unreachable or has no credentials stored yet. Disabled while it is
     // already the active mode (RefreshStatus keeps that in sync).
-    apButton_ = lv_button_create(listView_);
-    lv_obj_set_size(apButton_, 200, 56);
+    apButton_ = AddCard(listView_, 56);
+    lv_obj_set_width(apButton_, 200);
     lv_obj_align(apButton_, LV_ALIGN_TOP_RIGHT, 0, 0);
-    lv_obj_set_style_bg_color(apButton_, UiTheme::Surface(), 0);
-    lv_obj_set_style_bg_color(apButton_, UiTheme::Accent(), LV_STATE_PRESSED);
-    lv_obj_set_style_shadow_width(apButton_, 0, 0);
     lv_obj_add_event_cb(apButton_, ApCb, LV_EVENT_CLICKED, this);
     lv_obj_t* apLabel = lv_label_create(apButton_);
     lv_obj_set_style_text_font(apLabel, &lv_font_montserrat_20, 0);
@@ -102,6 +96,8 @@ void WifiScreen::Build(lv_obj_t* root)
     lv_obj_set_size(connect, 200, 52);
     lv_obj_align(connect, LV_ALIGN_TOP_MID, 0, 96);
     lv_obj_set_style_bg_color(connect, UiTheme::Accent(), 0);
+    lv_obj_set_style_bg_color(connect, UiTheme::AccentPressed(), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(connect, UiTheme::Radius, 0);
     lv_obj_set_style_shadow_width(connect, 0, 0);
     lv_obj_add_event_cb(connect, ConnectCb, LV_EVENT_CLICKED, this);
     lv_obj_t* connectLabel = lv_label_create(connect);
@@ -212,13 +208,7 @@ void WifiScreen::RebuildNetworkList()
     {
         const WiFiInterface::ScanResult& net = results[order[i]];
 
-        lv_obj_t* row = lv_button_create(networkList_);
-        lv_obj_set_size(row, LV_PCT(100), 60);
-        lv_obj_set_style_bg_color(row, UiTheme::Surface(), 0);
-        lv_obj_set_style_bg_color(row, UiTheme::Accent(), LV_STATE_PRESSED);
-        lv_obj_set_style_radius(row, 10, 0);
-        lv_obj_set_style_shadow_width(row, 0, 0);
-        lv_obj_set_style_pad_hor(row, UiTheme::Pad, 0);
+        lv_obj_t* row = AddCard(networkList_, 60);
         lv_obj_add_event_cb(row, NetworkCb, LV_EVENT_CLICKED, this);
         // The row remembers its slot in the sorted list; the SSID is copied out
         // on tap, before any later scan can overwrite the buffer.

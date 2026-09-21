@@ -13,16 +13,19 @@ void SettingsMenuScreen::Build(lv_obj_t* root)
     lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(list, 0, 0);
     lv_obj_set_style_pad_all(list, UiTheme::Pad, 0);
-    lv_obj_set_style_pad_row(list, 8, 0);
+    lv_obj_set_style_pad_row(list, UiTheme::Gap, 0);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
 
-    wifiSummary_ = AddRow(list, LV_SYMBOL_WIFI, "WiFi", ScreenId::Wifi);
-    AddRow(list, LV_SYMBOL_BLUETOOTH, "Gateway", ScreenId::Ble);
+    // The WiFi subtitle is a placeholder only until OnShow runs, which is
+    // before the screen is ever on the panel.
+    wifiSummary_ = AddRow(list, LV_SYMBOL_WIFI, "WiFi", "not connected", ScreenId::Wifi);
+    AddRow(list, LV_SYMBOL_BLUETOOTH, "Gateway", "Pair over Bluetooth", ScreenId::Ble);
     // Still the shared shell the firmware-update item plugs into
     // (docs/backlog/2026-07-27-wifi-update-ui.md).
     AddPendingRow(list, LV_SYMBOL_DOWNLOAD, "Firmware");
-    AddRow(list, LV_SYMBOL_LIST, "Info", ScreenId::Info);
-    AddToggleRow(list, LV_SYMBOL_EYE_OPEN, "Light theme", lightTheme_.Get());
+    AddRow(list, LV_SYMBOL_LIST, "Info", "Version and hardware", ScreenId::Info);
+    AddToggleRow(list, LV_SYMBOL_EYE_OPEN, "Light theme", "Bright palette for daylight",
+                 lightTheme_.Get());
 }
 
 void SettingsMenuScreen::OnShow()
@@ -31,73 +34,41 @@ void SettingsMenuScreen::OnShow()
     char ssid[33] = {};
     net.GetStaSsid(ssid, sizeof(ssid));
 
-    // Keep the chevron: the summary replaces the row's trailing label, and the
-    // row still has to read as "leads somewhere".
+    // No chevron to re-append: it is a widget of its own on the right of the
+    // card now, so the summary is just the row's second line.
     const char* summary = "not connected";
     if (net.IsStaConnected())       summary = ssid;
     else if (net.IsStaConnecting()) summary = "connecting...";
     else if (net.IsAccessPoint())   summary = "own AP";
 
-    lv_label_set_text_fmt(wifiSummary_, "%s  " LV_SYMBOL_RIGHT, summary);
-}
-
-lv_obj_t* SettingsMenuScreen::MakeRow(lv_obj_t* list, const char* icon, const char* text,
-                                      const char* trailing, lv_obj_t** trailingLabel)
-{
-    lv_obj_t* row = lv_button_create(list);
-    lv_obj_set_size(row, LV_PCT(100), UiTheme::RowH);
-    lv_obj_set_style_bg_color(row, UiTheme::Surface(), 0);
-    lv_obj_set_style_bg_color(row, UiTheme::Accent(), LV_STATE_PRESSED);
-    lv_obj_set_style_radius(row, 12, 0);
-    lv_obj_set_style_shadow_width(row, 0, 0);
-    lv_obj_set_style_pad_hor(row, UiTheme::Pad, 0);
-
-    lv_obj_t* label = lv_label_create(row);
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_color(label, UiTheme::Text(), 0);
-    lv_label_set_text_fmt(label, "%s  %s", icon, text);
-    lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
-
-    lv_obj_t* tail = nullptr;
-    if (trailing != nullptr)
-    {
-        tail = lv_label_create(row);
-        lv_obj_set_style_text_font(tail, &lv_font_montserrat_20, 0);
-        lv_obj_set_style_text_color(tail, UiTheme::TextDim(), 0);
-        lv_obj_set_width(tail, 200);
-        lv_label_set_long_mode(tail, LV_LABEL_LONG_MODE_DOTS);
-        lv_obj_set_style_text_align(tail, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_label_set_text(tail, trailing);
-        lv_obj_align(tail, LV_ALIGN_RIGHT_MID, 0, 0);
-    }
-
-    if (trailingLabel) *trailingLabel = tail;
-    return row;
+    SetLabelText(wifiSummary_, summary);
 }
 
 lv_obj_t* SettingsMenuScreen::AddRow(lv_obj_t* list, const char* icon, const char* text,
-                                     ScreenId target)
+                                     const char* subtitle, ScreenId target)
 {
-    lv_obj_t* tail = nullptr;
-    lv_obj_t* row = MakeRow(list, icon, text, LV_SYMBOL_RIGHT, &tail);
+    MenuRow row = AddMenuRow(list, icon, text, subtitle);
     // The target rides in the row's user data — no per-row state to keep.
-    lv_obj_add_event_cb(row, RowCb, LV_EVENT_CLICKED, this);
-    lv_obj_set_user_data(row, reinterpret_cast<void*>(static_cast<uintptr_t>(target)));
-    return tail;
+    lv_obj_add_event_cb(row.card, RowCb, LV_EVENT_CLICKED, this);
+    lv_obj_set_user_data(row.card, reinterpret_cast<void*>(static_cast<uintptr_t>(target)));
+    return row.subtitle;
 }
 
+// No chevron: the row leads nowhere yet, and drawing one would promise it does.
 void SettingsMenuScreen::AddPendingRow(lv_obj_t* list, const char* icon, const char* text)
 {
-    lv_obj_t* row = MakeRow(list, icon, text, "soon", nullptr);
-    lv_obj_add_state(row, LV_STATE_DISABLED);
+    MenuRow row = AddMenuRow(list, icon, text, "coming soon", false);
+    lv_obj_add_state(row.card, LV_STATE_DISABLED);
 }
 
 void SettingsMenuScreen::AddToggleRow(lv_obj_t* list, const char* icon, const char* text,
-                                      bool on)
+                                      const char* subtitle, bool on)
 {
-    lv_obj_t* row = MakeRow(list, icon, text, nullptr, nullptr);
+    // 96 px of reserve rather than the default 44: the switch is 72 wide and
+    // the second line has to stop before it.
+    MenuRow row = AddMenuRow(list, icon, text, subtitle, false, 96);
 
-    lv_obj_t* sw = lv_switch_create(row);
+    lv_obj_t* sw = lv_switch_create(row.card);
     lv_obj_set_size(sw, 72, 38);
     lv_obj_align(sw, LV_ALIGN_RIGHT_MID, 0, 0);
 
@@ -113,7 +84,7 @@ void SettingsMenuScreen::AddToggleRow(lv_obj_t* list, const char* icon, const ch
     lv_obj_remove_flag(sw, LV_OBJ_FLAG_CLICKABLE);
     if (on) lv_obj_add_state(sw, LV_STATE_CHECKED);
 
-    lv_obj_add_event_cb(row, ThemeCb, LV_EVENT_CLICKED, this);
+    lv_obj_add_event_cb(row.card, ThemeCb, LV_EVENT_CLICKED, this);
 }
 
 // Persist, then hand the shell the rebuild. Saving first is what makes the

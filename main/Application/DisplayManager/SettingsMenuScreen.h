@@ -33,24 +33,22 @@ protected:
     void OnShow() override;   // refreshes the WiFi row's summary
 
 private:
-    /// One menu row leading to `target`. Returns the right-hand summary label so
-    /// the caller can keep it and update it later.
-    lv_obj_t* AddRow(lv_obj_t* list, const char* icon, const char* text, ScreenId target);
+    /// One menu row leading to `target`. Returns the subtitle label so the
+    /// caller can keep it and update it later — the second line is where a row
+    /// says what it currently is, not just what it is called.
+    lv_obj_t* AddRow(lv_obj_t* list, const char* icon, const char* text,
+                     const char* subtitle, ScreenId target);
     void AddPendingRow(lv_obj_t* list, const char* icon, const char* text);
 
     /// A row carrying a switch instead of a chevron. The switch is display-only
     /// and the *row* is the control: a 76 px row is the touch target, and one
     /// event path means a tap cannot be counted twice.
-    void AddToggleRow(lv_obj_t* list, const char* icon, const char* text, bool on);
+    void AddToggleRow(lv_obj_t* list, const char* icon, const char* text,
+                      const char* subtitle, bool on);
 
     static void RowCb(lv_event_t* e);
     static void CloseCb(lv_event_t* e);
     static void ThemeCb(lv_event_t* e);
-
-    /// `trailing` of nullptr leaves the right-hand side empty for the caller to
-    /// fill with something other than a label.
-    lv_obj_t* MakeRow(lv_obj_t* list, const char* icon, const char* text,
-                      const char* trailing, lv_obj_t** trailingLabel);
 
     ServiceProvider& serviceProvider_;
     Navigator& navigator_;
