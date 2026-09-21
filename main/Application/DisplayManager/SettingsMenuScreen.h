@@ -34,6 +34,19 @@ protected:
     void OnShow() override;   // refreshes the WiFi row's summary
 
 private:
+    /// The WiFi row's second line: which network, and the address on it.
+    ///
+    /// On a timer as well as on show, because the interesting transitions all
+    /// happen while somebody is looking at this screen — the association
+    /// completes, then DHCP lands a second or two later. A row that only
+    /// refreshes on load would sit on "connecting..." until the reader gave up
+    /// and navigated away, which is exactly when it would have changed.
+    void RefreshWifiRow();
+
+    static constexpr uint32_t kRefreshMs = 1000;
+    static void RefreshTimerCb(lv_timer_t* t);
+    lv_timer_t* refreshTimer_ = nullptr;
+
     /// One menu row leading to `target`. Returns the subtitle label so the
     /// caller can keep it and update it later — the second line is where a row
     /// says what it currently is, not just what it is called.

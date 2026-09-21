@@ -1,6 +1,8 @@
 #include "SettingsMenuScreen.h"
 #include "NetworkManager/NetworkManager.h"
 #include "SettingsManager/SettingsManager.h"
+#include <cstdio>
+#include <cstring>
 
 void SettingsMenuScreen::Build(lv_obj_t* root)
 {
@@ -23,20 +25,71 @@ void SettingsMenuScreen::Build(lv_obj_t* root)
     AddRow(list, LV_SYMBOL_LIST, "Info", "Version and hardware", ScreenId::Info);
     AddToggleRow(list, LV_SYMBOL_EYE_OPEN, "Light theme", "Bright palette for daylight",
                  lightTheme_.Get());
+
+    // Once for the life of the screen — see HomeScreen::Build. It survives a
+    // Restyle rebuild, and its user data is `this`, which the rebuild does not
+    // move; the widget it writes to is re-looked-up through the member above.
+    if (refreshTimer_ == nullptr)
+        refreshTimer_ = lv_timer_create(RefreshTimerCb, kRefreshMs, this);
 }
 
 void SettingsMenuScreen::OnShow()
 {
+    RefreshWifiRow();
+}
+
+void SettingsMenuScreen::RefreshTimerCb(lv_timer_t* t)
+{
+    auto* self = static_cast<SettingsMenuScreen*>(lv_timer_get_user_data(t));
+    if (!self->IsActive()) return;
+    self->RefreshWifiRow();
+}
+
+void SettingsMenuScreen::RefreshWifiRow()
+{
     NetworkManager& net = serviceProvider_.getNetworkManager();
+    const NetworkStatus status = net.wifi().getStatus();
+
     char ssid[33] = {};
     net.GetStaSsid(ssid, sizeof(ssid));
 
+    // A 32-character SSID and an address do not both fit on the line, and the
+    // label's DOTS mode clips the tail — which is the address, the part worth
+    // walking to the panel for. So the name gives way, not the number.
+    char name[20];
+    snprintf(name, sizeof(name), "%.15s%s", ssid, strlen(ssid) > 15 ? "..." : "");
+
     // No chevron to re-append: it is a widget of its own on the right of the
-    // card now, so the summary is just the row's second line.
-    const char* summary = "not connected";
-    if (net.IsStaConnected())       summary = ssid;
-    else if (net.IsStaConnecting()) summary = "connecting...";
-    else if (net.IsAccessPoint())   summary = "own AP";
+    // card now, so this is just the row's second line.
+    char summary[64];
+    if (net.IsStaConnected())
+    {
+        // The address belongs here rather than one screen deeper in Info: it is
+        // how somebody reaches the web UI, and they are standing at the panel
+        // when they need it. The SSID stays beside it — the address alone does
+        // not answer "is it on the right network".
+        if (status.has_ipv4)
+            snprintf(summary, sizeof(summary), "%s  " IPSTR, name, IP2STR(&status.ipv4.ip));
+        else
+            snprintf(summary, sizeof(summary), "%s  waiting for address", name);
+    }
+    else if (net.IsStaConnecting())
+    {
+        snprintf(summary, sizeof(summary), "connecting...");
+    }
+    else if (net.IsAccessPoint())
+    {
+        // Hosting: the address is the one a phone joining the AP types in, so
+        // it is worth as much here as the station one.
+        if (status.has_ipv4)
+            snprintf(summary, sizeof(summary), "own AP  " IPSTR, IP2STR(&status.ipv4.ip));
+        else
+            snprintf(summary, sizeof(summary), "own AP");
+    }
+    else
+    {
+        snprintf(summary, sizeof(summary), "not connected");
+    }
 
     SetLabelText(wifiSummary_, summary);
 }
