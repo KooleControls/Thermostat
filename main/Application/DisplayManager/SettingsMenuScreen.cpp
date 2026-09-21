@@ -20,9 +20,6 @@ void SettingsMenuScreen::Build(lv_obj_t* root)
     // before the screen is ever on the panel.
     wifiSummary_ = AddRow(list, LV_SYMBOL_WIFI, "WiFi", "not connected", ScreenId::Wifi);
     AddRow(list, LV_SYMBOL_BLUETOOTH, "Gateway", "Pair over Bluetooth", ScreenId::Ble);
-    // Still the shared shell the firmware-update item plugs into
-    // (docs/backlog/2026-07-27-wifi-update-ui.md).
-    AddPendingRow(list, LV_SYMBOL_DOWNLOAD, "Firmware");
     AddRow(list, LV_SYMBOL_LIST, "Info", "Version and hardware", ScreenId::Info);
     AddToggleRow(list, LV_SYMBOL_EYE_OPEN, "Light theme", "Bright palette for daylight",
                  lightTheme_.Get());
@@ -52,13 +49,6 @@ lv_obj_t* SettingsMenuScreen::AddRow(lv_obj_t* list, const char* icon, const cha
     lv_obj_add_event_cb(row.card, RowCb, LV_EVENT_CLICKED, this);
     lv_obj_set_user_data(row.card, reinterpret_cast<void*>(static_cast<uintptr_t>(target)));
     return row.subtitle;
-}
-
-// No chevron: the row leads nowhere yet, and drawing one would promise it does.
-void SettingsMenuScreen::AddPendingRow(lv_obj_t* list, const char* icon, const char* text)
-{
-    MenuRow row = AddMenuRow(list, icon, text, "coming soon", false);
-    lv_obj_add_state(row.card, LV_STATE_DISABLED);
 }
 
 void SettingsMenuScreen::AddToggleRow(lv_obj_t* list, const char* icon, const char* text,

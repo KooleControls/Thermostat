@@ -8,9 +8,10 @@
 // The service menu behind the gear: a scrollable column of rows, each leading to
 // its own purpose-built screen.
 //
-// Rows for features that don't exist yet are added disabled — visible so the
-// menu reads as complete, unresponsive so there is no dead navigation. Enabling
-// one is a two-line change in Build() plus the screen it points at.
+// Only rows that go somewhere. A row for a feature that does not exist yet —
+// firmware update was the one — is a promise the menu cannot keep, and a
+// disabled row still costs the reader a look every time they open this screen.
+// Adding one back is a line in Build() plus the screen it points at.
 class SettingsMenuScreen final : public Screen
 {
 public:
@@ -38,7 +39,6 @@ private:
     /// says what it currently is, not just what it is called.
     lv_obj_t* AddRow(lv_obj_t* list, const char* icon, const char* text,
                      const char* subtitle, ScreenId target);
-    void AddPendingRow(lv_obj_t* list, const char* icon, const char* text);
 
     /// A row carrying a switch instead of a chevron. The switch is display-only
     /// and the *row* is the control: a 76 px row is the touch target, and one
