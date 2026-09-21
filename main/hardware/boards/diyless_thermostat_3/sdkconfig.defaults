@@ -39,14 +39,43 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # made it worse was a property of the buffer layout, not of the option, and
 # DisplayManager::InitLvgl changed that layout.
 #
-# What is left of the objection, and still true: IDF's own comment warns a late
-# restart shifts that one frame. In this mode that is a single frame instead of
-# a permanent offset, which is the trade we want.
+# TRIED 2026-09-21 ON THIS LAYOUT ANYWAY, AND IT FAILS DIFFERENTLY: the picture
+# shakes left and right continuously. The reason is not ISR lateness (the first
+# guess, and wrong) but that on ESP32-S3 this option cannot coexist with
+# num_fbs 2 at all:
 #
-# Note also that without this option there is now NO recovery at all: the
-# non-VSYNC detect branch compares bb_eof_count against expect_eof_count, and
-# expect_eof_count is 0 when there are no bounce buffers, so it never fires.
-CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
+#   * RGB_LCD_NEEDS_SEPARATE_RESTART_LINK is 1 only `#if
+#     CONFIG_IDF_TARGET_ESP32S3`, commented in IDF as "hardware issue
+#     workaround". On S3 a restart therefore always does
+#     gdma_start(dma_restart_link).
+#   * That restart link is built ONCE, mounted at `fbs[0] + restart_skip_bytes`
+#     and concatenated to dma_fb_links[0]. Framebuffer 0, hard-wired, never
+#     updated when the live buffer changes.
+#   * But rgb_panel_draw_bitmap switches buffers by re-concatenating every link's
+#     tail to dma_fb_links[cur_fb_index]. So with avoid_tearing alternating
+#     fb0/fb1 per rendered frame, each VBlank restart yanks the scanout back onto
+#     fb0 and leaves it looping fb0 — fighting the swap, every frame.
+#   * On top of that the restart link's skip is a fixed
+#     LCD_FIFO_PRESERVE_SIZE_PX (LCD_LL_FIFO_DEPTH + 1 = 17 px) compensation for
+#     what the LCD FIFO has already prefetched. Re-applied unconditionally 37
+#     times a second, whether or not 17 is the true figure at that instant.
+#
+# A per-frame re-rolled offset plus a per-frame overridden buffer identity is a
+# shake. So this option is structurally single-framebuffer on S3. Do not enable
+# it here without also going back to num_fbs 1 — where fb[0] is the only buffer,
+# the hard-wiring is correct, and the restart is harmless. That trade is
+# available (self-healing in exchange for tearing) if prevention ever fails.
+# CONFIG_LCD_RGB_ISR_IRAM_SAFE would NOT have saved it; the fault is the link,
+# not the latency.
+#
+# What remains true, and is why prevention is now the only route: without this
+# option the layout has NO recovery at all. The non-VSYNC detect branch compares
+# bb_eof_count against expect_eof_count, and expect_eof_count is 0 when there
+# are no bounce buffers, so it never fires. A desync here is permanent until
+# reboot. Note also that S3 has no LCD_LL_EVENT_UNDERRUN (RGB events are
+# VSYNC_END only; the underrun IRQ is P4), so the driver cannot even log the
+# stall that causes it.
+# CONFIG_LCD_RGB_RESTART_IN_VSYNC is not set
 
 # What most likely stalls the GDMA here, unfixed by the above: an MSPI1 flash
 # write disables the cache, and the panel's GDMA reads its PSRAM framebuffers
@@ -57,10 +86,17 @@ CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
 #
 # CONFIG_SPIRAM_XIP_FROM_PSRAM (= SPIRAM_FETCH_INSTRUCTIONS + SPIRAM_RODATA)
 # removes that cause: with .text and .rodata in PSRAM a flash write no longer
-# needs the cache off. It is deliberately NOT enabled yet, because it puts
-# instruction fetch on the same MSPI the panel is reading from, and MSPI
-# contention is the documented cause of every glitch this board has had. Enable
-# it as its own experiment if the VBlank restart alone leaves a visible artifact.
+# needs the cache off, so the GDMA keeps reading through it and never under-runs.
+#
+# This was held back at first as a second experiment, because it puts
+# instruction fetch on the same MSPI the panel reads from and MSPI contention is
+# the documented cause of every glitch this board has had. It is enabled now
+# because the recovery route turned out not to exist on this chip in this
+# layout (see above), which leaves prevention as the only lever. Instruction
+# fetch is cached, so the steady-state MSPI cost is the miss rate, not the whole
+# instruction stream — but if a NEW artifact appears that correlates with busy
+# rendering rather than with settings writes, suspect this first.
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
 
 # Console on USB-Serial/JTAG, NOT UART0. UART0's default pins are repurposed
 # on this board: GPIO43 is the LCD reset and GPIO44 the STM32 boot pin — a
