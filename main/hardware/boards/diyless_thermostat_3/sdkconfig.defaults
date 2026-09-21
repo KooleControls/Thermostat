@@ -16,24 +16,51 @@ CONFIG_SPIRAM_SPEED_80M=y
 # 240 MHz CPU.
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
-# ── RGB panel: do NOT enable CONFIG_LCD_RGB_RESTART_IN_VSYNC ────
-# Tried 2026-07-29 against the vertical-shift glitch and it made things
-# strictly worse: occasional shifts became continuous ones.
+# ── RGB panel: restart the GDMA every VBlank ────────────────
+# This reverses the 2026-07-29 entry that said never to enable this. That entry
+# was right about bounce-buffer mode and is now describing code we do not run.
 #
-# It re-arms the GDMA channel every VBlank, and IDF's own comment above
-# lcd_rgb_panel_try_restart_transmission() admits the trade: a late restart
-# shifts that frame, because the LCD controller has already clocked out the
-# first bytes and the reset re-sends them. IDF assumes the ISR "has the
-# entirety of the VBlank time" — here it does not. The VSYNC ISR shares core 0
-# with the BT controller, NimBLE, WiFi and esp_timer and is not IRAM-safe,
-# while the restart path itself re-fills BOTH bounce buffers (up to 19.2 KB of
-# PSRAM memcpy) inside a VBlank only 38 lines = 1.98 ms wide. So it converts a
-# rare permanent desync into a per-frame one.
+# The symptom it addresses: a horizontally offset picture, appearing after
+# minutes of normal use and then staying offset forever. In stream mode the
+# panel has no pixel addressing — a pixel's position is only how many PCLKs
+# have passed since VSYNC — so if the GDMA under-runs for a few clocks the LCD
+# clocks out dummy bytes and the read pointer stays offset from the scan
+# position permanently. IDF documents exactly this (rgb_lcd.rst: "leading to a
+# permanently shifted image") and names this option as the fix.
 #
-# The real cause is the bounce-buffer path: one PSRAM framebuffer + 10-line
-# bounce buffers means a GDMA EOF interrupt every 480 us that must memcpy
-# 9600 bytes out of PSRAM (~17 MB/s in ISR context, forever). Fix that layout
-# instead of re-arming the DMA around it.
+# Why the old objection no longer applies: it was that the restart path re-fills
+# BOTH bounce buffers, up to 19.2 KB of PSRAM memcpy, inside a VBlank only
+# 1.98 ms wide, on a non-IRAM-safe ISR sharing core 0 with the BT controller.
+# Read lcd_rgb_panel_try_restart_transmission() again with num_fbs 2 and
+# bounce_buffer_size_px 0: every one of those memcpys is inside
+# `if (panel->bb_size)`. With no bounce buffers the whole path is
+# lcd_ll_fifo_reset + gdma_reset + gdma_start on the restart link — a handful
+# of register writes, microseconds, nothing to miss a VBlank with. The cost that
+# made it worse was a property of the buffer layout, not of the option, and
+# DisplayManager::InitLvgl changed that layout.
+#
+# What is left of the objection, and still true: IDF's own comment warns a late
+# restart shifts that one frame. In this mode that is a single frame instead of
+# a permanent offset, which is the trade we want.
+#
+# Note also that without this option there is now NO recovery at all: the
+# non-VSYNC detect branch compares bb_eof_count against expect_eof_count, and
+# expect_eof_count is 0 when there are no bounce buffers, so it never fires.
+CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
+
+# What most likely stalls the GDMA here, unfixed by the above: an MSPI1 flash
+# write disables the cache, and the panel's GDMA reads its PSRAM framebuffers
+# through that cache. Every NVS commit is such a write, and several fire from
+# ordinary use — ClimateManager::MaybeCommitSettings on a settled setpoint,
+# HotWaterManager, the settings menu, NimBLE bond persistence — which is why the
+# shift correlates with using the thing rather than with uptime.
+#
+# CONFIG_SPIRAM_XIP_FROM_PSRAM (= SPIRAM_FETCH_INSTRUCTIONS + SPIRAM_RODATA)
+# removes that cause: with .text and .rodata in PSRAM a flash write no longer
+# needs the cache off. It is deliberately NOT enabled yet, because it puts
+# instruction fetch on the same MSPI the panel is reading from, and MSPI
+# contention is the documented cause of every glitch this board has had. Enable
+# it as its own experiment if the VBlank restart alone leaves a visible artifact.
 
 # Console on USB-Serial/JTAG, NOT UART0. UART0's default pins are repurposed
 # on this board: GPIO43 is the LCD reset and GPIO44 the STM32 boot pin — a
