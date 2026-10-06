@@ -21,6 +21,7 @@ void SettingsMenuScreen::Build(lv_obj_t* root)
     // (docs/backlog/2026-07-27-wifi-update-ui.md).
     AddPendingRow(list, LV_SYMBOL_DOWNLOAD, "Firmware");
     AddRow(list, LV_SYMBOL_LIST, "Info", ScreenId::Info);
+    AddRow(list, LV_SYMBOL_GPS, "BLE test", ScreenId::BleTest);   // POC: site test
 }
 
 void SettingsMenuScreen::OnShow()

@@ -17,6 +17,8 @@ namespace UiTheme
     inline lv_color_t TextDim() { return lv_color_hex(0x888888); }
     inline lv_color_t Accent()  { return lv_color_hex(0x2F80ED); }
     inline lv_color_t Danger()  { return lv_color_hex(0xE5484D); }
+    inline lv_color_t Good()    { return lv_color_hex(0x30D158); }
+    inline lv_color_t Warn()    { return lv_color_hex(0xFF9F0A); }
 
     /// A style selector is a part OR'd with a state, but the build is gnu++26,
     /// where a bitwise OR between two different enum types is an error — go

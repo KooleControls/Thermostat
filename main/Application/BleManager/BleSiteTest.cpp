@@ -1,0 +1,317 @@
+#include "BleSiteTest.h"
+#include "CommandManager/CommandManager.h"
+#include "JsonScope.h"
+#include "esp_log.h"
+#include "esp_timer.h"
+#include "esp_heap_caps.h"
+#include <algorithm>
+
+namespace
+{
+    // Brings the reply to roughly the size of a real status reply (~200 bytes),
+    // so a ping costs the radio what a normal command costs it. Still one chunk.
+    constexpr const char* kReplyPadding =
+        "0123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789"
+        "0123456789012345678901234567890123456789";
+}
+
+BleSiteTest::BleSiteTest(ServiceProvider& serviceProvider)
+    : serviceProvider_(serviceProvider)
+{
+}
+
+void BleSiteTest::Init()
+{
+    auto init = initState_.TryBeginInit();
+    if (!init)
+    {
+        ESP_LOGW(TAG, "Already initialized or initializing");
+        return;
+    }
+
+    slots_ = static_cast<Slot*>(
+        heap_caps_malloc(HistorySeconds * sizeof(Slot), MALLOC_CAP_SPIRAM));
+    if (slots_ == nullptr)
+    {
+        ESP_LOGE(TAG, "No memory for the sample history; site test unavailable");
+        return;
+    }
+    Reset();
+
+    serviceProvider_.getCommandManager().Register(this, commands_);
+
+    linkTimer_.Init("bletest_link", pdMS_TO_TICKS(kLinkPollMs));
+    linkTimer_.SetHandler([this] { PollLink(); });
+    linkTimer_.Start();
+
+    init.SetReady();
+    ESP_LOGI(TAG, "Initialized");
+}
+
+void BleSiteTest::Reset()
+{
+    bool up = serviceProvider_.getBleManager().GetLinkState() == BleManager::LinkState::Ready;
+
+    LOCK(mutex_);
+    if (slots_ == nullptr) return;
+
+    for (uint32_t i = 0; i < HistorySeconds; i++) slots_[i] = Slot{};
+    startUs_ = esp_timer_get_time();
+
+    haveSeq_ = false;
+    resolvedThrough_ = 0;
+    hasRssi_ = false;
+    rssi_ = worstRssi_ = 0;
+    ok_ = lost_ = lossRun_ = longestLossRun_ = 0;
+    lastRttMs_ = minRttMs_ = maxRttMs_ = 0;
+    rttSumMs_ = 0;
+    rttCount_ = 0;
+    wasUp_ = up;
+    downSinceUs_ = 0;
+    disconnects_ = 0;
+    longestOutageMs_ = 0;
+
+    ESP_LOGI(TAG, "Test reset");
+}
+
+void BleSiteTest::SetTestMode(bool on)
+{
+    serviceProvider_.getBleManager().SetFastReconnect(on);
+    ESP_LOGI(TAG, "Test mode %s", on ? "on (fast reconnect)" : "off");
+}
+
+// ──────────────────────────────────────────────────────────────
+// Recording
+// ──────────────────────────────────────────────────────────────
+
+uint32_t BleSiteTest::NowSecond() const
+{
+    return static_cast<uint32_t>((esp_timer_get_time() - startUs_) / 1000000);
+}
+
+BleSiteTest::Slot* BleSiteTest::SlotFor(uint32_t second)
+{
+    Slot& slot = slots_[second % HistorySeconds];
+    if (slot.second != second)
+    {
+        slot = Slot{};
+        slot.second = second;
+    }
+    return &slot;
+}
+
+const BleSiteTest::Slot* BleSiteTest::FindSlot(uint32_t second) const
+{
+    const Slot& slot = slots_[second % HistorySeconds];
+    return slot.second == second ? &slot : nullptr;
+}
+
+void BleSiteTest::OnPing(uint32_t seq, uint32_t history, uint32_t lastRttMs)
+{
+    // Read here rather than on a timer: this runs on the BLE dispatch task, which
+    // has the stack for an HCI round trip. A second with no ping has no RSSI, which
+    // is also the honest answer — nothing was getting through.
+    int8_t rssi = 0;
+    bool gotRssi = serviceProvider_.getBleManager().ReadRssi(rssi);
+
+    LOCK(mutex_);
+    if (slots_ == nullptr || seq == 0) return;
+
+    uint32_t now = NowSecond();
+    if (gotRssi)
+    {
+        Slot* slot = SlotFor(now);
+        slot->hasRssi = true;
+        slot->rssi = rssi;
+        if (!hasRssi_ || rssi < worstRssi_) worstRssi_ = rssi;
+        rssi_ = rssi;
+        hasRssi_ = true;
+    }
+
+    // The first ping after a reset, or a gateway that restarted its count: what
+    // came before it is not ours to judge.
+    if (!haveSeq_ || seq <= resolvedThrough_)
+    {
+        haveSeq_ = true;
+        resolvedThrough_ = seq - 1;
+        return;
+    }
+
+    // Settle every ping since the last one we heard. The gateway's history covers
+    // the last 32; anything older can only have been sent into an outage.
+    for (uint32_t s = resolvedThrough_ + 1; s < seq; s++)
+    {
+        uint32_t age = seq - 1 - s;                      // 0 = the ping before this one
+        bool ok = age < kHistoryBits && ((history >> age) & 1u) != 0;
+        uint32_t rttMs = (age == 0) ? lastRttMs : 0;     // only the latest RTT is sent
+
+        // One ping a second, so a ping's age is how many seconds ago it was sent.
+        uint32_t secondsAgo = seq - s;
+        bool inHistory = secondsAgo <= now && secondsAgo < HistorySeconds;
+        RecordOutcome(inHistory ? now - secondsAgo : UINT32_MAX, ok, rttMs);
+    }
+    resolvedThrough_ = seq - 1;
+}
+
+// `second` is UINT32_MAX for an outcome too old for the graph; it still counts.
+void BleSiteTest::RecordOutcome(uint32_t second, bool ok, uint32_t rttMs)
+{
+    Slot* slot = (second != UINT32_MAX) ? SlotFor(second) : nullptr;
+
+    if (!ok)
+    {
+        lost_++;
+        lossRun_++;
+        longestLossRun_ = std::max(longestLossRun_, lossRun_);
+        if (slot != nullptr && slot->lost < UINT8_MAX) slot->lost++;
+        return;
+    }
+
+    ok_++;
+    lossRun_ = 0;
+    if (slot != nullptr && slot->ok < UINT8_MAX) slot->ok++;
+
+    if (rttMs == 0) return;      // succeeded, but its round trip was not reported
+
+    lastRttMs_ = rttMs;
+    minRttMs_ = (rttCount_ == 0) ? rttMs : std::min(minRttMs_, rttMs);
+    maxRttMs_ = std::max(maxRttMs_, rttMs);
+    rttSumMs_ += rttMs;
+    rttCount_++;
+
+    if (slot != nullptr && slot->rttCount < UINT8_MAX)
+    {
+        slot->rttSumMs += rttMs;
+        slot->rttMaxMs = static_cast<uint16_t>(std::max<uint32_t>(slot->rttMaxMs,
+                                                                   std::min<uint32_t>(rttMs, UINT16_MAX)));
+        slot->rttCount++;
+    }
+}
+
+void BleSiteTest::PollLink()
+{
+    BleManager::LinkState state = serviceProvider_.getBleManager().GetLinkState();
+    bool up = state == BleManager::LinkState::Ready;
+    int64_t nowUs = esp_timer_get_time();
+
+    LOCK(mutex_);
+    link_ = state;
+
+    if (wasUp_ && !up)
+    {
+        disconnects_++;
+        downSinceUs_ = nowUs;
+        ESP_LOGW(TAG, "Link lost (disconnect #%lu)", static_cast<unsigned long>(disconnects_));
+    }
+    else if (!wasUp_ && up && downSinceUs_ != 0)
+    {
+        uint32_t outageMs = static_cast<uint32_t>((nowUs - downSinceUs_) / 1000);
+        longestOutageMs_ = std::max(longestOutageMs_, outageMs);
+        downSinceUs_ = 0;
+        ESP_LOGI(TAG, "Link back after %lu ms", static_cast<unsigned long>(outageMs));
+    }
+    wasUp_ = up;
+}
+
+// ──────────────────────────────────────────────────────────────
+// Reading
+// ──────────────────────────────────────────────────────────────
+
+BleSiteTest::Summary BleSiteTest::GetSummary() const
+{
+    Summary s;
+    LOCK(mutex_);
+    if (slots_ == nullptr) return s;
+
+    s.link = link_;
+    s.testSeconds = NowSecond();
+    s.hasRssi = hasRssi_;
+    s.rssi = rssi_;
+    s.worstRssi = worstRssi_;
+    s.ok = ok_;
+    s.lost = lost_;
+    s.longestLossRun = longestLossRun_;
+    s.lastRttMs = lastRttMs_;
+    s.minRttMs = minRttMs_;
+    s.avgRttMs = rttCount_ > 0 ? static_cast<uint32_t>(rttSumMs_ / rttCount_) : 0;
+    s.maxRttMs = maxRttMs_;
+    s.disconnects = disconnects_;
+    s.longestOutageMs = longestOutageMs_;
+    if (downSinceUs_ != 0)
+        s.currentOutageMs = static_cast<uint32_t>((esp_timer_get_time() - downSinceUs_) / 1000);
+    return s;
+}
+
+void BleSiteTest::GetBuckets(Bucket* out, uint32_t count, uint32_t secondsPerBucket) const
+{
+    LOCK(mutex_);
+    uint32_t now = (slots_ != nullptr) ? NowSecond() : 0;
+
+    for (uint32_t i = 0; i < count; i++)
+    {
+        Bucket b;
+        int32_t  rssiSum = 0;
+        uint32_t rssiCount = 0;
+        uint32_t rttSum = 0;
+        uint32_t rttCount = 0;
+
+        // Bucket i ends (count - 1 - i) buckets before the current second.
+        uint32_t back = (count - 1 - i) * secondsPerBucket;
+        for (uint32_t k = 0; k < secondsPerBucket && slots_ != nullptr; k++)
+        {
+            uint32_t ago = back + k;
+            if (ago > now || ago >= HistorySeconds) break;
+            const Slot* slot = FindSlot(now - ago);
+            if (slot == nullptr) continue;
+
+            b.ok += slot->ok;
+            b.lost += slot->lost;
+            if (slot->hasRssi)
+            {
+                b.rssiMin = (rssiCount == 0) ? slot->rssi : std::min(b.rssiMin, slot->rssi);
+                rssiSum += slot->rssi;
+                rssiCount++;
+            }
+            if (slot->rttCount > 0)
+            {
+                b.rttMaxMs = std::max<uint32_t>(b.rttMaxMs, slot->rttMaxMs);
+                rttSum += slot->rttSumMs;
+                rttCount += slot->rttCount;
+            }
+        }
+
+        b.hasRssi = rssiCount > 0;
+        if (b.hasRssi) b.rssiAvg = static_cast<int8_t>(rssiSum / static_cast<int32_t>(rssiCount));
+        b.hasRtt = rttCount > 0;
+        if (b.hasRtt) b.rttAvgMs = rttSum / rttCount;
+        out[i] = b;
+    }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Command
+// ──────────────────────────────────────────────────────────────
+
+RequestError BleSiteTest::Cmd_Ping(CommandContext& ctx)
+{
+    uint32_t seq = 0;
+    uint32_t history = 0;
+    uint32_t rtt = 0;
+    RETURN_IF_ERROR(ctx.readArgs(
+        Required("seq",  seq),
+        Optional("hist", history),
+        Optional("rtt",  rtt)
+    ));
+
+    OnPing(seq, history, rtt);
+
+    // "seq" must not be the last field: the gateway matches `"seq":N,` so that
+    // ping 12 is not mistaken for an echo of ping 123.
+    JsonObject root(ctx.out);
+    root.field("ok", true);
+    root.field("seq", seq);
+    root.field("pad", kReplyPadding);
+    return RequestError::Ok;
+}

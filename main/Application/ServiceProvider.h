@@ -1,6 +1,7 @@
 #pragma once
 
 class BleManager;
+class BleSiteTest;
 class Board;
 class ClimateManager;
 class CommandManager;
@@ -21,6 +22,7 @@ class ServiceProvider
 {
 public:
     virtual BleManager& getBleManager() = 0;
+    virtual BleSiteTest& getBleSiteTest() = 0;
     virtual Board& getBoard() = 0;
     virtual ClimateManager& getClimateManager() = 0;
     virtual CommandManager& getCommandManager() = 0;

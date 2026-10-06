@@ -475,8 +475,11 @@ void BleManager::ScheduleReconnect()
     // Never give up on the link (docs/reasoning/2026-07-27-16h17-...): a gateway
     // switched off for a week must be picked up when it returns, with no
     // installer present.
+    int64_t delayUs = fastReconnect_.load(std::memory_order_relaxed)
+                    ? FastReconnectDelayUs
+                    : ReconnectDelayUs;
     esp_timer_stop(reconnectTimer_);
-    esp_timer_start_once(reconnectTimer_, ReconnectDelayUs);
+    esp_timer_start_once(reconnectTimer_, delayUs);
 }
 
 void BleManager::ReconnectTimerCb(void* arg)
@@ -550,6 +553,17 @@ BleManager::LinkState BleManager::GetLinkState() const
 {
     LOCK(mutex_);
     return link_;
+}
+
+bool BleManager::ReadRssi(int8_t& out) const
+{
+    uint16_t handle;
+    {
+        LOCK(mutex_);
+        handle = connHandle_;
+    }
+    if (handle == BLE_HS_CONN_HANDLE_NONE) return false;
+    return ble_gap_conn_rssi(handle, &out) == 0;
 }
 
 const char* BleManager::StateName(LinkState s)

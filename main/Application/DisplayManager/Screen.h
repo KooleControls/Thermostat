@@ -13,6 +13,7 @@ enum class ScreenId
     Wifi,
     Ble,
     Info,
+    BleTest,    // POC: BLE site test
 };
 
 // All a screen may ask of the shell. Screens depend on this, never on

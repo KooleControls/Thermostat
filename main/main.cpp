@@ -27,6 +27,7 @@ extern "C" void app_main(void)
     g_appContext.getUpdateManager().Init();
     g_appContext.getWebServerManager().Init();
     g_appContext.getBleManager().Init();
+    g_appContext.getBleSiteTest().Init();   // POC: BLE site test, after the link it measures
 
     // Mark firmware as valid so the bootloader doesn't roll back on next reboot
     esp_ota_mark_app_valid_cancel_rollback();

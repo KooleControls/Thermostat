@@ -57,6 +57,9 @@ public:
     static constexpr int32_t ScanDurationMs = 8000;
     static constexpr int32_t ConnectTimeoutMs = 10000;
     static constexpr int64_t ReconnectDelayUs = 5LL * 1000 * 1000;
+    // BLE site test only (see SetFastReconnect). Not zero: a connect attempt that
+    // fails on the spot would otherwise retry in a tight loop on the host task.
+    static constexpr int64_t FastReconnectDelayUs = 100LL * 1000;
 
     // Below this much free internal DRAM the stack is not started at all: the
     // controller needs tens of KB of it and the host task a 4 KB stack, and both
@@ -107,6 +110,14 @@ public:
     void Forget();
 
     LinkState GetLinkState() const;
+
+    /// RSSI of the live connection in dBm. False when there is no connection.
+    bool ReadRssi(int8_t& out) const;
+
+    /// BLE site test: reconnect after FastReconnectDelayUs instead of
+    /// ReconnectDelayUs, so a measured outage is the radio's and the stack's
+    /// rather than our own back-off. Off outside the test screen.
+    void SetFastReconnect(bool on) { fastReconnect_.store(on, std::memory_order_relaxed); }
 
     /// "aa:bb:cc:dd:ee:ff" — `out` must hold 18 bytes. Printed MSB-first, which
     /// is the reverse of the on-air byte order.
@@ -192,6 +203,7 @@ private:
     uint16_t   inboundCccd_ = 0;
 
     esp_timer_handle_t reconnectTimer_ = nullptr;
+    std::atomic<bool>  fastReconnect_{false};
 
     // ── Session transport ───────────────────────────────────────
     // Inbound notifications are queued by the NimBLE callback and drained by a

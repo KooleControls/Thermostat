@@ -140,6 +140,7 @@ Screen* DisplayManager::Resolve(ScreenId id)
         case ScreenId::Wifi:     return &wifiScreen_;
         case ScreenId::Ble:      return &bleScreen_;
         case ScreenId::Info:     return &infoScreen_;
+        case ScreenId::BleTest:  return &bleTestScreen_;
     }
     return &homeScreen_;
 }
@@ -171,6 +172,7 @@ const char* DisplayManager::ScreenName(ScreenId id)
         case ScreenId::Wifi:     return "wifi";
         case ScreenId::Ble:      return "ble";
         case ScreenId::Info:     return "info";
+        case ScreenId::BleTest:  return "bletest";
     }
     return "home";
 }
@@ -179,7 +181,7 @@ bool DisplayManager::ParseScreen(const char *name, ScreenId &out)
 {
     static constexpr ScreenId kAll[] = {
         ScreenId::Home, ScreenId::Pin, ScreenId::Settings,
-        ScreenId::Wifi, ScreenId::Ble, ScreenId::Info,
+        ScreenId::Wifi, ScreenId::Ble, ScreenId::Info, ScreenId::BleTest,
     };
     for (ScreenId id : kAll)
     {
@@ -217,6 +219,9 @@ void DisplayManager::IdleTimerCb(lv_timer_t *t)
 {
     auto *self = static_cast<DisplayManager *>(lv_timer_get_user_data(t));
     if (self->current_ == ScreenId::Home) return;
+    // The site test is carried around untouched for minutes on end; dropping
+    // back to home would end the test mode halfway through a walk.
+    if (self->current_ == ScreenId::BleTest) return;
     if (lv_display_get_inactive_time(self->lvDisplay_) < kIdleTimeoutMs) return;
 
     // Never leave a unit sitting in the service menu, unlocked, in someone's

@@ -10,6 +10,7 @@
 #include "WifiScreen.h"
 #include "BleScreen.h"
 #include "InfoScreen.h"
+#include "BleTestScreen.h"
 #include "CommandManager/CommandEntry.h"
 #include "lvgl.h"
 
@@ -50,7 +51,7 @@ private:
     static bool ParseScreen(const char* name, ScreenId& out);
 
     /// `uiGo` — drive navigation from a bench client instead of a fingertip.
-    ///   {"screen":"home"|"pin"|"settings"|"wifi"|"ble"|"info"}
+    ///   {"screen":"home"|"pin"|"settings"|"wifi"|"ble"|"info"|"bletest"}
     /// Reports the screen actually shown, which is not always the one asked
     /// for: Pin resolves to Settings when no PIN is stored. Omitting "screen"
     /// just reads the current one back.
@@ -78,6 +79,7 @@ private:
     WifiScreen wifiScreen_{serviceProvider_, *this};
     BleScreen bleScreen_{serviceProvider_, *this};
     InfoScreen infoScreen_{serviceProvider_, *this};
+    BleTestScreen bleTestScreen_{serviceProvider_, *this};
 
     ScreenId current_ = ScreenId::Home;
 };
