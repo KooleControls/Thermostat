@@ -4,7 +4,6 @@ import { useRoute } from "@/hooks/use-route"
 import { useAuth } from "@/hooks/use-auth"
 import ThermostatPage from "@/pages/ThermostatPage"
 import DiagnosticsPage from "@/pages/DiagnosticsPage"
-import ThermalPage from "@/pages/ThermalPage"
 import ConsolePage from "@/pages/ConsolePage"
 import SettingsPage from "@/pages/SettingsPage"
 import FirmwarePage from "@/pages/FirmwarePage"
@@ -17,8 +16,6 @@ function PageContent({ page }: { page: Page }) {
       return <ThermostatPage />
     case "diagnostics":
       return <DiagnosticsPage />
-    case "thermal":
-      return <ThermalPage />
     case "console":
       return <ConsolePage />
     case "settings":

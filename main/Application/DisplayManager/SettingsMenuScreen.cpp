@@ -1,5 +1,8 @@
 #include "SettingsMenuScreen.h"
 #include "NetworkManager/NetworkManager.h"
+#include "SettingsManager/SettingsManager.h"
+#include <cstdio>
+#include <cstring>
 
 void SettingsMenuScreen::Build(lv_obj_t* root)
 {
@@ -12,79 +15,136 @@ void SettingsMenuScreen::Build(lv_obj_t* root)
     lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(list, 0, 0);
     lv_obj_set_style_pad_all(list, UiTheme::Pad, 0);
-    lv_obj_set_style_pad_row(list, 8, 0);
+    lv_obj_set_style_pad_row(list, UiTheme::Gap, 0);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
 
-    wifiSummary_ = AddRow(list, LV_SYMBOL_WIFI, "WiFi", ScreenId::Wifi);
-    AddRow(list, LV_SYMBOL_BLUETOOTH, "Gateway", ScreenId::Ble);
-    // Still the shared shell the firmware-update item plugs into
-    // (docs/backlog/2026-07-27-wifi-update-ui.md).
-    AddPendingRow(list, LV_SYMBOL_DOWNLOAD, "Firmware");
-    AddRow(list, LV_SYMBOL_LIST, "Info", ScreenId::Info);
-    AddRow(list, LV_SYMBOL_GPS, "BLE test", ScreenId::BleTest);   // POC: site test
+    // The WiFi subtitle is a placeholder only until OnShow runs, which is
+    // before the screen is ever on the panel.
+    wifiSummary_ = AddRow(list, LV_SYMBOL_WIFI, "WiFi", "not connected", ScreenId::Wifi);
+    AddRow(list, LV_SYMBOL_BLUETOOTH, "Gateway", "Pair over Bluetooth", ScreenId::Ble);
+    AddRow(list, LV_SYMBOL_LIST, "Info", "Version and hardware", ScreenId::Info);
+    AddRow(list, LV_SYMBOL_GPS, "BLE test", "Range to the gateway", ScreenId::BleTest);   // POC
+    AddToggleRow(list, LV_SYMBOL_EYE_OPEN, "Light theme", "Bright palette for daylight",
+                 lightTheme_.Get());
+
+    // Once for the life of the screen — see HomeScreen::Build. It survives a
+    // Restyle rebuild, and its user data is `this`, which the rebuild does not
+    // move; the widget it writes to is re-looked-up through the member above.
+    if (refreshTimer_ == nullptr)
+        refreshTimer_ = lv_timer_create(RefreshTimerCb, kRefreshMs, this);
 }
 
 void SettingsMenuScreen::OnShow()
 {
+    RefreshWifiRow();
+}
+
+void SettingsMenuScreen::RefreshTimerCb(lv_timer_t* t)
+{
+    auto* self = static_cast<SettingsMenuScreen*>(lv_timer_get_user_data(t));
+    if (!self->IsActive()) return;
+    self->RefreshWifiRow();
+}
+
+void SettingsMenuScreen::RefreshWifiRow()
+{
     NetworkManager& net = serviceProvider_.getNetworkManager();
+    const NetworkStatus status = net.wifi().getStatus();
+
     char ssid[33] = {};
     net.GetStaSsid(ssid, sizeof(ssid));
 
-    // Keep the chevron: the summary replaces the row's trailing label, and the
-    // row still has to read as "leads somewhere".
-    const char* summary = "not connected";
-    if (net.IsStaConnected())       summary = ssid;
-    else if (net.IsStaConnecting()) summary = "connecting...";
-    else if (net.IsAccessPoint())   summary = "own AP";
+    // A 32-character SSID and an address do not both fit on the line, and the
+    // label's DOTS mode clips the tail — which is the address, the part worth
+    // walking to the panel for. So the name gives way, not the number.
+    char name[20];
+    snprintf(name, sizeof(name), "%.15s%s", ssid, strlen(ssid) > 15 ? "..." : "");
 
-    lv_label_set_text_fmt(wifiSummary_, "%s  " LV_SYMBOL_RIGHT, summary);
-}
+    // No chevron to re-append: it is a widget of its own on the right of the
+    // card now, so this is just the row's second line.
+    char summary[64];
+    if (net.IsStaConnected())
+    {
+        // The address belongs here rather than one screen deeper in Info: it is
+        // how somebody reaches the web UI, and they are standing at the panel
+        // when they need it. The SSID stays beside it — the address alone does
+        // not answer "is it on the right network".
+        if (status.has_ipv4)
+            snprintf(summary, sizeof(summary), "%s  " IPSTR, name, IP2STR(&status.ipv4.ip));
+        else
+            snprintf(summary, sizeof(summary), "%s  waiting for address", name);
+    }
+    else if (net.IsStaConnecting())
+    {
+        snprintf(summary, sizeof(summary), "connecting...");
+    }
+    else if (net.IsAccessPoint())
+    {
+        // Hosting: the address is the one a phone joining the AP types in, so
+        // it is worth as much here as the station one.
+        if (status.has_ipv4)
+            snprintf(summary, sizeof(summary), "own AP  " IPSTR, IP2STR(&status.ipv4.ip));
+        else
+            snprintf(summary, sizeof(summary), "own AP");
+    }
+    else
+    {
+        snprintf(summary, sizeof(summary), "not connected");
+    }
 
-lv_obj_t* SettingsMenuScreen::MakeRow(lv_obj_t* list, const char* icon, const char* text,
-                                      const char* trailing, lv_obj_t** trailingLabel)
-{
-    lv_obj_t* row = lv_button_create(list);
-    lv_obj_set_size(row, LV_PCT(100), UiTheme::RowH);
-    lv_obj_set_style_bg_color(row, UiTheme::Surface(), 0);
-    lv_obj_set_style_bg_color(row, UiTheme::Accent(), LV_STATE_PRESSED);
-    lv_obj_set_style_radius(row, 12, 0);
-    lv_obj_set_style_shadow_width(row, 0, 0);
-    lv_obj_set_style_pad_hor(row, UiTheme::Pad, 0);
-
-    lv_obj_t* label = lv_label_create(row);
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_color(label, UiTheme::Text(), 0);
-    lv_label_set_text_fmt(label, "%s  %s", icon, text);
-    lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
-
-    lv_obj_t* tail = lv_label_create(row);
-    lv_obj_set_style_text_font(tail, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(tail, UiTheme::TextDim(), 0);
-    lv_obj_set_width(tail, 200);
-    lv_label_set_long_mode(tail, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_style_text_align(tail, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_label_set_text(tail, trailing);
-    lv_obj_align(tail, LV_ALIGN_RIGHT_MID, 0, 0);
-
-    if (trailingLabel) *trailingLabel = tail;
-    return row;
+    SetLabelText(wifiSummary_, summary);
 }
 
 lv_obj_t* SettingsMenuScreen::AddRow(lv_obj_t* list, const char* icon, const char* text,
-                                     ScreenId target)
+                                     const char* subtitle, ScreenId target)
 {
-    lv_obj_t* tail = nullptr;
-    lv_obj_t* row = MakeRow(list, icon, text, LV_SYMBOL_RIGHT, &tail);
+    MenuRow row = AddMenuRow(list, icon, text, subtitle);
     // The target rides in the row's user data — no per-row state to keep.
-    lv_obj_add_event_cb(row, RowCb, LV_EVENT_CLICKED, this);
-    lv_obj_set_user_data(row, reinterpret_cast<void*>(static_cast<uintptr_t>(target)));
-    return tail;
+    lv_obj_add_event_cb(row.card, RowCb, LV_EVENT_CLICKED, this);
+    lv_obj_set_user_data(row.card, reinterpret_cast<void*>(static_cast<uintptr_t>(target)));
+    return row.subtitle;
 }
 
-void SettingsMenuScreen::AddPendingRow(lv_obj_t* list, const char* icon, const char* text)
+void SettingsMenuScreen::AddToggleRow(lv_obj_t* list, const char* icon, const char* text,
+                                      const char* subtitle, bool on)
 {
-    lv_obj_t* row = MakeRow(list, icon, text, "soon", nullptr);
-    lv_obj_add_state(row, LV_STATE_DISABLED);
+    // 96 px of reserve rather than the default 44: the switch is 72 wide and
+    // the second line has to stop before it.
+    MenuRow row = AddMenuRow(list, icon, text, subtitle, false, 96);
+
+    lv_obj_t* sw = lv_switch_create(row.card);
+    lv_obj_set_size(sw, 72, 38);
+    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    // Off track, on track, knob. Grey reads as "off" against either palette,
+    // and the knob is white in both — on light it sits on grey or on blue,
+    // never on white.
+    lv_obj_set_style_bg_color(sw, UiTheme::TextDim(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, UiTheme::Accent(), UiTheme::Sel(LV_PART_INDICATOR, LV_STATE_CHECKED));
+    lv_obj_set_style_bg_color(sw, UiTheme::OnAccent(), LV_PART_KNOB);
+
+    // Display-only: the row owns the gesture, so the switch must not also
+    // answer the same tap, and it will never pick up CHECKED on its own.
+    lv_obj_remove_flag(sw, LV_OBJ_FLAG_CLICKABLE);
+    if (on) lv_obj_add_state(sw, LV_STATE_CHECKED);
+
+    lv_obj_add_event_cb(row.card, ThemeCb, LV_EVENT_CLICKED, this);
+}
+
+// Persist, then hand the shell the rebuild. Saving first is what makes the
+// toggle survive the power cycle that a customer is most likely to try right
+// after flipping it.
+void SettingsMenuScreen::ThemeCb(lv_event_t* e)
+{
+    auto* self = static_cast<SettingsMenuScreen*>(lv_event_get_user_data(e));
+
+    lightTheme_.Set(!lightTheme_.Get());
+    self->serviceProvider_.getSettingsManager().Save();
+
+    // Deletes this screen's tree — and with it the row whose event is still on
+    // the stack — then loads the rebuilt one. Nothing below may touch `self`'s
+    // widgets, which is why this is the last statement.
+    self->navigator_.Restyle();
 }
 
 void SettingsMenuScreen::RowCb(lv_event_t* e)

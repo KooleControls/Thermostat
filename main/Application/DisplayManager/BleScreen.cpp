@@ -28,12 +28,9 @@ void BleScreen::Build(lv_obj_t* root)
     lv_obj_set_style_pad_all(listView_, UiTheme::Pad, 0);
     lv_obj_remove_flag(listView_, LV_OBJ_FLAG_SCROLLABLE);
 
-    rescanButton_ = lv_button_create(listView_);
-    lv_obj_set_size(rescanButton_, 200, 56);
+    rescanButton_ = AddCard(listView_, 56);
+    lv_obj_set_width(rescanButton_, 200);
     lv_obj_align(rescanButton_, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_obj_set_style_bg_color(rescanButton_, UiTheme::Surface(), 0);
-    lv_obj_set_style_bg_color(rescanButton_, UiTheme::Accent(), LV_STATE_PRESSED);
-    lv_obj_set_style_shadow_width(rescanButton_, 0, 0);
     lv_obj_add_event_cb(rescanButton_, RescanCb, LV_EVENT_CLICKED, this);
     lv_obj_t* rescanLabel = lv_label_create(rescanButton_);
     lv_obj_set_style_text_font(rescanLabel, &lv_font_montserrat_20, 0);
@@ -43,12 +40,9 @@ void BleScreen::Build(lv_obj_t* root)
 
     // Unpair: drops the link and deletes the bond, so the next pairing asks for
     // the install code again. Dead while nothing is paired.
-    forgetButton_ = lv_button_create(listView_);
-    lv_obj_set_size(forgetButton_, 200, 56);
+    forgetButton_ = AddCard(listView_, 56);
+    lv_obj_set_width(forgetButton_, 200);
     lv_obj_align(forgetButton_, LV_ALIGN_TOP_RIGHT, 0, 0);
-    lv_obj_set_style_bg_color(forgetButton_, UiTheme::Surface(), 0);
-    lv_obj_set_style_bg_color(forgetButton_, UiTheme::Accent(), LV_STATE_PRESSED);
-    lv_obj_set_style_shadow_width(forgetButton_, 0, 0);
     lv_obj_add_event_cb(forgetButton_, ForgetCb, LV_EVENT_CLICKED, this);
     lv_obj_t* forgetLabel = lv_label_create(forgetButton_);
     lv_obj_set_style_text_font(forgetLabel, &lv_font_montserrat_20, 0);
@@ -97,11 +91,13 @@ void BleScreen::Build(lv_obj_t* root)
     lv_obj_set_size(connect, 200, 52);
     lv_obj_align(connect, LV_ALIGN_TOP_MID, 0, 96);
     lv_obj_set_style_bg_color(connect, UiTheme::Accent(), 0);
+    lv_obj_set_style_bg_color(connect, UiTheme::AccentPressed(), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(connect, UiTheme::Radius, 0);
     lv_obj_set_style_shadow_width(connect, 0, 0);
     lv_obj_add_event_cb(connect, ConnectCb, LV_EVENT_CLICKED, this);
     lv_obj_t* connectLabel = lv_label_create(connect);
     lv_obj_set_style_text_font(connectLabel, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(connectLabel, UiTheme::Text(), 0);
+    lv_obj_set_style_text_color(connectLabel, UiTheme::OnAccent(), 0);
     lv_label_set_text(connectLabel, "Pair");
     lv_obj_center(connectLabel);
 
@@ -113,7 +109,9 @@ void BleScreen::Build(lv_obj_t* root)
     lv_obj_add_event_cb(keypad, ConnectCb, LV_EVENT_READY, this);
     lv_obj_add_event_cb(keypad, CodeBackCb, LV_EVENT_CANCEL, this);
 
-    lv_timer_create(RefreshTimerCb, kRefreshMs, this);
+    // Once for the life of the screen — see HomeScreen::Build.
+    if (refreshTimer_ == nullptr)
+        refreshTimer_ = lv_timer_create(RefreshTimerCb, kRefreshMs, this);
 }
 
 void BleScreen::OnShow()
@@ -206,13 +204,7 @@ void BleScreen::RebuildPeerList()
     {
         const BleManager::Peer& peer = peers[i];
 
-        lv_obj_t* row = lv_button_create(peerList_);
-        lv_obj_set_size(row, LV_PCT(100), 60);
-        lv_obj_set_style_bg_color(row, UiTheme::Surface(), 0);
-        lv_obj_set_style_bg_color(row, UiTheme::Accent(), LV_STATE_PRESSED);
-        lv_obj_set_style_radius(row, 10, 0);
-        lv_obj_set_style_shadow_width(row, 0, 0);
-        lv_obj_set_style_pad_hor(row, UiTheme::Pad, 0);
+        lv_obj_t* row = AddCard(peerList_, 60);
         lv_obj_add_event_cb(row, PeerCb, LV_EVENT_CLICKED, this);
         lv_obj_set_user_data(row, reinterpret_cast<void*>(static_cast<uintptr_t>(i)));
 

@@ -51,6 +51,13 @@ public:
     // On-screen UI control surface (calls, not JSON commands).
     float GetUserSetpoint() const;
     void  NudgeSetpoint(float deltaC);   // ±, clamped to [5,30]; persisted lazily (see MaybeCommitSettings)
+    void  SetUserSetpoint(float celsius);// absolute, same clamping and lazy persistence
+    ClimateMode GetMode() const;
+    void  SetMode(ClimateMode mode);     // persisted lazily, same as the setpoint
+
+    /// What the last control step computed. Same snapshot the climateStatus
+    /// command reports; a copy, so the caller holds no lock.
+    ClimateStatus GetStatus() const;
 
 private:
     void Loop();
@@ -67,7 +74,7 @@ private:
         { "climate", "status", &InvokeCommand<&ClimateManager::Cmd_ClimateStatus> },
     };
 
-    inline static UInt32Setting modeSetting_{ "climate.mode", "Climate Mode", (uint32_t)ClimateMode::Off };
+    inline static UInt32Setting modeSetting_{ "climate.mode", "Climate Mode", (uint32_t)ClimateMode::Auto };
     inline static FloatSetting  setpointSetting_{ "climate.setpt", "Setpoint", 20.0f };   // NVS key ≤15 chars
 
     ServiceProvider &serviceProvider_;
@@ -77,7 +84,7 @@ private:
     PidController pid_;
 
     // live config + last-step snapshot (guarded by mutex_)
-    ClimateMode mode_ = ClimateMode::Off;
+    ClimateMode mode_ = ClimateMode::Auto;
     float userSetpoint_ = 20.0f;
     ClimateStatus status_;
 

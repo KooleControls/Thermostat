@@ -12,10 +12,6 @@ CONFIG_HTTPD_WS_SUPPORT=y
 # Increase timer task stack (default 2048 too small for WiFi calls in timer callbacks)
 CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
 
-# FAT long filename support (needed for React build output)
-CONFIG_FATFS_LFN_HEAP=y
-CONFIG_FATFS_MAX_LFN=255
-
 # OTA rollback — pairs with esp_ota_mark_app_valid_cancel_rollback() in main.cpp
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
@@ -77,3 +73,27 @@ CONFIG_ESP_WIFI_RX_BA_WIN=4
 # default means every medium allocation lands in internal DRAM first, which is
 # exactly the memory BLE needs.
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=2048
+
+# ── UI latency ──────────────────────────────────────────────────
+# How long LVGL waits before it looks at what has been invalidated. The Kconfig
+# default of 33 ms sat in front of every press: the touch interrupt marks a
+# button dirty immediately, then nothing is drawn until this timer next fires.
+#
+# It no longer has a second job. It is also the default period for an input
+# device's read timer, so while touch was polled this single number set the
+# input rate too and lowering it meant paying for extra I2C reads. The GT911's
+# INT line now drives the reads, so this only governs drawing.
+#
+# 16 ms rather than lower because of what is underneath: the panel runs at
+# 10 MHz pclk over 522x518 total, ~37 Hz, so nothing becomes visible faster than
+# ~27 ms however often LVGL looks, and with avoid_tearing the flush blocks on
+# VSYNC regardless. Below the frame time this buys latency the scanout discards.
+#
+# It is still worth having at 16 rather than 33 even though the frame is 27 ms,
+# and an earlier version of this comment had that wrong — it claimed the two
+# numbers should track each other. They govern different waits. This one is how
+# long an invalidated button sits before LVGL starts drawing it; the frame time
+# is how long the finished pixels then wait for the scanout. Halving the first
+# is a real saving whatever the second is doing. The cost of a period shorter
+# than the frame is an occasional wasted wakeup, which is CPU, not latency.
+CONFIG_LV_DEF_REFR_PERIOD=16

@@ -12,6 +12,7 @@
 #include "InfoScreen.h"
 #include "BleTestScreen.h"
 #include "CommandManager/CommandEntry.h"
+#include "TypedSettings.h"
 #include "lvgl.h"
 
 // Owns LVGL (via esp_lvgl_port) and is the navigation shell: it holds every
@@ -24,8 +25,17 @@
 class DisplayManager final : public Navigator
 {
     static constexpr const char* TAG = "DisplayManager";
-    static constexpr uint32_t kIdleTickMs = 1000;
+
+    /// The housekeeping tick drives both the menu timeout and the backlight.
+    /// It runs ten times a second not because either deadline is tight, but
+    /// because the *wake* is: a panel that takes a second to brighten after a
+    /// touch feels broken, and the tick is a counter read and a comparison.
+    static constexpr uint32_t kTickMs = 100;
     static constexpr uint32_t kIdleTimeoutMs = 60000;   // menu → home when untouched
+
+    /// Backstop poll for the touch controller once INT drives the reads.
+    /// Not the press path — see ArmTouchBackstop().
+    static constexpr uint32_t kTouchBackstopMs = 100;
 
 public:
     explicit DisplayManager(ServiceProvider& serviceProvider);
@@ -42,13 +52,28 @@ public:
     /// gate policy stays here with the PinGate rather than in the home screen.
     void Go(ScreenId id) override;
 
+    /// Re-read the palette from the theme setting and rebuild every screen.
+    /// Safe to call from any task and from inside an LVGL event callback on the
+    /// screen being rebuilt — the port lock is recursive and LVGL marks an
+    /// in-flight event dead when its target is destroyed.
+    void Restyle() override;
+
 private:
     bool InitLvgl();
+    static void ArmTouchBackstop(lv_indev_t* indev);
     Screen* Resolve(ScreenId id);
-    static void IdleTimerCb(lv_timer_t* t);
+    void ServiceBacklight(uint32_t idleMs);
+    static void TickCb(lv_timer_t* t);
 
     static const char* ScreenName(ScreenId id);
     static bool ParseScreen(const char* name, ScreenId& out);
+
+    /// Every id exactly once — the name lookup walks it, and so does the
+    /// rebuild, which must not miss a screen or it would keep a stale palette.
+    static constexpr ScreenId kAllScreens[] = {
+        ScreenId::Home, ScreenId::Pin, ScreenId::Settings,
+        ScreenId::Wifi, ScreenId::Ble, ScreenId::Info, ScreenId::BleTest,
+    };
 
     /// `uiGo` — drive navigation from a bench client instead of a fingertip.
     ///   {"screen":"home"|"pin"|"settings"|"wifi"|"ble"|"info"|"bletest"}
@@ -62,9 +87,34 @@ private:
     /// a headless or remote unit.
     RequestError Cmd_UiGo(CommandContext& ctx);
 
+    /// `uiTheme` — flip the palette from a bench client instead of the glass.
+    ///   {"light":true|false}
+    /// Takes the same path the on-screen toggle does, persistence included, so
+    /// it exercises the restyle rather than shortcutting around it. Omitting
+    /// "light" just reads the setting back.
+    ///
+    /// Here for the same reason as uiGo: a rebuild of every screen is the
+    /// heaviest thing the shell does, and verifying it had meant asking someone
+    /// to stand at the panel and tap.
+    RequestError Cmd_UiTheme(CommandContext& ctx);
+
     inline static CommandEntry commands_[] = {
-        { "ui", "go", &InvokeCommand<&DisplayManager::Cmd_UiGo> },
+        { "ui", "go",    &InvokeCommand<&DisplayManager::Cmd_UiGo> },
+        { "ui", "theme", &InvokeCommand<&DisplayManager::Cmd_UiTheme> },
     };
+
+    // The panel rests dim and comes up full when someone is at it. The motive
+    // is thermal as much as it is power: the backlight is the largest single
+    // contributor to the self-heating that skews the room sensor, so the state
+    // the unit spends its life in is the one the calibration has to hold for.
+    // NVS keys are capped at 15 characters.
+    inline static UInt32Setting dimPercent_{ "ui.dimPct",  "Backlight Dim (%)",   30 };
+    inline static UInt32Setting fullPercent_{ "ui.fullPct", "Backlight Full (%)", 100 };
+    inline static UInt32Setting dimAfterS_{ "ui.dimSec",   "Backlight Dim After (s)", 30 };
+
+    // The theme setting itself lives on the settings screen that carries its
+    // toggle; the shell only registers it and reads it, because the palette has
+    // to be chosen before the first screen is built.
 
     ServiceProvider& serviceProvider_;
     InitState initState_;
@@ -82,4 +132,8 @@ private:
     BleTestScreen bleTestScreen_{serviceProvider_, *this};
 
     ScreenId current_ = ScreenId::Home;
+
+    /// Which of the two levels is currently on the panel. Tracked so the tick
+    /// only writes LEDC on a transition rather than ten times a second.
+    bool backlightFull_ = true;
 };

@@ -15,11 +15,13 @@ set(SOURCE_FILES_LIST
     "Application/CommandManager/CommandManager.cpp"
     "Application/OpenThermManager/OpenThermManager.cpp"
     "Application/RoomTemperatureManager/RoomTemperatureManager.cpp"
+    "Application/RoomSimManager/RoomSimManager.cpp"
     "Application/ClimateManager/ClimateManager.cpp"
     "Application/HotWaterManager/HotWaterManager.cpp"
     "Application/DisplayManager/DisplayManager.cpp"
     "Application/DisplayManager/Screen.cpp"
     "Application/DisplayManager/HomeScreen.cpp"
+    "Application/DisplayManager/HomeFace.cpp"
     "Application/DisplayManager/PinScreen.cpp"
     "Application/DisplayManager/SettingsMenuScreen.cpp"
     "Application/DisplayManager/WifiScreen.cpp"
@@ -28,12 +30,12 @@ set(SOURCE_FILES_LIST
     "Application/DisplayManager/WifiScanner.cpp"
     "Application/DisplayManager/InfoScreen.cpp"
     "Application/DisplayManager/fonts/font_temp_96.c"
+    "Application/DisplayManager/fonts/font_icons_32.c"
     "Application/UpdateManager/UpdateManager.cpp"
     "Application/UpdateManager/PartitionWriter.cpp"
     "Application/SettingsManager/SettingsManager.cpp"
     "Application/SettingsManager/Setting.cpp"
     "Application/SystemManager/SystemManager.cpp"
-    "Application/ThermalTestManager/ThermalTestManager.cpp"
     "Application/ConsoleManager/ConsoleManager.cpp"
     "Application/TimeManager/TimeManager.cpp"
     "lib/system/DateTime.cpp"
@@ -52,10 +54,10 @@ set(INCLUDE_DIRS_LIST
     "Application/HotWaterManager"
     "Application/DisplayManager"
     "Application/RoomTemperatureManager"
+    "Application/RoomSimManager"
     "Application/UpdateManager"
     "Application/SettingsManager"
     "Application/SystemManager"
-    "Application/ThermalTestManager"
     "Application/ConsoleManager"
     "Application/TimeManager"
     "hardware"
@@ -80,8 +82,7 @@ set(COMPONENT_REQUIRES
     app_update
     esp_partition
     spi_flash
-    fatfs
-    wear_levelling
+    web_assets
     esp_driver_gpio
     esp_driver_ledc
     esp_driver_tsens
@@ -141,6 +142,15 @@ idf_component_register(
 # Board identity define for the (rare) code-level conditionals.
 string(TOUPPER "${BOARD}" BOARD_UPPER)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE BOARD_${BOARD_UPPER})
+
+# Force the room simulation on at build time: `idf.py build -DROOM_SIM_FORCE_ENABLE=1`.
+# For a board with no route to it -- no network, and no serial command path --
+# where the sim.enable setting cannot be written. Leaves the setting alone, so
+# a later build without the flag comes back off.
+if(ROOM_SIM_FORCE_ENABLE)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE ROOM_SIM_FORCE_ENABLE=1)
+    message(WARNING "ROOM SIMULATION FORCED ON -- the room temperature is fake")
+endif()
 
 # Switches over enums (e.g. SettingType) deliberately have no default case
 # so that adding an enum value flags every converter that wasn't updated.

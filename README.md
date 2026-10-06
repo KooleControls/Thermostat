@@ -42,7 +42,7 @@ Thermostat/
 │   │   ├── SettingsManager/           # NVS key-value store
 │   │   ├── SystemManager/             # Device identity, ping/info/reboot
 │   │   ├── TimeManager/              # SNTP + timezone
-│   │   ├── UpdateManager/            # OTA firmware + www partition
+│   │   ├── UpdateManager/            # OTA firmware (app slots)
 │   │   └── WebServerManager/         # HTTP + WebSocket server
 │   ├── hardware/                      # Hardware abstraction
 │   │   ├── boards/                    # One folder per target board (-DBOARD=<name>)
@@ -60,7 +60,8 @@ Thermostat/
 │       ├── rtos/                      # Task, Mutex, Timer, InitState
 │       └── system/                    # DateTime, TimeSpan
 ├── frontend/                          # React web UI (Vite + Tailwind + shadcn)
-├── www/                               # Build output — gzipped, embedded in flash
+├── components/web_assets/             # Packs www/ into the blob embedded in the app
+├── www/                               # Frontend build output — packed into that blob
 ├── CMakeLists.txt                     # Root ESP-IDF project config
 ├── partitions.csv                     # Flash partition layout
 └── sdkconfig.defaults                 # ESP-IDF defaults
@@ -114,7 +115,7 @@ To build for a different board (see `main/hardware/boards/`):
 idf.py -DBOARD=<name> build
 ```
 
-If [pnpm](https://pnpm.io/) is installed, the frontend is built automatically as part of `idf.py build`. The React app is compiled, gzipped, and embedded into a FAT partition on flash. No SD card or external storage needed.
+If [pnpm](https://pnpm.io/) is installed, the frontend is built automatically as part of `idf.py build`. The React app is compiled, packed into a single gzipped blob, and embedded in the application binary itself — no www partition, no SD card, no external storage. The UI can never be out of step with the firmware serving it.
 
 If pnpm is not available, the firmware still builds — you just won't have a web UI until you build the frontend manually (`cd frontend && pnpm install && pnpm build`) and reflash.
 
@@ -187,16 +188,14 @@ The `main.cpp` stays clean — just `Init()` calls. Hardware drivers live in the
 
 After initial USB flash, the device can be updated entirely over the web UI:
 
-- **Firmware > Application Firmware** — Writes to the inactive OTA slot, then reboots into it
-- **Firmware > WWW Partition** — Updates the web UI independently of firmware
+- **Firmware > Application Firmware** — Writes to the inactive OTA slot, then reboots into it. The web UI travels with it.
 
-The CI pipeline produces three artifacts per release:
+The CI pipeline produces two artifacts per release:
 
 | File | Purpose |
 |------|---------|
-| `Thermostat-<version>-factory.bin` | Full image (bootloader + partitions + app + www) for initial flash |
-| `Thermostat-<version>.bin` | Firmware only, for OTA update via web UI |
-| `Thermostat-<version>-www.bin` | Web UI only, for updating the frontend independently |
+| `Thermostat-<version>-factory.bin` | Full image (bootloader + partitions + app) for initial flash |
+| `Thermostat-<version>.bin` | Firmware including the web UI, for OTA update via web UI |
 
 ---
 

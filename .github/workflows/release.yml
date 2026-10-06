@@ -86,14 +86,12 @@ jobs:
           set -euo pipefail
           mkdir -p dist
 
-          # Full factory image (bootloader + partition table + app + www)
+          # Full factory image (bootloader + partition table + app)
           cp build/merged-factory.bin "dist/${ARTIFACT_BASE}-factory.bin"
 
-          # Application-only binary (web-UI OTA)
+          # Application-only binary (OTA). The web UI is embedded in it — one
+          # artifact carries firmware and frontend together.
           cp "build/${PROJECT_NAME}.bin" "dist/${ARTIFACT_BASE}.bin"
-
-          # WWW FAT partition image (independent web-UI OTA)
-          cp build/www.bin "dist/${ARTIFACT_BASE}-www.bin"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -102,10 +100,8 @@ jobs:
           generate_release_notes: true
           body: |
             ### Firmware files
-            - **${{ env.ARTIFACT_BASE }}-factory.bin** — Full factory image (bootloader + partition table + app + www). Use for initial flashing or full recovery via `esptool.py`.
-            - **${{ env.ARTIFACT_BASE }}.bin** — Application firmware only. Upload via the web UI (Firmware > Application Firmware) for OTA update.
-            - **${{ env.ARTIFACT_BASE }}-www.bin** — Web interface FAT image. Upload via the web UI (Firmware > WWW Partition) to update the frontend independently.
+            - **${{ env.ARTIFACT_BASE }}-factory.bin** — Full factory image (bootloader + partition table + app). Use for initial flashing or full recovery via `esptool.py`.
+            - **${{ env.ARTIFACT_BASE }}.bin** — Application firmware, web interface included. Upload via the web UI (Firmware > Application Firmware) for OTA update.
           files: |
             dist/${{ env.ARTIFACT_BASE }}-factory.bin
             dist/${{ env.ARTIFACT_BASE }}.bin
-            dist/${{ env.ARTIFACT_BASE }}-www.bin

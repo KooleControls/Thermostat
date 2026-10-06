@@ -39,8 +39,6 @@ namespace
     const char* const kViewMap[] = { "RSSI", "Latency", "Rx/Lost", "" };
     const char* const kRangeMap[] = { "1m", "5m", "10m", "" };
 
-    lv_color_t GridColor() { return lv_color_hex(0x3A3A3C); }
-
     uint32_t Rgb(lv_color_t c) { return lv_color_to_u32(c) & 0xFFFFFF; }
 
     /// Like Screen::SetLabelText, and recolours only when the text changes, so
@@ -72,8 +70,13 @@ namespace
 
 void BleTestScreen::Build(lv_obj_t* root)
 {
-    buckets_ = static_cast<BleSiteTest::Bucket*>(
-        heap_caps_malloc(kColumns * sizeof(BleSiteTest::Bucket), MALLOC_CAP_SPIRAM));
+    // Build runs again on every theme change; the buffer and the timer outlive
+    // the widget tree, so they are made once.
+    if (buckets_ == nullptr)
+        buckets_ = static_cast<BleSiteTest::Bucket*>(
+            heap_caps_malloc(kColumns * sizeof(BleSiteTest::Bucket), MALLOC_CAP_SPIRAM));
+    if (refreshTimer_ == nullptr)
+        refreshTimer_ = lv_timer_create(RefreshTimerCb, kRefreshMs, this);
 
     lv_obj_t* back = AddHeader(root, "BLE Test", LV_SYMBOL_LEFT);
     lv_obj_add_event_cb(back, BackCb, LV_EVENT_CLICKED, this);
@@ -93,8 +96,9 @@ void BleTestScreen::Build(lv_obj_t* root)
     lv_obj_set_size(card, 480 - 2 * UiTheme::Pad, kCardH);
     lv_obj_align(card, LV_ALIGN_TOP_MID, 0, kCardY);
     lv_obj_set_style_bg_color(card, UiTheme::Surface(), 0);
-    lv_obj_set_style_radius(card, 12, 0);
-    lv_obj_set_style_border_width(card, 0, 0);
+    lv_obj_set_style_radius(card, UiTheme::Radius, 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_border_color(card, UiTheme::Line(), 0);
     lv_obj_set_style_pad_all(card, kCardPad, 0);
     lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -104,11 +108,15 @@ void BleTestScreen::Build(lv_obj_t* root)
     time_ = AddStatColumn(card, 3, "Test time");
 
     // ── View and range selectors ─────────────────────────────
-    lv_obj_t* views = AddSegmented(root, kViewMap, ViewCb);
+    // Selections survive a rebuild: they live in members, not in the widgets.
+    lv_obj_t* views = AddSegmented(root, kViewMap, static_cast<uint32_t>(view_), ViewCb);
     lv_obj_set_size(views, kViewsW, kControlsH);
     lv_obj_set_pos(views, UiTheme::Pad, kControlsY);
 
-    lv_obj_t* ranges = AddSegmented(root, kRangeMap, RangeCb);
+    uint32_t rangeIndex = 0;
+    for (uint32_t i = 0; i < std::size(kRangeSecondsPerColumn); i++)
+        if (kRangeSecondsPerColumn[i] == secondsPerColumn_) rangeIndex = i;
+    lv_obj_t* ranges = AddSegmented(root, kRangeMap, rangeIndex, RangeCb);
     lv_obj_set_size(ranges, kRangesW, kControlsH);
     lv_obj_set_pos(ranges, 480 - UiTheme::Pad - kRangesW, kControlsY);
 
@@ -123,7 +131,7 @@ void BleTestScreen::Build(lv_obj_t* root)
     // No padding, so the grid lines sit exactly where the y labels are put.
     lv_obj_set_style_pad_all(chart_, 0, 0);
     lv_obj_set_style_pad_column(chart_, 2, 0);                  // gap between bars
-    lv_obj_set_style_line_color(chart_, GridColor(), 0);
+    lv_obj_set_style_line_color(chart_, UiTheme::Line(), 0);
     lv_obj_set_style_line_width(chart_, 2, LV_PART_ITEMS);
     lv_obj_set_style_width(chart_, 0, LV_PART_INDICATOR);       // no dot per point
     lv_obj_set_style_height(chart_, 0, LV_PART_INDICATOR);
@@ -148,8 +156,8 @@ void BleTestScreen::Build(lv_obj_t* root)
     rangeLabel_ = lv_label_create(root);
     lv_obj_set_style_text_font(rangeLabel_, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(rangeLabel_, UiTheme::TextDim(), 0);
-    lv_label_set_text(rangeLabel_, "-1m");
     lv_obj_align_to(rangeLabel_, chart_, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 4);
+    ShowRangeLabel();
 
     lv_obj_t* now = lv_label_create(root);
     lv_obj_set_style_text_font(now, &lv_font_montserrat_16, 0);
@@ -166,8 +174,6 @@ void BleTestScreen::Build(lv_obj_t* root)
     lv_obj_set_style_text_align(legendLabel_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(legendLabel_, "");
     lv_obj_align_to(legendLabel_, chart_, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
-
-    lv_timer_create(RefreshTimerCb, kRefreshMs, this);
 }
 
 BleTestScreen::StatColumn BleTestScreen::AddStatColumn(lv_obj_t* card, int index, const char* title)
@@ -195,15 +201,15 @@ BleTestScreen::StatColumn BleTestScreen::AddStatColumn(lv_obj_t* card, int index
     return column;
 }
 
-// A row of buttons of which exactly one is selected; the first starts selected.
+// A row of buttons of which exactly one is selected.
 lv_obj_t* BleTestScreen::AddSegmented(lv_obj_t* parent, const char* const* map,
-                                      lv_event_cb_t onChange)
+                                      uint32_t selected, lv_event_cb_t onChange)
 {
     lv_obj_t* m = lv_buttonmatrix_create(parent);
     lv_buttonmatrix_set_map(m, map);
     lv_buttonmatrix_set_button_ctrl_all(m, LV_BUTTONMATRIX_CTRL_CHECKABLE);
     lv_buttonmatrix_set_one_checked(m, true);
-    lv_buttonmatrix_set_button_ctrl(m, 0, LV_BUTTONMATRIX_CTRL_CHECKED);
+    lv_buttonmatrix_set_button_ctrl(m, selected, LV_BUTTONMATRIX_CTRL_CHECKED);
 
     lv_obj_set_style_bg_opa(m, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(m, 0, 0);
@@ -213,6 +219,7 @@ lv_obj_t* BleTestScreen::AddSegmented(lv_obj_t* parent, const char* const* map,
     lv_obj_set_style_bg_color(m, UiTheme::Surface(), LV_PART_ITEMS);
     lv_obj_set_style_bg_color(m, UiTheme::Accent(), UiTheme::Sel(LV_PART_ITEMS, LV_STATE_CHECKED));
     lv_obj_set_style_text_color(m, UiTheme::Text(), LV_PART_ITEMS);
+    lv_obj_set_style_text_color(m, UiTheme::OnAccent(), UiTheme::Sel(LV_PART_ITEMS, LV_STATE_CHECKED));
     lv_obj_set_style_text_font(m, &lv_font_montserrat_20, LV_PART_ITEMS);
     lv_obj_set_style_radius(m, 8, LV_PART_ITEMS);
     lv_obj_set_style_shadow_width(m, 0, LV_PART_ITEMS);
@@ -477,9 +484,13 @@ void BleTestScreen::RangeCb(lv_event_t* e)
     uint32_t id = lv_buttonmatrix_get_selected_button(lv_event_get_target_obj(e));
     if (id >= std::size(kRangeSecondsPerColumn)) return;
     self->secondsPerColumn_ = kRangeSecondsPerColumn[id];
-
-    char buf[16];
-    snprintf(buf, sizeof(buf), "-%" PRIu32 "m", self->secondsPerColumn_ * kColumns / 60);
-    SetLabelText(self->rangeLabel_, buf);
+    self->ShowRangeLabel();
     self->RefreshGraph();
+}
+
+void BleTestScreen::ShowRangeLabel()
+{
+    char buf[16];
+    snprintf(buf, sizeof(buf), "-%" PRIu32 "m", secondsPerColumn_ * kColumns / 60);
+    SetLabelText(rangeLabel_, buf);
 }

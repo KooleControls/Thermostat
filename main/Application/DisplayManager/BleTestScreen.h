@@ -38,7 +38,9 @@ private:
     };
 
     StatColumn AddStatColumn(lv_obj_t* card, int index, const char* title);
-    lv_obj_t*  AddSegmented(lv_obj_t* parent, const char* const* map, lv_event_cb_t onChange);
+    lv_obj_t*  AddSegmented(lv_obj_t* parent, const char* const* map, uint32_t selected,
+                            lv_event_cb_t onChange);
+    void ShowRangeLabel();
 
     void Refresh();
     void RefreshSummary();
@@ -76,4 +78,5 @@ private:
     // kColumns of them, in PSRAM: this object lives in internal DRAM, which the
     // BLE stack needs more than a graph does.
     BleSiteTest::Bucket* buckets_ = nullptr;
+    lv_timer_t*          refreshTimer_ = nullptr;
 };
