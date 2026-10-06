@@ -30,6 +30,9 @@ class BleSiteTest
     static constexpr uint32_t kLinkPollMs = 100;
     // The gateway reports outcomes for the last 32 pings (one u32 of history).
     static constexpr uint32_t kHistoryBits = 32;
+    // How far the gateway's one-a-second count may drift from our clock before
+    // a ping's graph second is re-anchored to its arrival.
+    static constexpr int64_t kReanchorSeconds = 2;
 
 public:
     /// Raw one-second samples kept: the longest graph range, 10 minutes.
@@ -91,8 +94,8 @@ public:
     Summary GetSummary() const;
 
     /// Fills `count` buckets of `secondsPerBucket` each, oldest first. Edges are
-    /// fixed multiples of the bucket size; the last bucket is the one the
-    /// current second falls in, so it is still filling.
+    /// fixed multiples of the bucket size; the last bucket is the most recent
+    /// complete one.
     void GetBuckets(Bucket* out, uint32_t count, uint32_t secondsPerBucket) const;
 
 private:
@@ -115,6 +118,7 @@ private:
     const Slot* FindSlot(uint32_t second) const;
 
     void OnPing(uint32_t seq, uint32_t history, uint32_t lastRttMs);
+    uint32_t SecondOfSeq(uint32_t seq, uint32_t now) const;
     void RecordOutcome(uint32_t second, bool ok, uint32_t rttMs);
     void PollLink();
 
@@ -135,6 +139,7 @@ private:
 
     bool     haveSeq_ = false;
     uint32_t resolvedThrough_ = 0;   // highest seq whose outcome is counted
+    int64_t  seqToSecond_ = 0;       // graph second of a ping = seq + this
 
     bool     hasRssi_ = false;
     int8_t   rssi_ = 0;

@@ -120,11 +120,25 @@ void BleSiteTest::OnPing(uint32_t seq, uint32_t history, uint32_t lastRttMs)
     if (slots_ == nullptr || seq == 0) return;
 
     uint32_t now = NowSecond();
+    bool restart = !haveSeq_ || seq <= resolvedThrough_;
+
+    // A ping's second comes from its sequence number, not from when it arrived.
+    // The gateway sends once a second, but arrival jitters around our second
+    // boundaries: two pings would share a second and leave a hole in the next.
+    // Re-anchored only when the two clocks have drifted visibly apart.
+    int64_t drift = static_cast<int64_t>(seq) + seqToSecond_ - static_cast<int64_t>(now);
+    if (restart || drift > kReanchorSeconds || drift < -kReanchorSeconds)
+        seqToSecond_ = static_cast<int64_t>(now) - static_cast<int64_t>(seq);
+
     if (gotRssi)
     {
-        Slot* slot = SlotFor(now);
-        slot->hasRssi = true;
-        slot->rssi = rssi;
+        uint32_t second = SecondOfSeq(seq, now);
+        if (second != UINT32_MAX)
+        {
+            Slot* slot = SlotFor(second);
+            slot->hasRssi = true;
+            slot->rssi = rssi;
+        }
         if (!hasRssi_ || rssi < worstRssi_) worstRssi_ = rssi;
         rssi_ = rssi;
         hasRssi_ = true;
@@ -132,7 +146,7 @@ void BleSiteTest::OnPing(uint32_t seq, uint32_t history, uint32_t lastRttMs)
 
     // The first ping after a reset, or a gateway that restarted its count: what
     // came before it is not ours to judge.
-    if (!haveSeq_ || seq <= resolvedThrough_)
+    if (restart)
     {
         haveSeq_ = true;
         resolvedThrough_ = seq - 1;
@@ -146,13 +160,18 @@ void BleSiteTest::OnPing(uint32_t seq, uint32_t history, uint32_t lastRttMs)
         uint32_t age = seq - 1 - s;                      // 0 = the ping before this one
         bool ok = age < kHistoryBits && ((history >> age) & 1u) != 0;
         uint32_t rttMs = (age == 0) ? lastRttMs : 0;     // only the latest RTT is sent
-
-        // One ping a second, so a ping's age is how many seconds ago it was sent.
-        uint32_t secondsAgo = seq - s;
-        bool inHistory = secondsAgo <= now && secondsAgo < HistorySeconds;
-        RecordOutcome(inHistory ? now - secondsAgo : UINT32_MAX, ok, rttMs);
+        RecordOutcome(SecondOfSeq(s, now), ok, rttMs);
     }
     resolvedThrough_ = seq - 1;
+}
+
+// The graph second a ping belongs to, or UINT32_MAX when that is before the
+// test, in the future, or older than the kept history.
+uint32_t BleSiteTest::SecondOfSeq(uint32_t seq, uint32_t now) const
+{
+    int64_t second = static_cast<int64_t>(seq) + seqToSecond_;
+    if (second < 0 || second > now || now - second >= HistorySeconds) return UINT32_MAX;
+    return static_cast<uint32_t>(second);
 }
 
 // `second` is UINT32_MAX for an outcome too old for the graph; it still counts.
@@ -251,9 +270,18 @@ void BleSiteTest::GetBuckets(Bucket* out, uint32_t count, uint32_t secondsPerBuc
 
     // Bucket edges sit on whole multiples of the bucket size, counted from the
     // test start. Measured back from `now` instead, every second regrouped every
-    // column and the whole graph jumped on each refresh. Only the last bucket,
-    // the one still filling, changes now.
-    uint32_t lastBucketStart = now - now % secondsPerBucket;
+    // column and the whole graph jumped on each refresh.
+    //
+    // Only complete buckets are shown: a still-filling one draws as a short bar
+    // that grows and resets, which reads as loss. At one second per bucket that
+    // costs nothing — the newest second has no settled outcome yet anyway.
+    uint32_t currentBucketStart = now - now % secondsPerBucket;
+    if (currentBucketStart < secondsPerBucket)
+    {
+        for (uint32_t i = 0; i < count; i++) out[i] = Bucket{};
+        return;
+    }
+    uint32_t lastBucketStart = currentBucketStart - secondsPerBucket;
 
     for (uint32_t i = 0; i < count; i++)
     {
@@ -264,15 +292,15 @@ void BleSiteTest::GetBuckets(Bucket* out, uint32_t count, uint32_t secondsPerBuc
         uint32_t rttCount = 0;
 
         uint32_t bucketsBack = count - 1 - i;
+        // A bucket from before the test, or one reaching past the kept history,
+        // stays empty rather than drawing as a partly filled column.
         bool beforeTestStart = bucketsBack * secondsPerBucket > lastBucketStart;
         uint32_t start = beforeTestStart ? 0 : lastBucketStart - bucketsBack * secondsPerBucket;
+        bool fullyKept = !beforeTestStart && now - start < HistorySeconds;
 
-        for (uint32_t k = 0; k < secondsPerBucket && slots_ != nullptr && !beforeTestStart; k++)
+        for (uint32_t k = 0; k < secondsPerBucket && slots_ != nullptr && fullyKept; k++)
         {
-            uint32_t second = start + k;
-            if (second > now) break;
-            if (now - second >= HistorySeconds) continue;
-            const Slot* slot = FindSlot(second);
+            const Slot* slot = FindSlot(start + k);
             if (slot == nullptr) continue;
 
             b.ok += slot->ok;
