@@ -125,10 +125,13 @@ void BleSiteTest::OnPing(uint32_t seq, uint32_t history, uint32_t lastRttMs)
     // A ping's second comes from its sequence number, not from when it arrived.
     // The gateway sends once a second, but arrival jitters around our second
     // boundaries: two pings would share a second and leave a hole in the next.
-    // Re-anchored only when the two clocks have drifted visibly apart.
+    // Re-anchored only when the two clocks have drifted visibly apart. Anchored
+    // one second back, so a ping arriving just across a boundary still maps to
+    // a second that has begun — not to the next one, which would drop every
+    // other RSSI sample and leave the line with no two neighbours to join.
     int64_t drift = static_cast<int64_t>(seq) + seqToSecond_ - static_cast<int64_t>(now);
     if (restart || drift > kReanchorSeconds || drift < -kReanchorSeconds)
-        seqToSecond_ = static_cast<int64_t>(now) - static_cast<int64_t>(seq);
+        seqToSecond_ = static_cast<int64_t>(now) - 1 - static_cast<int64_t>(seq);
 
     if (gotRssi)
     {
@@ -166,11 +169,13 @@ void BleSiteTest::OnPing(uint32_t seq, uint32_t history, uint32_t lastRttMs)
 }
 
 // The graph second a ping belongs to, or UINT32_MAX when that is before the
-// test, in the future, or older than the kept history.
+// test or older than the kept history. Drift that has not yet triggered a
+// re-anchor can point past `now`; that sample lands in the current second
+// rather than being lost.
 uint32_t BleSiteTest::SecondOfSeq(uint32_t seq, uint32_t now) const
 {
-    int64_t second = static_cast<int64_t>(seq) + seqToSecond_;
-    if (second < 0 || second > now || now - second >= HistorySeconds) return UINT32_MAX;
+    int64_t second = std::min<int64_t>(static_cast<int64_t>(seq) + seqToSecond_, now);
+    if (second < 0 || now - second >= HistorySeconds) return UINT32_MAX;
     return static_cast<uint32_t>(second);
 }
 
