@@ -249,6 +249,12 @@ void BleSiteTest::GetBuckets(Bucket* out, uint32_t count, uint32_t secondsPerBuc
     LOCK(mutex_);
     uint32_t now = (slots_ != nullptr) ? NowSecond() : 0;
 
+    // Bucket edges sit on whole multiples of the bucket size, counted from the
+    // test start. Measured back from `now` instead, every second regrouped every
+    // column and the whole graph jumped on each refresh. Only the last bucket,
+    // the one still filling, changes now.
+    uint32_t lastBucketStart = now - now % secondsPerBucket;
+
     for (uint32_t i = 0; i < count; i++)
     {
         Bucket b;
@@ -257,13 +263,16 @@ void BleSiteTest::GetBuckets(Bucket* out, uint32_t count, uint32_t secondsPerBuc
         uint32_t rttSum = 0;
         uint32_t rttCount = 0;
 
-        // Bucket i ends (count - 1 - i) buckets before the current second.
-        uint32_t back = (count - 1 - i) * secondsPerBucket;
-        for (uint32_t k = 0; k < secondsPerBucket && slots_ != nullptr; k++)
+        uint32_t bucketsBack = count - 1 - i;
+        bool beforeTestStart = bucketsBack * secondsPerBucket > lastBucketStart;
+        uint32_t start = beforeTestStart ? 0 : lastBucketStart - bucketsBack * secondsPerBucket;
+
+        for (uint32_t k = 0; k < secondsPerBucket && slots_ != nullptr && !beforeTestStart; k++)
         {
-            uint32_t ago = back + k;
-            if (ago > now || ago >= HistorySeconds) break;
-            const Slot* slot = FindSlot(now - ago);
+            uint32_t second = start + k;
+            if (second > now) break;
+            if (now - second >= HistorySeconds) continue;
+            const Slot* slot = FindSlot(second);
             if (slot == nullptr) continue;
 
             b.ok += slot->ok;

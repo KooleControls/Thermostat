@@ -90,8 +90,9 @@ public:
 
     Summary GetSummary() const;
 
-    /// Fills `count` buckets of `secondsPerBucket` each, oldest first; the last
-    /// one ends at the current second.
+    /// Fills `count` buckets of `secondsPerBucket` each, oldest first. Edges are
+    /// fixed multiples of the bucket size; the last bucket is the one the
+    /// current second falls in, so it is still filling.
     void GetBuckets(Bucket* out, uint32_t count, uint32_t secondsPerBucket) const;
 
 private:
