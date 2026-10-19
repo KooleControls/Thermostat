@@ -1,6 +1,7 @@
 #pragma once
 
 class BleManager;
+class BleSiteTest;
 class Board;
 class ClimateManager;
 class CommandManager;
@@ -9,10 +10,10 @@ class DisplayManager;
 class HotWaterManager;
 class NetworkManager;
 class OpenThermManager;
+class RoomSimManager;
 class RoomTemperatureManager;
 class SettingsManager;
 class SystemManager;
-class ThermalTestManager;
 class TimeManager;
 class UpdateManager;
 class WebServerManager;
@@ -21,6 +22,7 @@ class ServiceProvider
 {
 public:
     virtual BleManager& getBleManager() = 0;
+    virtual BleSiteTest& getBleSiteTest() = 0;
     virtual Board& getBoard() = 0;
     virtual ClimateManager& getClimateManager() = 0;
     virtual CommandManager& getCommandManager() = 0;
@@ -29,10 +31,10 @@ public:
     virtual HotWaterManager& getHotWaterManager() = 0;
     virtual NetworkManager& getNetworkManager() = 0;
     virtual OpenThermManager& getOpenThermManager() = 0;
+    virtual RoomSimManager& getRoomSimManager() = 0;
     virtual RoomTemperatureManager& getRoomTemperatureManager() = 0;
     virtual SettingsManager& getSettingsManager() = 0;
     virtual SystemManager& getSystemManager() = 0;
-    virtual ThermalTestManager& getThermalTestManager() = 0;
     virtual TimeManager& getTimeManager() = 0;
     virtual UpdateManager& getUpdateManager() = 0;
     virtual WebServerManager& getWebServerManager() = 0;

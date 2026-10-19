@@ -28,15 +28,31 @@ namespace BoardConfig
 
     // ── GT911 capacitive touch (I2C, shared bus) ───────────────────
     // Address is auto-probed (0x5D default, 0x14 backup) in Touch.h; this unit
-    // reports 0x14. INT is wired to GPIO10 but we poll (handled by esp_lvgl_port),
-    // and there is no ESP-controlled touch reset line.
+    // reports 0x14. INT drives an interrupt (esp_lvgl_port then runs the input
+    // device in event mode); there is no ESP-controlled touch reset line.
     static constexpr int TOUCH_PIN_INT = 10;
 
     // ── RGB LCD panel (ST7701S) ────────────────────────────────────
     static constexpr int LCD_H_RES = 480;
     static constexpr int LCD_V_RES = 480;
 
-    // Timing from diyless-thermostat-3.yaml.
+    // Timing from diyless-thermostat-3.yaml. Do not raise the pixel clock.
+    //
+    // 16 MHz was tried, to buy latency: over the 522x518 total below, 10 MHz is
+    // ~37 Hz, so a rendered frame waits up to ~27 ms for the VSYNC swap that
+    // avoid_tearing makes it wait for — the largest remaining term once the
+    // touch INT and the LVGL refresh period had been dealt with. 16 MHz would
+    // have made it ~59 Hz and ~17 ms, PLL160M divides by exactly 10 there, and
+    // ~27 MB/s of PSRAM read is nothing to octal PSRAM at 80 MHz.
+    //
+    // On real hardware it tore the picture apart. So the bandwidth arithmetic
+    // was not what constrained this: something in the panel, the flex, or the
+    // ST7701's own tolerance sets the ceiling, and 10 MHz is not a conservative
+    // number DIYLESS picked with room above it. Treat the vendor timing as
+    // measured rather than nominal.
+    //
+    // The bound this leaves is real and worth knowing: ~27 ms of scanout that
+    // no amount of rendering sooner can recover.
     static constexpr int LCD_PIXEL_CLOCK_HZ = 10000000;  // 10 MHz
     static constexpr bool LCD_PCLK_ACTIVE_NEG = false;   // pclk_inverted: false
     static constexpr bool LCD_PCLK_IDLE_HIGH  = false;

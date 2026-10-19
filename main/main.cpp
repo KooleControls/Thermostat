@@ -21,12 +21,13 @@ extern "C" void app_main(void)
     g_appContext.getRoomTemperatureManager().Init();
     g_appContext.getOpenThermManager().Init();
     g_appContext.getClimateManager().Init();
+    g_appContext.getRoomSimManager().Init();
     g_appContext.getHotWaterManager().Init();
     g_appContext.getDisplayManager().Init();
-    g_appContext.getThermalTestManager().Init();
     g_appContext.getUpdateManager().Init();
     g_appContext.getWebServerManager().Init();
     g_appContext.getBleManager().Init();
+    g_appContext.getBleSiteTest().Init();   // POC: BLE site test, after the link it measures
 
     // Mark firmware as valid so the bootloader doesn't roll back on next reboot
     esp_ota_mark_app_valid_cancel_rollback();

@@ -49,20 +49,6 @@ public:
     /// is picked again or the unit reboots.
     void StartAccessPoint();
 
-    /// Stop the radio outright — no STA, no AP, no retries. Costs the web UI but
-    /// not OpenTherm, which is what makes it measurable: the gateway keeps
-    /// logging while the WiFi power is gone. Only a reboot brings it back, since
-    /// with the radio down there is nothing left to ask.
-    void StopRadio();
-
-    bool IsRadioStopped() const { return radioStopped_; }
-
-    /// Modem sleep, the middle ground between a permanently awake receiver and
-    /// no radio at all: the connection survives, round trips get slower. Kept
-    /// here rather than in a setting because for now it is something a test
-    /// drives (see ThermalTestManager), not something a product configures.
-    void SetPowerSave(wifi_ps_type_t mode) { wifi_interface_.SetPowerSave(mode); }
-    wifi_ps_type_t GetPowerSave() const { return wifi_interface_.GetPowerSave(); }
 
     bool IsStaConnected() const { return staConnected_; }
     bool IsStaConnecting() const { return staConnecting_; }
@@ -91,7 +77,6 @@ private:
     std::atomic<int> staRetryCount_{0};
     std::atomic<bool> staConnected_{false};
     std::atomic<bool> staConnecting_{false};
-    std::atomic<bool> radioStopped_{false};
 
     Timer connectTimer_;
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_touch_gt911.h"
@@ -30,6 +31,9 @@ struct Gt911Config
     gpio_num_t rst = GPIO_NUM_NC;
     gpio_num_t intr = GPIO_NUM_NC;
     uint32_t scl_speed_hz = 400000;
+    // Trigger the INT line on both edges instead of the single edge implied by
+    // esp_lcd_touch's levels.interrupt. See Init() for why a board wants this.
+    bool intr_any_edge = false;
     // When true, probe 0x5D then 0x14; otherwise use fixed_addr as-is.
     bool auto_probe_addr = true;
     uint32_t fixed_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS;
@@ -90,6 +94,30 @@ public:
         {
             ESP_LOGW(TAG, "GT911 init failed: %s", esp_err_to_name(err));
             return false;
+        }
+
+        if (cfg.intr != GPIO_NUM_NC && cfg.intr_any_edge)
+        {
+            // Which edge the GT911 pulses is not a property of the wiring, it is
+            // burned into the module's config firmware (register 0x804D selects
+            // rising / falling / low / high), so the pin map cannot tell us.
+            // esp_lcd_touch commits to one edge from levels.interrupt, and the
+            // wrong guess is silent: either nothing arrives, or presses only
+            // register on release. Any-edge removes the guess. The cost is
+            // waking twice per data frame instead of once, and a read that finds
+            // no change is a single I2C transaction.
+            //
+            // The pull-up is for the idle line. If the module drives INT
+            // open-drain, a bare input floats and storms the ISR; if it drives
+            // push-pull, a 45k internal pull-up is far too weak to fight it.
+            gpio_config_t int_cfg = {};
+            int_cfg.pin_bit_mask = BIT64(cfg.intr);
+            int_cfg.mode = GPIO_MODE_INPUT;
+            int_cfg.pull_up_en = GPIO_PULLUP_ENABLE;
+            int_cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+            int_cfg.intr_type = GPIO_INTR_ANYEDGE;
+            if (gpio_config(&int_cfg) != ESP_OK)
+                ESP_LOGW(TAG, "INT any-edge reconfigure failed; keeping single edge");
         }
         return true;
     }

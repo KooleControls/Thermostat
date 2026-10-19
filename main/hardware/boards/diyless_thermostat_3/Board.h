@@ -59,29 +59,6 @@ public:
     void SetBacklightPercent(uint8_t percent);
     uint8_t GetBacklightPercent() const { return backlightPercent_; }
 
-    /// Change the RGB refresh clock. Lowering it proportionally cuts the
-    /// continuous DMA/PSRAM traffic that scans the framebuffer out to the panel
-    /// — the panel's *other* power draw, next to the backlight.
-    ///
-    /// This is the only way to idle the panel on this board: the ST7701's
-    /// 3-wire SPI lines double as the STM32 OpenTherm UART (GPIO11/12), and
-    /// with no disp_gpio wired the esp_lcd_st7701 driver implements
-    /// esp_lcd_panel_disp_on_off() by sending DISPOFF over exactly those pins.
-    /// Calling it would corrupt the OT link, so we never do.
-    bool SetPanelPclk(uint32_t hz);
-    uint32_t GetPanelPclk() const { return panelPclkHz_; }
-    static constexpr uint32_t PanelPclkDefaultHz = BoardConfig::LCD_PIXEL_CLOCK_HZ;
-
-    /// Hold the ST7701 in hardware reset — the closest this board gets to
-    /// "display off", since the panel has no power-enable line and its command
-    /// interface is gone (those pins are the OpenTherm UART now). Its gate
-    /// drivers and internal supplies stop, which is the point when measuring the
-    /// self-heating floor.
-    ///
-    /// ONE-WAY: bringing the panel back needs the init sequence, which needs the
-    /// SPI pins we no longer have. Only a reboot restores the display.
-    void HoldPanelInReset();
-    bool IsPanelInReset() const { return panelInReset_; }
 
 private:
     ServiceProvider &serviceProvider_;
@@ -96,8 +73,6 @@ private:
     SocTemperature socTemp_;
 
     uint8_t backlightPercent_ = 0;
-    uint32_t panelPclkHz_ = PanelPclkDefaultHz;
-    bool panelInReset_ = false;
 
     static constexpr ledc_timer_t kBacklightTimer = LEDC_TIMER_0;
     static constexpr ledc_channel_t kBacklightChannel = LEDC_CHANNEL_0;
