@@ -413,13 +413,18 @@ void BleTestScreen::RefreshGraph()
             for (uint32_t i = 0; i < kColumns; i++)
                 top = std::max(top, buckets_[i].ok + buckets_[i].lost);
 
+            // A zero goes in as "no point". The stacked chart tests `<= 0` and logs
+            // "doesn't support negative values" for every zero segment on every
+            // redraw — and lost == 0 is the normal column. It draws nothing for a
+            // zero either way, so the picture is the same.
+            auto segment = [](uint32_t n) {
+                return n == 0 ? LV_CHART_POINT_NONE : static_cast<int32_t>(n);
+            };
             lv_chart_set_axis_range(chart_, LV_CHART_AXIS_PRIMARY_Y, 0, static_cast<int32_t>(top));
             for (uint32_t i = 0; i < kColumns; i++)
             {
-                lv_chart_set_series_value_by_id(chart_, backSeries_, i,
-                                                static_cast<int32_t>(buckets_[i].ok));
-                lv_chart_set_series_value_by_id(chart_, frontSeries_, i,
-                                                static_cast<int32_t>(buckets_[i].lost));
+                lv_chart_set_series_value_by_id(chart_, backSeries_, i, segment(buckets_[i].ok));
+                lv_chart_set_series_value_by_id(chart_, frontSeries_, i, segment(buckets_[i].lost));
             }
             SetYLabels(0, static_cast<int32_t>(top), true);
             break;
