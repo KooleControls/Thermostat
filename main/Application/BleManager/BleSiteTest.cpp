@@ -79,6 +79,13 @@ void BleSiteTest::Reset()
 void BleSiteTest::SetTestMode(bool on)
 {
     serviceProvider_.getBleManager().SetFastReconnect(on);
+    {
+        LOCK(mutex_);
+        testMode_ = on;
+        // The pings in between were not bookkept, so a new test starts its count
+        // afresh, as after a reset, instead of settling them into the graph.
+        if (on) haveSeq_ = false;
+    }
     ESP_LOGI(TAG, "Test mode %s", on ? "on (fast reconnect)" : "off");
 }
 
@@ -347,13 +354,19 @@ RequestError BleSiteTest::Cmd_Ping(CommandContext& ctx)
         Optional("rtt",  rtt)
     ));
 
-    OnPing(seq, history, rtt);
+    bool testing;
+    { LOCK(mutex_); testing = testMode_; }
+
+    if (testing)
+        OnPing(seq, history, rtt);
 
     // "seq" must not be the last field: the gateway matches `"seq":N,` so that
-    // ping 12 is not mistaken for an echo of ping 123.
+    // ping 12 is not mistaken for an echo of ping 123. "test" sets the gateway's
+    // pace: once a second while true, a slow probe otherwise.
     JsonObject root(ctx.out);
     root.field("ok", true);
     root.field("seq", seq);
+    root.field("test", testing);
     root.field("pad", kReplyPadding);
     return RequestError::Ok;
 }

@@ -12,15 +12,19 @@
 // POC: BLE site test — the thermostat half.
 //
 // Carry the thermostat around a house and see, live, whether the link to the
-// gateway holds. The gateway sends `bletest ping` once a second; each ping
-// carries the outcome of the ones before it (see the gateway's BleSiteTest), so
-// the round-trip result of every sequence number ends up here, including the
-// ones that never arrived because the link was down. This class keeps the
-// bookkeeping; BleTestScreen shows it.
+// gateway holds. The gateway sends `bletest ping`; each ping carries the outcome
+// of the ones before it (see the gateway's BleSiteTest), so the round-trip
+// result of every sequence number ends up here, including the ones that never
+// arrived because the link was down. This class keeps the bookkeeping;
+// BleTestScreen shows it.
 //
-// Every ping is bookkept, whichever screen is up. "Test mode" only switches the
-// BLE manager to an immediate reconnect, so an outage measures the radio and the
-// stack instead of the production back-off.
+// "Test mode" is BleTestScreen being open. It switches the BLE manager to an
+// immediate reconnect, so an outage measures the radio and the stack instead of
+// the production back-off, and our reply to each ping says "test":true. That is
+// what has the gateway ping once a second; outside a test it pings only every
+// 10 s, to notice a test starting, and those pings are not bookkept. Pinging
+// once a second all the time would keep the link busy for nothing, and the
+// gateway's own commands wait behind a ping.
 // ──────────────────────────────────────────────────────────────
 class BleSiteTest
 {
@@ -137,6 +141,7 @@ private:
 
     int64_t  startUs_ = 0;
 
+    bool     testMode_ = false;      // BleTestScreen is open; see the class comment
     bool     haveSeq_ = false;
     uint32_t resolvedThrough_ = 0;   // highest seq whose outcome is counted
     int64_t  seqToSecond_ = 0;       // graph second of a ping = seq + this
