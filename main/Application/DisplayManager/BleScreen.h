@@ -62,5 +62,5 @@ private:
     BleManager::Peer selected_{};
 
     int  shownCount_ = 0;
-    bool listStale_ = true;      // rebuild once a scan finishes
+    bool listStale_ = true;      // emptied for a scan; rebuild once it finishes
 };

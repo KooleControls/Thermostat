@@ -117,9 +117,12 @@ void BleScreen::Build(lv_obj_t* root)
 void BleScreen::OnShow()
 {
     ShowListView();
+    BleManager& ble = serviceProvider_.getBleManager();
+    ble.StartScan();
+    // No scan (the stack is down): draw what the manager last heard, which may
+    // have changed while this screen was away.
+    if (!ble.Scanning()) listStale_ = true;
     RefreshStatus();
-    listStale_ = true;
-    serviceProvider_.getBleManager().StartScan();
 }
 
 void BleScreen::ShowListView()
@@ -175,13 +178,20 @@ void BleScreen::RefreshStatus()
             break;
     }
 
-    // A scan that has finished gets drawn once, not every half second.
-    if (!scanning && listStale_)
+    // The list follows the scan, as on the WiFi screen: emptied when one starts,
+    // and drawn once, not every half second, when it ends. Emptied whoever
+    // started it — the web UI's `ble scan` too — because the manager empties
+    // its own table then, and rows left up would be gateways it no longer has.
+    if (scanning && !listStale_)
+    {
+        lv_obj_clean(peerList_);
+        listStale_ = true;
+    }
+    else if (!scanning && listStale_)
     {
         listStale_ = false;
         RebuildPeerList();
     }
-    if (scanning) listStale_ = true;
 }
 
 void BleScreen::RebuildPeerList()
@@ -274,9 +284,8 @@ void BleScreen::BackCb(lv_event_t* e)
 void BleScreen::RescanCb(lv_event_t* e)
 {
     auto* self = static_cast<BleScreen*>(lv_event_get_user_data(e));
-    self->listStale_ = true;
     self->serviceProvider_.getBleManager().StartScan();
-    self->RefreshStatus();
+    self->RefreshStatus();   // empties the list now, not on the next tick
 }
 
 void BleScreen::ForgetCb(lv_event_t* e)
