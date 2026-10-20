@@ -64,11 +64,19 @@ struct St7701Config
     //     fed from the wrong offset and the image slips vertically.
     //
     //   num_fbs 2 + bounce_buffer_lines 0
-    //     Two framebuffers in PSRAM, DMA streaming straight from them, no
-    //     interrupt and no deadline to miss. Lets LVGL render directly into the
-    //     buffers and swap on VSYNC — one render pass instead of one per
-    //     bounce-buffer's worth of lines, no staging copy, and no tearing.
-    //     Costs a second full framebuffer of PSRAM.
+    //     Two framebuffers in PSRAM, DMA streaming straight from them. Lets
+    //     LVGL render directly into the buffers and swap on VSYNC — one render
+    //     pass, no staging copy, no tearing. Costs a second full framebuffer of
+    //     PSRAM. It has a deadline too, only a hidden one: the DMA's FIFO, a few
+    //     microseconds of pixels, and PSRAM shares its SPI bus with the flash,
+    //     so a burst of flash traffic can outlast it and shift the picture.
+    //
+    //   num_fbs 2 + bounce_buffer_lines N
+    //     Both of the above: LVGL still renders into two PSRAM framebuffers in
+    //     one pass, and the DMA reads internal RAM, so the deadline is N lines
+    //     of scanout instead of a FIFO's worth. The refill is the ISR memcpy
+    //     again, which needs the cache on during flash writes; on this board
+    //     SPIRAM_XIP_FROM_PSRAM keeps it on.
     size_t num_fbs = 1;
     int bounce_buffer_lines = 10;   // 0 disables bounce-buffer mode entirely
 

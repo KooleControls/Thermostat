@@ -85,8 +85,15 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # shift correlates with using the thing rather than with uptime.
 #
 # CONFIG_SPIRAM_XIP_FROM_PSRAM (= SPIRAM_FETCH_INSTRUCTIONS + SPIRAM_RODATA)
-# removes that cause: with .text and .rodata in PSRAM a flash write no longer
-# needs the cache off, so the GDMA keeps reading through it and never under-runs.
+# removes the cache-off half of that: with .text and .rodata in PSRAM a flash
+# write no longer needs the cache off. It does NOT make the GDMA safe, which is
+# what this comment first claimed. PSRAM and the flash share one SPI bus ("only
+# one consumer at a time", rgb_lcd.rst), and a GDMA streaming out of PSRAM has a
+# few microseconds of FIFO, so a burst of flash traffic — NimBLE storing a bond
+# at the end of a pairing, every time — still starved it and shifted the
+# picture. What made the scanout safe is the bounce buffers in Board.cpp: the
+# GDMA reads internal RAM, and only their refill touches PSRAM, through the
+# cache XIP keeps on. So XIP stays, now as the thing the bounce buffers need.
 #
 # This was held back at first as a second experiment, because it puts
 # instruction fetch on the same MSPI the panel reads from and MSPI contention is

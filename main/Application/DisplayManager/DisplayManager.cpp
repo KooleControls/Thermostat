@@ -122,11 +122,22 @@ bool DisplayManager::InitLvgl()
     //     48 passes. Direct mode is ONE.
     //   * The staging buffer then had to be copied into the framebuffer. In
     //     direct mode LVGL renders into the framebuffer, so that copy is gone.
-    //   * No bounce buffers means no GDMA EOF interrupt every 480 us with a CPU
-    //     memcpy out of PSRAM, so the deadline that produced the vertical slip
-    //     no longer exists to be missed.
-    //   * Frees ~38 KB of internal DRAM (19 KB staging + 19 KB bounce buffers),
-    //     which is what the BLE stack was starved of.
+    //   * Frees the 19 KB staging buffer of internal DRAM, which is what the BLE
+    //     stack was starved of.
+    //
+    // The bounce buffers went with it at first, and are back under the direct
+    // mode: 10 lines, 19 KB of internal RAM. Streaming straight out of PSRAM
+    // left the DMA a few microseconds of FIFO, and PSRAM shares its SPI bus
+    // with the flash, so a burst of flash traffic — NimBLE storing a bond at
+    // the end of every pairing — starved it and shifted the picture for good.
+    // Fed from internal RAM, the DMA has ~500 us of slack instead. The refill
+    // is a CPU memcpy out of PSRAM in an ISR, the deadline once blamed for a
+    // vertical slip. That slip predates SPIRAM_XIP_FROM_PSRAM, when every flash
+    // write turned the cache off and the refill could not run at all — the
+    // likely cause, not a confirmed one. If it slips anyway, the driver sees
+    // the missed refill and restarts at the next VSYNC: one bad frame, not a
+    // permanent shift. bb_mode tells the port to swap on the bounce frame's
+    // end rather than on VSYNC.
     //
     // The old comment here said rendering into PSRAM competes with the panel DMA
     // and produced artifacts. That was measured without double buffering and
@@ -150,7 +161,7 @@ bool DisplayManager::InitLvgl()
     disp_cfg.flags.direct_mode = true;
 
     lvgl_port_display_rgb_cfg_t rgb_cfg = {};
-    rgb_cfg.flags.bb_mode = false;
+    rgb_cfg.flags.bb_mode = true;
     rgb_cfg.flags.avoid_tearing = true;
 
     lvDisplay_ = lvgl_port_add_disp_rgb(&disp_cfg, &rgb_cfg);
