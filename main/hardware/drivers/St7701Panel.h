@@ -176,6 +176,28 @@ public:
     esp_lcd_panel_handle_t panel() const { return panel_; }
     bool ok() const { return panel_ != nullptr; }
 
+    /// Put a shifted picture back in register, at the next VSYNC.
+    ///
+    /// The shift: the frame buffers are in PSRAM, which on the S3 shares one SPI
+    /// bus with the flash, so a flash write (NVS, a bond, OTA) can hold the bus
+    /// long enough to starve the LCD's DMA. The LCD then clocks out dummy bytes
+    /// while the DMA waits, and in stream mode — where a pixel's place is only a
+    /// count of clocks since VSYNC — the two stay out of step for good. Nothing
+    /// reports it: the S3 has no LCD underrun event, and the DMA side never
+    /// underflows, because it is the LCD that fills the gap (IDF's rgb_lcd.rst).
+    ///
+    /// A restart re-arms the DMA from the top of frame buffer 0, so on the
+    /// frame it happens that buffer is shown even if the other is current; the
+    /// next frame is the current one again. Meant to be harmless on a picture
+    /// that is not shifted, so that it can be applied blind; the `ui resync`
+    /// bench command exists to confirm that on the panel. Not the per-VBlank
+    /// restart, which this frame-buffer layout cannot take — see the board's
+    /// sdkconfig.defaults.
+    void RestartDma()
+    {
+        if (panel_ != nullptr) esp_lcd_rgb_panel_restart(panel_);
+    }
+
 private:
     esp_lcd_panel_handle_t panel_ = nullptr;
 };

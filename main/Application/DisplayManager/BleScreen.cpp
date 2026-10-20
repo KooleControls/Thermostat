@@ -135,6 +135,7 @@ void BleScreen::OnShow()
     // No scan (the stack is down): draw what the manager last heard, which may
     // have changed while this screen was away.
     if (!ble.Scanning()) listStale_ = true;
+    lastLink_ = ble.GetLinkState();   // a link already up is not news
     RefreshStatus();
 }
 
@@ -177,8 +178,16 @@ void BleScreen::RefreshStatus()
     if (isPaired) DescribePeer(paired, who, sizeof(who));
     else          snprintf(who, sizeof(who), "the gateway");
 
+    // A link coming up has just written to flash — a new bond, at the end of a
+    // pairing — and that is when the picture shifted. This screen does not
+    // change, so the shell's resync after a screen change would not come.
+    const BleManager::LinkState link = ble.GetLinkState();
+    if (link == BleManager::LinkState::Ready && lastLink_ != BleManager::LinkState::Ready)
+        navigator_.ResyncPanel();
+    lastLink_ = link;
+
     char status[96];
-    switch (ble.GetLinkState())
+    switch (link)
     {
         case BleManager::LinkState::Ready:
             snprintf(status, sizeof(status), LV_SYMBOL_OK "  Connected to %s", who);
@@ -313,7 +322,8 @@ void BleScreen::RescanCb(lv_event_t* e)
 void BleScreen::ForgetCb(lv_event_t* e)
 {
     auto* self = static_cast<BleScreen*>(lv_event_get_user_data(e));
-    self->serviceProvider_.getBleManager().Forget();
+    self->serviceProvider_.getBleManager().Forget();   // deletes the bond: a flash write
+    self->navigator_.ResyncPanel();
     self->RefreshStatus();
 }
 

@@ -58,11 +58,15 @@ public:
     /// in-flight event dead when its target is destroyed.
     void Restyle() override;
 
+    /// Queue a panel resync for when the screen has settled. LVGL task only.
+    void ResyncPanel() override;
+
 private:
     bool InitLvgl();
     static void ArmTouchBackstop(lv_indev_t* indev);
     Screen* Resolve(ScreenId id);
     void ServiceBacklight(uint32_t idleMs);
+    void ServicePanelResync();
     static void TickCb(lv_timer_t* t);
 
     static const char* ScreenName(ScreenId id);
@@ -98,9 +102,15 @@ private:
     /// to stand at the panel and tap.
     RequestError Cmd_UiTheme(CommandContext& ctx);
 
+    /// `ui resync` — restart the panel's DMA at the next VSYNC, which undoes a
+    /// sideways shift of the picture (see Board::ResyncPanel). On demand, to
+    /// see what it does to a shifted picture and to one that is not.
+    RequestError Cmd_UiResync(CommandContext& ctx);
+
     inline static CommandEntry commands_[] = {
-        { "ui", "go",    &InvokeCommand<&DisplayManager::Cmd_UiGo> },
-        { "ui", "theme", &InvokeCommand<&DisplayManager::Cmd_UiTheme> },
+        { "ui", "go",     &InvokeCommand<&DisplayManager::Cmd_UiGo> },
+        { "ui", "theme",  &InvokeCommand<&DisplayManager::Cmd_UiTheme> },
+        { "ui", "resync", &InvokeCommand<&DisplayManager::Cmd_UiResync> },
     };
 
     // The panel rests dim and comes up full when someone is at it. The motive
@@ -136,4 +146,9 @@ private:
     /// Which of the two levels is currently on the panel. Tracked so the tick
     /// only writes LEDC on a transition rather than ten times a second.
     bool backlightFull_ = true;
+
+    // A panel resync waiting for the screen change that asked for it to finish
+    // drawing. See ResyncPanel.
+    bool     resyncPending_ = false;
+    uint32_t resyncRequestedMs_ = 0;
 };

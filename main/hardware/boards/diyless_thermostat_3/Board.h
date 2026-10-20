@@ -54,6 +54,10 @@ public:
     esp_lcd_panel_handle_t GetPanel() { return panel_.panel(); }
     esp_lcd_touch_handle_t GetTouch() { return touch_.handle(); }
 
+    /// Undo a sideways shift of the picture at the next VSYNC; harmless when
+    /// there is none. See St7701Panel::RestartDma.
+    void ResyncPanel() { panel_.RestartDma(); }
+
     /// The size of one pixel on the panel, in nm. The two differ on this board:
     /// see LCD_ACTIVE_W_UM in BoardConfig.h.
     static constexpr int32_t GetPixelPitchXNm() { return BoardConfig::LCD_ACTIVE_W_UM * 1000 / BoardConfig::LCD_H_RES; }

@@ -215,6 +215,7 @@ void DisplayManager::Go(ScreenId id)
     }
     Resolve(id)->Load();
     current_ = id;
+    ResyncPanel();
     lvgl_port_unlock();
 }
 
@@ -247,6 +248,7 @@ void DisplayManager::Restyle()
 
     current->Load();
     if (outgoing) lv_obj_delete(outgoing);
+    ResyncPanel();   // the theme setting was just written to flash
 
     lvgl_port_unlock();
     ESP_LOGI(TAG, "Restyled — %s theme", UiTheme::IsLight() ? "light" : "dark");
@@ -265,6 +267,24 @@ const char* DisplayManager::ScreenName(ScreenId id)
         case ScreenId::BleTest:  return "bletest";
     }
     return "home";
+}
+
+RequestError DisplayManager::Cmd_UiResync(CommandContext& ctx)
+{
+    RETURN_IF_ERROR(ctx.readArgs());
+
+    // Through the same queue as the automatic ones, so it levels the frame
+    // buffers first; this runs on the command task, hence the lock.
+    if (lvDisplay_ != nullptr && lvgl_port_lock(0))
+    {
+        ResyncPanel();
+        lvgl_port_unlock();
+    }
+
+    JsonObject resp(ctx.out);
+    resp.field("ok", true);
+    resp.field("headless", lvDisplay_ == nullptr);
+    return RequestError::Ok;
 }
 
 RequestError DisplayManager::Cmd_UiTheme(CommandContext& ctx)
@@ -344,9 +364,42 @@ void DisplayManager::ServiceBacklight(uint32_t idleMs)
     backlightFull_ = full;
 }
 
+// A sideways shift of the picture is permanent (see Board::ResyncPanel) and
+// cannot be detected, so it is undone blind: after every screen change, which
+// makes a shift last until the next tap through the menus at most, and when a
+// screen asks after a flash write of its own. Deferred, not done on the spot,
+// so the change that asked for it has finished drawing first. Must be called
+// with the LVGL lock held.
+void DisplayManager::ResyncPanel()
+{
+    resyncPending_ = true;
+    resyncRequestedMs_ = lv_tick_get();
+}
+
+// The restart shows frame buffer 0 for one frame, whichever buffer is current.
+// In direct mode LVGL brings the other buffer up to date only at the start of
+// its next refresh, so straight after a screen change one of the two still
+// holds the previous screen — and restarting then flashed that screen up for a
+// frame, half the time. So both are levelled first: a one-pixel invalidation
+// makes the next refresh copy every pending area across, and lv_refr_now runs
+// it here, flip included. After that both buffers hold the same picture and
+// the restart has nothing to show but the screen already on the panel.
+void DisplayManager::ServicePanelResync()
+{
+    if (!resyncPending_ || lv_tick_elaps(resyncRequestedMs_) < 300) return;
+    resyncPending_ = false;
+
+    lv_area_t pixel = { 0, 0, 0, 0 };
+    lv_obj_invalidate_area(lv_screen_active(), &pixel);
+    lv_refr_now(lvDisplay_);
+
+    serviceProvider_.getBoard().ResyncPanel();
+}
+
 void DisplayManager::TickCb(lv_timer_t *t)
 {
     auto *self = static_cast<DisplayManager *>(lv_timer_get_user_data(t));
+    self->ServicePanelResync();
     uint32_t idleMs = lv_display_get_inactive_time(self->lvDisplay_);
 
     // The site test is carried around untouched for minutes on end: it has to
@@ -368,4 +421,5 @@ void DisplayManager::TickCb(lv_timer_t *t)
     ESP_LOGI(TAG, "Idle — returning to home screen");
     self->homeScreen_.Load();
     self->current_ = ScreenId::Home;
+    self->ResyncPanel();
 }
