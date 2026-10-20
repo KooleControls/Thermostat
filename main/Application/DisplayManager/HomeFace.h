@@ -119,17 +119,12 @@ private:
                        const char* text, lv_color_t hue, HomeIntent intent);
     static void SetTileEnabled(Tile& tile, bool enabled);
 
-    static void PaintDisc(lv_draw_buf_t* buf, lv_color_t top, lv_color_t bottom);
     static void IntentCb(lv_event_t* e);
     static void FormatTemp(char* out, size_t cap, float value, bool valid);
     static void SetBadgeGlyph(lv_obj_t* label, HomeStage what, bool running);
 
     IntentHandler handler_ = nullptr;
     void*         user_    = nullptr;
-
-    // The disc's pixels. Outlives the widget tree, which is rebuilt on every
-    // theme change, so it is made once and repainted in place.
-    lv_draw_buf_t* discBuf_ = nullptr;
 
     // The badge is a flex row: one icon at rest, three during a changeover.
     lv_obj_t* badgeRow_     = nullptr;

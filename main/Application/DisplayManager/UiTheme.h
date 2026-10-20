@@ -81,13 +81,6 @@ namespace UiTheme
     inline lv_color_t Heat()    { return Pick(0xE03A3A, 0xD92B2B); }
     inline lv_color_t Cool()    { return Pick(0x3B82F6, 0x1D6FE0); }
 
-    // The home readout disc, top and bottom of its vertical gradient. Here
-    // rather than in HomeFace because the pair is a palette decision: the disc
-    // is lit from the top in both modes, but on light it is a white disc lifting
-    // off grey, not a dark one sinking into black.
-    inline lv_color_t DiscTop()    { return Pick(0x24262B, 0xFFFFFF); }
-    inline lv_color_t DiscBottom() { return Pick(0x141519, 0xE6E6EB); }
-
     /// A style selector is a part OR'd with a state, but the build is gnu++26,
     /// where a bitwise OR between two different enum types is an error — go
     /// through the selector type instead.

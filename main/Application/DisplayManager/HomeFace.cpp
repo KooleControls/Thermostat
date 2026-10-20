@@ -34,106 +34,32 @@ void HomeFace::Build(lv_obj_t* root, IntentHandler handler, void* user)
 // The disc the readout sits on.
 //
 // A filled circle rather than an outline: it lifts the number off the
-// background without drawing a line around it. The vertical gradient is what
-// stops it reading as a flat hole — top edge lit, bottom settling back toward
-// the background. Both ends come from the palette, so on the light theme it is
-// a white disc rising off grey rather than a dark one sinking into black.
-// Static, and not clickable.
+// background without drawing a line around it. Surface(), like the -/+ beside
+// it, so it reads as raised in both themes — a white disc rising off grey on
+// light, a dark grey one off black. Static, and not clickable.
 //
-// An image we paint, not a styled object, because the gradient has to be
-// dithered and LVGL's cannot be: see PaintDisc. Painting it also makes the
-// shape a true ellipse — it is taller than wide, see UiTheme::RoundHeight —
-// where LV_RADIUS_CIRCLE on a non-square box would draw a stadium.
+// Flat, not a gradient. A top-lit gradient was tried, and this panel's RGB565
+// cannot carry one this subtle: across the disc it had 3 levels of red and
+// blue and 5 of green, stepping on different rows, so it showed as stripes of
+// changing hue. Dithered smooth it needed a 171 KB image, and was then too
+// faint to see — the flat fill is its average colour, at no cost.
+//
+// Taller than wide (see UiTheme::RoundHeight). LV_RADIUS_CIRCLE on that box
+// draws a stadium, which strays at most 0.74 px from the true ellipse here.
 void HomeFace::BuildDisc(lv_obj_t* root)
 {
     const int32_t discH = UiTheme::RoundHeight(kDiscW);   // 242 on this panel
-    if (discBuf_ == nullptr)
-        discBuf_ = lv_draw_buf_create(kDiscW, discH, LV_COLOR_FORMAT_RGB565A8, LV_STRIDE_AUTO);
-    if (discBuf_ == nullptr) return;   // a face without its disc beats no face
 
-    // Repainted on every build, because a build is what a theme change is. When
-    // this is the screen on the panel, the outgoing tree still points at the
-    // same buffer; it is replaced before anything is drawn again.
-    PaintDisc(discBuf_, UiTheme::DiscTop(), UiTheme::DiscBottom());
-
-    lv_obj_t* disc = lv_image_create(root);
-    lv_image_set_src(disc, discBuf_);
+    lv_obj_t* disc = lv_obj_create(root);
+    lv_obj_remove_style_all(disc);
+    lv_obj_set_size(disc, kDiscW, discH);
     lv_obj_align(disc, LV_ALIGN_TOP_LEFT, kDiscCx - kDiscW / 2, kDiscCy - discH / 2);
     lv_obj_remove_flag(disc, LV_OBJ_FLAG_CLICKABLE);
-}
+    lv_obj_remove_flag(disc, LV_OBJ_FLAG_SCROLLABLE);
 
-// The gradient, quantized to RGB565 here with an ordered dither instead of
-// left to LVGL. Across this disc the dark palette spans only 3 levels of red
-// and blue and 5 of green; LVGL rounds each row to the nearest, so the disc
-// came out as a few broad bands, and because the channels step on different
-// rows each band had a different hue — the stripes of blue, teal and grey.
-// Dithered, every row averages to its exact colour and the pattern is one
-// pixel, 0.15 mm, finer than anything the eye resolves at arm's length.
-//
-// The edge is anti-aliased into the alpha plane. Fully covered pixels pass
-// through to the framebuffer untouched, so the dither survives the blend.
-void HomeFace::PaintDisc(lv_draw_buf_t* buf, lv_color_t top, lv_color_t bottom)
-{
-    // 8x8 Bayer matrix: thresholds spread evenly over a tile, so a fraction f
-    // of a level becomes f of the pixels rounding up, scattered rather than
-    // clumped.
-    static constexpr uint8_t kBayer[8][8] = {
-        {  0, 32,  8, 40,  2, 34, 10, 42 },
-        { 48, 16, 56, 24, 50, 18, 58, 26 },
-        { 12, 44,  4, 36, 14, 46,  6, 38 },
-        { 60, 28, 52, 20, 62, 30, 54, 22 },
-        {  3, 35, 11, 43,  1, 33,  9, 41 },
-        { 51, 19, 59, 27, 49, 17, 57, 25 },
-        { 15, 47,  7, 39, 13, 45,  5, 37 },
-        { 63, 31, 55, 23, 61, 29, 53, 21 },
-    };
-
-    const int32_t  w      = buf->header.w;
-    const int32_t  h      = buf->header.h;
-    const uint32_t stride = buf->header.stride;
-    uint8_t* const alphaPlane = buf->data + stride * h;   // LVGL's RGB565A8 layout:
-    const uint32_t alphaStride = stride / 2;               // A8 at half the stride
-
-    const float a = w / 2.0f;              // semi-axes, in pixels
-    const float b = h / 2.0f;
-    const float r = (a + b) / 2.0f;        // for turning the edge test into pixels
-
-    // floor(v + threshold), threshold in (0, 1): rounds up for the fraction of
-    // the tile that v's fractional part says it should.
-    auto quantize = [](float v, float threshold, int max) {
-        int n = static_cast<int>(v + threshold);
-        return n > max ? max : n;
-    };
-
-    for (int32_t y = 0; y < h; y++)
-    {
-        // Each channel in its own RGB565 units, still fractional.
-        const float t  = static_cast<float>(y) / static_cast<float>(h - 1);
-        const float cr = (top.red   + (bottom.red   - top.red)   * t) * (31.0f / 255.0f);
-        const float cg = (top.green + (bottom.green - top.green) * t) * (63.0f / 255.0f);
-        const float cb = (top.blue  + (bottom.blue  - top.blue)  * t) * (31.0f / 255.0f);
-        const float ny = (y + 0.5f - b) / b;
-
-        uint16_t* px    = reinterpret_cast<uint16_t*>(buf->data + stride * y);
-        uint8_t*  alpha = alphaPlane + alphaStride * y;
-
-        for (int32_t x = 0; x < w; x++)
-        {
-            const float threshold = (kBayer[y & 7][x & 7] + 0.5f) / 64.0f;
-            px[x] = static_cast<uint16_t>(quantize(cr, threshold, 31) << 11 |
-                                          quantize(cg, threshold, 63) << 5  |
-                                          quantize(cb, threshold, 31));
-
-            // How far this pixel's centre lies outside the ellipse, in pixels,
-            // and from that how much of the pixel it covers.
-            const float nx      = (x + 0.5f - a) / a;
-            const float outside = (sqrtf(nx * nx + ny * ny) - 1.0f) * r;
-            const float cover   = 0.5f - outside;
-            alpha[x] = cover >= 1.0f ? 255
-                     : cover <= 0.0f ? 0
-                     : static_cast<uint8_t>(cover * 255.0f + 0.5f);
-        }
-    }
+    lv_obj_set_style_radius(disc, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(disc, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(disc, UiTheme::Surface(), 0);
 }
 
 // Top-left activity badge + the top-right bluetooth/gear pair.
