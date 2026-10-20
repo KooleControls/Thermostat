@@ -119,6 +119,15 @@ public:
     /// False when nothing is paired.
     bool GetPaired(Peer& out) const;
 
+    /// How the last pairing attempt ended, when it was something the installer
+    /// can act on rather than a dropout to retry. Only one so far: the install
+    /// code was wrong.
+    enum class PairFailure : uint8_t { None, WrongCode };
+
+    /// The last attempt's failure and, in `who`, the gateway it was with.
+    /// Cleared by the next Connect(), StartScan() or Forget().
+    PairFailure GetPairFailure(Peer* who = nullptr) const;
+
     LinkState GetLinkState() const;
 
     /// RSSI of the live connection in dBm. False when there is no connection.
@@ -143,6 +152,7 @@ private:
     void StartConnect();                               // uses target_
     void ScheduleReconnect();
     void DropLink(const char* why);
+    void RejectInstallCode();
     void StartDiscovery();
     void SetState(LinkState s);
 
@@ -208,6 +218,8 @@ private:
     // ask twice a second without reading NVS.
     char       targetName_[MaxNameLen + 1] = {};
     uint32_t   targetDgid_ = 0;
+    PairFailure pairFailure_ = PairFailure::None;
+    Peer        failedPeer_{};               // who pairFailure_ was with
     uint32_t   pendingPasskey_ = 0;      // only meaningful while havePasskey_
     bool       havePasskey_ = false;     // set between Connect() and pairing
     uint16_t   connHandle_ = BLE_HS_CONN_HANDLE_NONE;

@@ -31,6 +31,7 @@ void BleScreen::Build(lv_obj_t* root)
     lv_obj_set_style_text_align(statusLabel_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(statusLabel_, LV_ALIGN_TOP_MID, 0, UiTheme::HeaderH);
     lv_label_set_text(statusLabel_, "");
+    statusWarn_ = false;   // a new label, in TextDim()
 
     // ── List view: rescan + forget, then the gateways we heard ────
     listView_ = lv_obj_create(root);
@@ -191,6 +192,7 @@ void BleScreen::RefreshStatus()
     lastLink_ = link;
 
     char status[96];
+    bool warn = false;
     switch (link)
     {
         case BleManager::LinkState::Ready:
@@ -206,12 +208,30 @@ void BleScreen::RefreshStatus()
             snprintf(status, sizeof(status), "Reading the gateway's services...");
             break;
         case BleManager::LinkState::Down:
+        {
+            BleManager::Peer failed;
             if (scanning)      snprintf(status, sizeof(status), "Looking for gateways...");
             else if (isPaired) snprintf(status, sizeof(status), "Paired with %s, not connected", who);
+            else if (ble.GetPairFailure(&failed) == BleManager::PairFailure::WrongCode)
+            {
+                char failedWho[56];
+                DescribePeer(failed, failedWho, sizeof(failedWho));
+                snprintf(status, sizeof(status), "Wrong install code for %s", failedWho);
+                warn = true;
+            }
             else               snprintf(status, sizeof(status), "Not connected: pick a gateway");
             break;
+        }
     }
     SetLabelText(statusLabel_, status);
+
+    // Red only for what the installer has to act on; compared first, because
+    // setting a style redraws the label even when nothing changed.
+    if (warn != statusWarn_)
+    {
+        lv_obj_set_style_text_color(statusLabel_, warn ? UiTheme::Danger() : UiTheme::TextDim(), 0);
+        statusWarn_ = warn;
+    }
 
     // The list follows the scan, as on the WiFi screen: emptied when one starts,
     // and drawn once, not every half second, when it ends. Emptied whoever

@@ -259,7 +259,9 @@ bool BleManager::StartScan()
 
         // A fresh scan starts from an empty list: a gateway that has been
         // switched off should disappear rather than linger from a past scan.
+        // A failed pairing is old news by now too.
         for (auto& p : peers_) p = Peer{};
+        pairFailure_ = PairFailure::None;
         addrType = ownAddrType_;
         scanning_ = true;
     }
@@ -455,6 +457,7 @@ bool BleManager::Connect(const Peer& peer, const char* code)
         haveTarget_ = true;
         snprintf(targetName_, sizeof(targetName_), "%s", peer.name);
         targetDgid_ = dgid;
+        pairFailure_ = PairFailure::None;     // a new attempt, a clean slate
         // An empty string means "no code given". The code is kept as text up to
         // here because "000000" — the factory default — is a perfectly valid
         // passkey that a numeric 0 cannot be distinguished from.
@@ -590,6 +593,7 @@ void BleManager::Forget()
         targetDgid_ = 0;
         havePasskey_ = false;
         pendingPasskey_ = 0;
+        pairFailure_ = PairFailure::None;
     }
 
     peerSetting_.Set("");
@@ -614,6 +618,29 @@ void BleManager::Forget()
     if (had) ble_store_util_delete_peer(&addr);
 
     ESP_LOGI(TAG, "Gateway forgotten");
+}
+
+// The install code was wrong. Nothing got paired, so the record Connect() made
+// to keep retrying goes: kept, it would send the same code again every few
+// seconds, and again after every reboot. What is kept instead is the failure,
+// so the screen can say what happened rather than cycle through "Connecting".
+void BleManager::RejectInstallCode()
+{
+    Peer who{};
+    GetPaired(who);                 // name and id, before Forget() clears them
+    ESP_LOGW(TAG, "Wrong install code, not retrying");
+    Forget();
+
+    LOCK(mutex_);
+    failedPeer_ = who;
+    pairFailure_ = PairFailure::WrongCode;
+}
+
+BleManager::PairFailure BleManager::GetPairFailure(Peer* who) const
+{
+    LOCK(mutex_);
+    if (who != nullptr) *who = failedPeer_;
+    return pairFailure_;
 }
 
 bool BleManager::GetPaired(Peer& out) const
@@ -749,7 +776,18 @@ int BleManager::OnGapEvent(struct ble_gap_event* event)
             if (event->enc_change.status != 0 ||
                 ble_gap_conn_find(event->enc_change.conn_handle, &desc) != 0)
             {
-                ESP_LOGW(TAG, "Encryption failed: status %d", event->enc_change.status);
+                const int status = event->enc_change.status;
+                ESP_LOGW(TAG, "Encryption failed: status 0x%x", status);
+
+                // Confirm values that disagree are the passkey disagreeing —
+                // whichever side checked first. That is a wrong install code,
+                // and no retry can fix it.
+                if (status == BLE_HS_SM_US_ERR(BLE_SM_ERR_CONFIRM_MISMATCH) ||
+                    status == BLE_HS_SM_PEER_ERR(BLE_SM_ERR_CONFIRM_MISMATCH))
+                {
+                    RejectInstallCode();
+                    return 0;
+                }
                 DropLink("encryption failed");
                 return 0;
             }

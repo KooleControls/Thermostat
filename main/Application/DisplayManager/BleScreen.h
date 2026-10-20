@@ -64,4 +64,5 @@ private:
     int  shownCount_ = 0;
     bool listStale_ = true;      // emptied for a scan; rebuild once it finishes
     BleManager::LinkState lastLink_ = BleManager::LinkState::Down;   // to see it come up
+    bool statusWarn_ = false;    // status line is in Danger(), not TextDim()
 };
