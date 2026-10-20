@@ -54,6 +54,11 @@ public:
     esp_lcd_panel_handle_t GetPanel() { return panel_.panel(); }
     esp_lcd_touch_handle_t GetTouch() { return touch_.handle(); }
 
+    /// The size of one pixel on the panel, in nm. The two differ on this board:
+    /// see LCD_ACTIVE_W_UM in BoardConfig.h.
+    static constexpr int32_t GetPixelPitchXNm() { return BoardConfig::LCD_ACTIVE_W_UM * 1000 / BoardConfig::LCD_H_RES; }
+    static constexpr int32_t GetPixelPitchYNm() { return BoardConfig::LCD_ACTIVE_H_UM * 1000 / BoardConfig::LCD_V_RES; }
+
     /// Backlight brightness, 0..100 %. 0 is fully off (the LED string is the
     /// board's single biggest heat source, so this doubles as a thermal lever).
     void SetBacklightPercent(uint8_t percent);

@@ -35,6 +35,11 @@ void DisplayManager::Init()
     // whether or not this unit has a panel to show it on.
     UiTheme::SetMode(SettingsMenuScreen::ThemeMode());
 
+    // Also before anything is built: the screens size their round shapes from
+    // it. The panel's pixels are not square (see UiTheme::RoundHeight).
+    UiTheme::SetPixelPitch(serviceProvider_.getBoard().GetPixelPitchXNm(),
+                           serviceProvider_.getBoard().GetPixelPitchYNm());
+
     // Likewise for uiGo — headless it reports the shell's idea of the current
     // screen and navigates nothing, which is a truthful answer rather than a
     // missing command.
