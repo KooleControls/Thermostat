@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Screen.h"
+#include "ScanBar.h"
 #include "ServiceProvider.h"
 #include "BleManager/BleManager.h"
 
@@ -65,4 +66,5 @@ private:
     bool listStale_ = true;      // emptied for a scan; rebuild once it finishes
     BleManager::LinkState lastLink_ = BleManager::LinkState::Down;   // to see it come up
     bool statusWarn_ = false;    // status line is in Danger(), not TextDim()
+    ScanBar scanBar_;
 };

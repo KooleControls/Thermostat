@@ -264,6 +264,7 @@ bool BleManager::StartScan()
         pairFailure_ = PairFailure::None;
         addrType = ownAddrType_;
         scanning_ = true;
+        scanStartUs_ = esp_timer_get_time();
     }
 
     // Active scan: the name lives in the scan response, which only an active
@@ -293,6 +294,13 @@ bool BleManager::Scanning() const
 {
     LOCK(mutex_);
     return scanning_;
+}
+
+uint32_t BleManager::ScanElapsedMs() const
+{
+    LOCK(mutex_);
+    if (!scanning_) return 0;
+    return static_cast<uint32_t>((esp_timer_get_time() - scanStartUs_) / 1000);
 }
 
 int BleManager::GetPeers(Peer* out, int max) const

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Screen.h"
+#include "ScanBar.h"
 #include "ServiceProvider.h"
 #include "WifiScanner.h"
 
@@ -14,6 +15,13 @@
 class WifiScreen final : public Screen
 {
     static constexpr uint32_t kRefreshMs = 500;   // status + scan-result polling
+
+    // How long the first scan after boot is expected to take, before one has
+    // been timed: an active scan dwells up to 300 ms on each of 13 channels
+    // (WiFiInterface), plus a margin for switching to APSTA when the AP is up.
+    // Generous on purpose — a line that finishes early just snaps to the end,
+    // one that runs out first sits full while the screen waits.
+    static constexpr uint32_t kFirstScanGuessMs = 13 * 300 + 600;
 
 public:
     WifiScreen(ServiceProvider& serviceProvider, Navigator& navigator)
@@ -62,4 +70,11 @@ private:
     // later scan overwriting the buffer can't change what we connect to.
     char selectedSsid_[33] = {};
     bool listRebuilt_ = false;   // false while a scan is in flight
+
+    // A WiFi scan takes as long as the channels and the answers on them make
+    // it, so the line paces itself on how long the last one took — measured to
+    // the poll that noticed it end, so it errs long, which is the safe side.
+    ScanBar  scanBar_;
+    uint32_t scanStartMs_ = 0;
+    uint32_t lastScanMs_ = kFirstScanGuessMs;
 };

@@ -15,6 +15,7 @@ void WifiScreen::Build(lv_obj_t* root)
 {
     lv_obj_t* back = AddHeader(root, "WiFi", LV_SYMBOL_LEFT);
     lv_obj_add_event_cb(back, BackCb, LV_EVENT_CLICKED, this);
+    scanBar_.Build(root);
 
     statusLabel_ = lv_label_create(root);
     lv_obj_set_style_text_font(statusLabel_, &lv_font_montserrat_20, 0);
@@ -152,12 +153,25 @@ void WifiScreen::StartScan()
     listRebuilt_ = false;
     lv_obj_clean(networkList_);
     lv_obj_add_state(rescanButton_, LV_STATE_DISABLED);
+    scanStartMs_ = lv_tick_get();
+    scanBar_.Start(lastScanMs_);
 }
 
 void WifiScreen::CollectScan()
 {
     if (scanner_.GetState() == WifiScanner::State::Scanning) return;
     if (listRebuilt_) return;
+
+    // Timed only if the line was running for it, i.e. this screen started it
+    // and has not been rebuilt since. To the refresh tick that noticed, so up
+    // to kRefreshMs long; the clamp keeps one odd scan from setting a silly
+    // pace for the next.
+    if (scanBar_.Running())
+    {
+        uint32_t took = lv_tick_elaps(scanStartMs_);
+        lastScanMs_ = took < 1000 ? 1000 : took > 15000 ? 15000 : took;
+        scanBar_.Finish();
+    }
 
     listRebuilt_ = true;
     lv_obj_remove_state(rescanButton_, LV_STATE_DISABLED);

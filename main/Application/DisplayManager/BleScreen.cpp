@@ -22,6 +22,7 @@ void BleScreen::Build(lv_obj_t* root)
 {
     lv_obj_t* back = AddHeader(root, "Gateway", LV_SYMBOL_LEFT);
     lv_obj_add_event_cb(back, BackCb, LV_EVENT_CLICKED, this);
+    scanBar_.Build(root);
 
     statusLabel_ = lv_label_create(root);
     lv_obj_set_style_text_font(statusLabel_, &lv_font_montserrat_20, 0);
@@ -170,6 +171,15 @@ void BleScreen::RefreshStatus()
     bool scanning = ble.Scanning();
     if (scanning) lv_obj_add_state(rescanButton_, LV_STATE_DISABLED);
     else          lv_obj_remove_state(rescanButton_, LV_STATE_DISABLED);
+
+    // The scan line follows the scan, whoever started it. A BLE scan runs for a
+    // fixed time from a known start, so the line is exact, including for a scan
+    // the web UI began before this screen was opened; one cut short by a
+    // pairing finishes early.
+    if (scanning && !scanBar_.Running())
+        scanBar_.Start(static_cast<uint32_t>(BleManager::ScanDurationMs), ble.ScanElapsedMs());
+    else if (!scanning && scanBar_.Running())
+        scanBar_.Finish();
 
     // Unpair is live whenever something is paired, which includes the gaps
     // between reconnect attempts to a gateway that is off — the moment someone

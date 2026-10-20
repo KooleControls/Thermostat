@@ -96,6 +96,9 @@ public:
     bool StartScan();
     bool Scanning() const;
 
+    /// How far into its ScanDurationMs the running scan is; 0 when none runs.
+    uint32_t ScanElapsedMs() const;
+
     /// Copy out what the current/last scan has heard. Returns the count.
     int GetPeers(Peer* out, int max) const;
 
@@ -208,6 +211,7 @@ private:
     bool    stackUp_ = false;      // NimBLE host running
     bool    synced_ = false;       // controller synced, own address known
     bool    scanning_ = false;
+    int64_t scanStartUs_ = 0;      // esp_timer time the running scan began
     uint8_t ownAddrType_ = 0;
     Peer    peers_[MaxPeers];
 
