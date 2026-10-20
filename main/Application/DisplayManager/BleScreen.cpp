@@ -139,10 +139,13 @@ void BleScreen::OnShow()
     RefreshStatus();
 }
 
+// The status line belongs to the list view. It sits where the code view's
+// prompt does, so left up it drew straight through "Install code for ...".
 void BleScreen::ShowListView()
 {
     lv_obj_add_flag(codeView_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(listView_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(statusLabel_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void BleScreen::ShowCodeView(const BleManager::Peer& peer)
@@ -154,6 +157,7 @@ void BleScreen::ShowCodeView(const BleManager::Peer& peer)
     lv_textarea_set_text(codeInput_, "");
 
     lv_obj_add_flag(listView_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(statusLabel_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(codeView_, LV_OBJ_FLAG_HIDDEN);
 }
 

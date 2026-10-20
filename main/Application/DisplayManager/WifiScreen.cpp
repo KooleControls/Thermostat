@@ -126,10 +126,13 @@ void WifiScreen::OnShow()
     StartScan();
 }
 
+// The status line belongs to the list view. It sits where the password view's
+// prompt does, so left up it drew straight through "Password for ...".
 void WifiScreen::ShowListView()
 {
     lv_obj_add_flag(passwordView_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(listView_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(statusLabel_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void WifiScreen::ShowPasswordView(const char* ssid)
@@ -139,6 +142,7 @@ void WifiScreen::ShowPasswordView(const char* ssid)
     lv_textarea_set_text(passwordInput_, "");
 
     lv_obj_add_flag(listView_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(statusLabel_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(passwordView_, LV_OBJ_FLAG_HIDDEN);
 }
 
