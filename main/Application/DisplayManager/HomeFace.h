@@ -93,7 +93,7 @@ private:
     /// one's, so equal boxes are not equal glyphs — measured, not derived.
     static constexpr int32_t kUnitDrop = 5;
 
-    static constexpr int32_t kNudgeSize = 76;    // -/+ circle diameter
+    static constexpr int32_t kNudgeSize = 76;    // -/+ circle width; height likewise
     static constexpr int32_t kTileW     = 100;
     static constexpr int32_t kTileH     = 96;
     static constexpr int32_t kTileGap   = 10;

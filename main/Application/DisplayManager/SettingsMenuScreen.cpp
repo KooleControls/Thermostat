@@ -112,9 +112,22 @@ void SettingsMenuScreen::AddToggleRow(lv_obj_t* list, const char* icon, const ch
     // the second line has to stop before it.
     MenuRow row = AddMenuRow(list, icon, text, subtitle, false, 96);
 
+    constexpr int32_t kTrackH = 38;
+    constexpr int32_t kInset  = 3;   // knob to track edge
     lv_obj_t* sw = lv_switch_create(row.card);
-    lv_obj_set_size(sw, 72, 38);
+    lv_obj_set_size(sw, 72, kTrackH);
     lv_obj_align(sw, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    // LVGL makes the knob a square as tall as the track, inset by the knob's
+    // pads, so on this panel it comes out wider than tall. Its height is set
+    // by the track; take the missing pixel off the right, along the axis the
+    // knob slides on, where it only moves the rest position. Set here rather
+    // than left to the theme, whose inset scales with the DPI setting.
+    const int32_t knobH = kTrackH - 2 * kInset;
+    lv_obj_set_style_pad_top(sw, -kInset, LV_PART_KNOB);
+    lv_obj_set_style_pad_bottom(sw, -kInset, LV_PART_KNOB);
+    lv_obj_set_style_pad_left(sw, -kInset, LV_PART_KNOB);
+    lv_obj_set_style_pad_right(sw, -(kInset + knobH - UiTheme::RoundWidth(knobH)), LV_PART_KNOB);
 
     // Off track, on track, knob. Grey reads as "off" against either palette,
     // and the knob is white in both — on light it sits on grey or on blue,

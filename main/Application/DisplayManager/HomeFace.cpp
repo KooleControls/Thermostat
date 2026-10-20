@@ -242,8 +242,10 @@ lv_obj_t* HomeFace::MakeNudge(lv_obj_t* root, bool plus, lv_color_t hue,
     constexpr int32_t kBarLen   = 34;
     constexpr int32_t kBarThick = 5;
 
+    // LV_RADIUS_CIRCLE on the 76 x 78 box draws a stadium rather than an
+    // ellipse, but at this size the two part by a quarter pixel at most.
     lv_obj_t* btn = lv_button_create(root);
-    lv_obj_set_size(btn, kNudgeSize, kNudgeSize);
+    lv_obj_set_size(btn, kNudgeSize, UiTheme::RoundHeight(kNudgeSize));
     lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(btn, UiTheme::Surface(), 0);
     lv_obj_set_style_bg_color(btn, hue, LV_STATE_PRESSED);
