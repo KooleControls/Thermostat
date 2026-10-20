@@ -5,6 +5,19 @@
 
 static const char* TAG = "BleScreen";
 
+// A gateway in one phrase, the way the list names it: by name, then by gateway
+// id, and by address only when it gave neither.
+static void DescribePeer(const BleManager::Peer& peer, char* out, size_t cap)
+{
+    const bool hasId = peer.hasDgid && peer.dgid != 0;
+    const unsigned long id = static_cast<unsigned long>(peer.dgid);
+
+    if (peer.name[0] != '\0' && hasId) snprintf(out, cap, "%s, id %lu", peer.name, id);
+    else if (peer.name[0] != '\0')     snprintf(out, cap, "%s", peer.name);
+    else if (hasId)                    snprintf(out, cap, "gateway id %lu", id);
+    else                               BleManager::FormatAddr(peer.addr, out, cap);
+}
+
 void BleScreen::Build(lv_obj_t* root)
 {
     lv_obj_t* back = AddHeader(root, "Gateway", LV_SYMBOL_LEFT);
@@ -147,36 +160,45 @@ void BleScreen::RefreshStatus()
 {
     BleManager& ble = serviceProvider_.getBleManager();
 
-    // Rescanning while connecting would cancel the attempt, and unpairing is
-    // meaningless with nothing paired.
+    // A scan already running is not restarted.
     bool scanning = ble.Scanning();
     if (scanning) lv_obj_add_state(rescanButton_, LV_STATE_DISABLED);
     else          lv_obj_remove_state(rescanButton_, LV_STATE_DISABLED);
 
+    // Unpair is live whenever something is paired, which includes the gaps
+    // between reconnect attempts to a gateway that is off — the moment someone
+    // is most likely to want it — and is meaningless with nothing paired.
+    BleManager::Peer paired;
+    const bool isPaired = ble.GetPaired(paired);
+    if (isPaired) lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
+    else          lv_obj_add_state(forgetButton_, LV_STATE_DISABLED);
+
+    char who[56];
+    if (isPaired) DescribePeer(paired, who, sizeof(who));
+    else          snprintf(who, sizeof(who), "the gateway");
+
+    char status[96];
     switch (ble.GetLinkState())
     {
         case BleManager::LinkState::Ready:
-            SetLabelText(statusLabel_, LV_SYMBOL_OK "  Paired and connected");
-            lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
+            snprintf(status, sizeof(status), LV_SYMBOL_OK "  Connected to %s", who);
             break;
         case BleManager::LinkState::Connecting:
-            SetLabelText(statusLabel_, "Connecting...");
-            lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
+            snprintf(status, sizeof(status), "Connecting to %s...", who);
             break;
         case BleManager::LinkState::Securing:
-            SetLabelText(statusLabel_, "Pairing...");
-            lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
+            snprintf(status, sizeof(status), "Pairing with %s...", who);
             break;
         case BleManager::LinkState::Discovering:
-            SetLabelText(statusLabel_, "Reading the gateway's services...");
-            lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
+            snprintf(status, sizeof(status), "Reading the gateway's services...");
             break;
         case BleManager::LinkState::Down:
-            SetLabelText(statusLabel_, scanning ? "Looking for gateways..."
-                                                : "Not connected — pick a gateway");
-            lv_obj_add_state(forgetButton_, LV_STATE_DISABLED);
+            if (scanning)      snprintf(status, sizeof(status), "Looking for gateways...");
+            else if (isPaired) snprintf(status, sizeof(status), "Paired with %s, not connected", who);
+            else               snprintf(status, sizeof(status), "Not connected: pick a gateway");
             break;
     }
+    SetLabelText(statusLabel_, status);
 
     // The list follows the scan, as on the WiFi screen: emptied when one starts,
     // and drawn once, not every half second, when it ends. Emptied whoever
@@ -259,7 +281,7 @@ void BleScreen::Connect()
     BleManager::FormatAddr(selected_.addr, addr, sizeof(addr));
     ESP_LOGI(TAG, "Pairing with %s", addr);
 
-    serviceProvider_.getBleManager().Connect(selected_.addr, code);
+    serviceProvider_.getBleManager().Connect(selected_, code);   // name and id too
 
     ShowListView();
     RefreshStatus();

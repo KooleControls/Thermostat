@@ -103,11 +103,21 @@ public:
     /// install-code digits as TEXT — empty means "no code, rely on the stored
     /// bond". Text, not a number, because "000000" is a perfectly valid passkey
     /// and a numeric 0 cannot be told apart from "none given". Remembers the peer
-    /// so the link comes back by itself after a reboot or a dropout.
+    /// so the link comes back by itself after a reboot or a dropout, and its
+    /// name and gateway id so it can be named while it does.
+    bool Connect(const Peer& peer, const char* code);
+
+    /// The same, by address alone (`ble connect`): the name and id come from
+    /// the scan table, or are kept when it is the gateway already on record.
     bool Connect(const ble_addr_t& addr, const char* code);
 
     /// Drop the link, forget the peer and delete its bond.
     void Forget();
+
+    /// The gateway on record: what Connect() last paired with, until Forget().
+    /// Name and id are as it advertised them then; `dgid` 0 means it gave none.
+    /// False when nothing is paired.
+    bool GetPaired(Peer& out) const;
 
     LinkState GetLinkState() const;
 
@@ -178,6 +188,8 @@ private:
     inline static BoolSetting   enableSetting_{ "ble.enable", "BLE Enable", true };
     inline static StringSetting peerSetting_{ "ble.peer", "BLE Gateway Address", "" };
     inline static UInt32Setting peerTypeSetting_{ "ble.peerType", "BLE Gateway Address Type", 0 };
+    inline static StringSetting peerNameSetting_{ "ble.peerName", "BLE Gateway Name", "" };
+    inline static UInt32Setting peerIdSetting_{ "ble.peerId", "BLE Gateway Id", 0 };
 
     ServiceProvider& serviceProvider_;
     InitState initState_;
@@ -192,6 +204,10 @@ private:
     LinkState  link_ = LinkState::Down;
     ble_addr_t target_{};
     bool       haveTarget_ = false;
+    // What target_ is called, mirrored from the settings above so the screen can
+    // ask twice a second without reading NVS.
+    char       targetName_[MaxNameLen + 1] = {};
+    uint32_t   targetDgid_ = 0;
     uint32_t   pendingPasskey_ = 0;      // only meaningful while havePasskey_
     bool       havePasskey_ = false;     // set between Connect() and pairing
     uint16_t   connHandle_ = BLE_HS_CONN_HANDLE_NONE;

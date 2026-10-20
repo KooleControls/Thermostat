@@ -43,7 +43,8 @@ void BleManager::Init()
     s_instance = this;
     serviceProvider_.getCommandManager().Register(this, commands_);
     serviceProvider_.getSettingsManager().Register(
-        { &enableSetting_, &peerSetting_, &peerTypeSetting_ });
+        { &enableSetting_, &peerSetting_, &peerTypeSetting_,
+          &peerNameSetting_, &peerIdSetting_ });
 
     if (!enableSetting_.Get())
     {
@@ -63,7 +64,10 @@ void BleManager::Init()
         {
             target_ = addr;
             haveTarget_ = true;
-            ESP_LOGI(TAG, "Paired gateway on record: %s", stored);
+            peerNameSetting_.Get(targetName_, sizeof(targetName_));
+            targetDgid_ = peerIdSetting_.Get();
+            ESP_LOGI(TAG, "Paired gateway on record: %s '%s' id %lu", stored, targetName_,
+                     static_cast<unsigned long>(targetDgid_));
         }
         else
         {
@@ -331,42 +335,75 @@ void BleManager::NotePeer(const struct ble_gap_disc_desc& disc)
         }
     }
 
-    LOCK(mutex_);
-
-    Peer* slot = nullptr;
-    for (auto& p : peers_)
-        if (p.used && ble_addr_cmp(&p.addr, &disc.addr) == 0) { slot = &p; break; }
-
-    if (slot == nullptr)
+    bool renamed = false;
+    char targetName[MaxNameLen + 1] = {};
+    uint32_t targetDgid = 0;
     {
-        // A scan response for an address we never heard advertise as a gateway
-        // is not ours to keep.
-        if (!isGateway) return;
+        LOCK(mutex_);
 
+        Peer* slot = nullptr;
         for (auto& p : peers_)
-            if (!p.used) { slot = &p; break; }
+            if (p.used && ble_addr_cmp(&p.addr, &disc.addr) == 0) { slot = &p; break; }
 
         if (slot == nullptr)
         {
-            ESP_LOGW(TAG, "Peer table full, ignoring further gateways");
-            return;
+            // A scan response for an address we never heard advertise as a gateway
+            // is not ours to keep.
+            if (!isGateway) return;
+
+            for (auto& p : peers_)
+                if (!p.used) { slot = &p; break; }
+
+            if (slot == nullptr)
+            {
+                ESP_LOGW(TAG, "Peer table full, ignoring further gateways");
+                return;
+            }
+            slot->used = true;
+            slot->addr = disc.addr;
         }
-        slot->used = true;
-        slot->addr = disc.addr;
+
+        slot->rssi = disc.rssi;
+        if (isGateway)
+        {
+            slot->dgid = dgid;
+            slot->hasDgid = true;
+        }
+        if (fields.name != nullptr && fields.name_len > 0)
+        {
+            size_t n = fields.name_len;
+            if (n > MaxNameLen) n = MaxNameLen;      // ~29 chars is all a scan response holds
+            memcpy(slot->name, fields.name, n);
+            slot->name[n] = '\0';
+        }
+
+        // The gateway on record, heard again: keep what it is called current.
+        // That fills in a pairing made before names were saved, and follows a
+        // gateway renamed since, without asking for the install code again.
+        if (haveTarget_ && ble_addr_cmp(&target_, &disc.addr) == 0)
+        {
+            if (slot->name[0] != '\0' && strcmp(slot->name, targetName_) != 0)
+            {
+                snprintf(targetName_, sizeof(targetName_), "%s", slot->name);
+                renamed = true;
+            }
+            if (slot->hasDgid && slot->dgid != targetDgid_)
+            {
+                targetDgid_ = slot->dgid;
+                renamed = true;
+            }
+            snprintf(targetName, sizeof(targetName), "%s", targetName_);
+            targetDgid = targetDgid_;
+        }
     }
 
-    slot->rssi = disc.rssi;
-    if (isGateway)
+    // Outside the lock: an NVS write is not something to hold it across.
+    if (renamed)
     {
-        slot->dgid = dgid;
-        slot->hasDgid = true;
-    }
-    if (fields.name != nullptr && fields.name_len > 0)
-    {
-        size_t n = fields.name_len;
-        if (n > MaxNameLen) n = MaxNameLen;      // ~29 chars is all a scan response holds
-        memcpy(slot->name, fields.name, n);
-        slot->name[n] = '\0';
+        peerNameSetting_.Set(targetName);
+        peerIdSetting_.Set(targetDgid);
+        ESP_LOGI(TAG, "Paired gateway is '%s' id %lu", targetName,
+                 static_cast<unsigned long>(targetDgid));
     }
 }
 
@@ -376,6 +413,34 @@ void BleManager::NotePeer(const struct ble_gap_disc_desc& disc)
 
 bool BleManager::Connect(const ble_addr_t& addr, const char* code)
 {
+    Peer peer{};
+    peer.addr = addr;
+    {
+        LOCK(mutex_);
+        const Peer* heard = nullptr;
+        for (const auto& p : peers_)
+            if (p.used && ble_addr_cmp(&p.addr, &addr) == 0) { heard = &p; break; }
+
+        if (heard != nullptr)
+        {
+            peer = *heard;
+        }
+        else if (haveTarget_ && ble_addr_cmp(&target_, &addr) == 0)
+        {
+            // Not in the last scan, but it is the gateway on record: a reconnect
+            // by address must not cost it its name.
+            snprintf(peer.name, sizeof(peer.name), "%s", targetName_);
+            peer.dgid = targetDgid_;
+            peer.hasDgid = targetDgid_ != 0;
+        }
+    }
+    return Connect(peer, code);
+}
+
+bool BleManager::Connect(const Peer& peer, const char* code)
+{
+    const ble_addr_t& addr = peer.addr;
+    const uint32_t dgid = peer.hasDgid ? peer.dgid : 0;
     char text[18];
     FormatAddr(addr, text, sizeof(text));
 
@@ -388,6 +453,8 @@ bool BleManager::Connect(const ble_addr_t& addr, const char* code)
         }
         target_ = addr;
         haveTarget_ = true;
+        snprintf(targetName_, sizeof(targetName_), "%s", peer.name);
+        targetDgid_ = dgid;
         // An empty string means "no code given". The code is kept as text up to
         // here because "000000" — the factory default — is a perfectly valid
         // passkey that a numeric 0 cannot be distinguished from.
@@ -402,6 +469,8 @@ bool BleManager::Connect(const ble_addr_t& addr, const char* code)
     // than silently forgetting it.
     peerSetting_.Set(text);
     peerTypeSetting_.Set(addr.type);
+    peerNameSetting_.Set(peer.name);
+    peerIdSetting_.Set(dgid);
 
     // Scanning and connecting cannot run at the same time.
     if (Scanning())
@@ -517,12 +586,16 @@ void BleManager::Forget()
         addr = target_;
         had = haveTarget_;
         haveTarget_ = false;
+        targetName_[0] = '\0';
+        targetDgid_ = 0;
         havePasskey_ = false;
         pendingPasskey_ = 0;
     }
 
     peerSetting_.Set("");
     peerTypeSetting_.Set(0);
+    peerNameSetting_.Set("");
+    peerIdSetting_.Set(0);
 
     if (reconnectTimer_) esp_timer_stop(reconnectTimer_);
 
@@ -541,6 +614,20 @@ void BleManager::Forget()
     if (had) ble_store_util_delete_peer(&addr);
 
     ESP_LOGI(TAG, "Gateway forgotten");
+}
+
+bool BleManager::GetPaired(Peer& out) const
+{
+    LOCK(mutex_);
+    if (!haveTarget_) return false;
+
+    out = Peer{};
+    out.addr = target_;
+    snprintf(out.name, sizeof(out.name), "%s", targetName_);
+    out.dgid = targetDgid_;
+    out.hasDgid = targetDgid_ != 0;
+    out.used = true;
+    return true;
 }
 
 void BleManager::SetState(LinkState s)
@@ -1153,6 +1240,12 @@ RequestError BleManager::Cmd_BleStatus(CommandContext& ctx)
     char peer[24] = {};
     peerSetting_.Get(peer, sizeof(peer));
     root.field("peer", peer);
+    Peer paired;
+    if (GetPaired(paired))
+    {
+        root.field("peerName", paired.name);
+        root.field("peerId", paired.dgid);
+    }
     WritePeers(root);
     return RequestError::Ok;
 }
