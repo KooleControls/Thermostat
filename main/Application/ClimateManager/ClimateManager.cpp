@@ -182,15 +182,38 @@ void ClimateManager::ControlStep()
     if (overrideActive && !status_.overrideActive)
         ESP_LOGI(TAG, "Remote override adopted: setpoint %.1f", activeSp);
 
-    // Demand does not depend on the mode. The panel's four buttons are
-    // forwarded to the gateway, not acted on here, so we report what the room
-    // needs in both directions and the gateway decides which one it is willing
-    // to run — exactly what it already does with a third-party thermostat.
-    // Mode reaches the demand only through activeSp, which Off pins to frost.
-    float output = pid_.Update(activeSp, room, dt);
-    float tset   = OutputToTSet(output, boiler.maxTSetLower, boiler.maxTSetUpper);
-    bool  ch     = tset > 0.0f;
-    bool  cool   = boiler.coolingSupported && (room > activeSp + 0.5f);
+    // Over OpenTherm the mode can only be said one way: by which requests go on
+    // the wire. A boiler never learns which tile the guest pressed, so a heat
+    // request sent in Cool fires it. So each mode requests only its own
+    // direction, as the thermostat this replaces does:
+    //
+    //   Heat  heating only
+    //   Cool  cooling only
+    //   Off   heating only, against the frost setpoint
+    //   Auto  both, because the changeover is the gateway's call — but never
+    //         both at once: a room cannot need heat and cooling together.
+    //
+    // Changeover delays and minimum on/off times stay with the gateway.
+    bool heatAllowed = mode != ClimateMode::Cool;
+    bool coolAllowed = boiler.coolingSupported &&
+                       (mode == ClimateMode::Cool || mode == ClimateMode::Auto);
+
+    bool  cool   = coolAllowed && (room > activeSp + 0.5f);
+    float output = 0.0f;
+    float tset   = 0.0f;
+    if (heatAllowed && !cool)
+    {
+        output = pid_.Update(activeSp, room, dt);
+        tset   = OutputToTSet(output, boiler.maxTSetLower, boiler.maxTSetUpper);
+    }
+    else
+    {
+        // Not heating, so the controller must not remember heating: its
+        // averaging window holds up to 75 s of old output, and that is what
+        // kept a heat request on beside a cooling request.
+        pid_.Reset();
+    }
+    bool ch = tset > 0.0f;
 
     serviceProvider_.getOpenThermManager().SetHeatingDemand(ch, cool, activeSp, tset);
 
