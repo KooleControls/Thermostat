@@ -1,9 +1,10 @@
 #pragma once
 #include <cstring>
 
-// What the guest picked on the panel. The thermostat does not act on this —
-// it is forwarded to the gateway, whose state machine owns the changeover and
-// its timings. Auto leaves that decision with the gateway, as it always was.
+// What the guest picked on the panel. It decides which requests go out over
+// OpenTherm (see ClimateManager::ControlStep), and the gateway also reads it;
+// the gateway's state machine still owns the changeover and its timings. Auto
+// leaves the choice of direction with the gateway, as it always was.
 enum class ClimateMode { Off = 0, Heat = 1, Cool = 2, Auto = 3 };
 
 inline const char *ClimateModeName(ClimateMode m)
