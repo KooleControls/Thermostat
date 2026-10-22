@@ -35,7 +35,7 @@ void HomeScreen::Build(lv_obj_t* root)
         refreshTimer_ = lv_timer_create(RefreshTimerCb, kRefreshMs, this);
 }
 
-// The commit timer is the one piece of state that can outlive the tree with a
+// The edit timer is the one piece of state that can outlive the tree with a
 // reason to touch it: it is armed by a nudge and survives a walk into the menu,
 // so a rebuild from there would land it on a deleted face. A rebuild ends the
 // edit instead — handing over what was dialled, since the guest saw it there —
@@ -63,6 +63,8 @@ void HomeScreen::Refresh()
     view.setpoint     = editing_ ? editSetpoint_
                                  : serviceProvider_.getClimateManager().GetUserSetpoint();
     view.showSetpoint = editing_;
+    view.blink        = editing_ && editSettled_ &&
+                        fabsf(editSetpoint_ - editStart_) > 0.001f;
 
     view.mode = ToHomeMode(serviceProvider_.getClimateManager().GetMode());
 
@@ -83,10 +85,10 @@ void HomeScreen::Refresh()
     // meanings; this is just no longer throwing the distinction away.
     OtBoilerState boiler = serviceProvider_.getOpenThermManager().GetState();
 
-    // Both from the slave's config (ID 3). Not read yet is not "no cooling":
-    // dimming the tile until the first answer greyed out a mode the guest had
-    // picked, on every boot.
-    view.coolingAvailable = !boiler.configRead || boiler.coolingSupported;
+    // All three from the slave's config (ID 3). Until it has answered the face
+    // draws no mode tiles at all, rather than guessing which modes there are.
+    view.modesKnown       = boiler.configRead;
+    view.coolingAvailable = boiler.coolingSupported;
     view.modeChoice       = boiler.heatCoolByMaster;
 
     if (boiler.chActive && !boiler.coolingActive)
@@ -146,7 +148,7 @@ void HomeScreen::Refresh()
 }
 
 // The first touch only puts the setpoint on the dial; the touches after it move
-// it. Every touch restarts the quiet time that ends the edit.
+// it. Every touch stops any blink and starts the quiet time over.
 //
 // The face shows whole degrees, so the setpoint has to move in whole degrees —
 // a half-degree step would leave every other press with nothing to show for
@@ -170,8 +172,16 @@ void HomeScreen::Nudge(float direction)
         editSetpoint_ = target;
     }
 
-    if (commitTimer_) lv_timer_reset(commitTimer_);
-    else commitTimer_ = lv_timer_create(CommitTimerCb, kCommitMs, this);
+    editSettled_ = false;
+    if (editTimer_)
+    {
+        lv_timer_set_period(editTimer_, kSettleMs);
+        lv_timer_reset(editTimer_);
+    }
+    else
+    {
+        editTimer_ = lv_timer_create(EditTimerCb, kSettleMs, this);
+    }
 }
 
 // Ends an edit. Only now does the dialled value reach the climate loop, and
@@ -179,13 +189,14 @@ void HomeScreen::Nudge(float direction)
 // look changes nothing, not even an override that landed meanwhile.
 void HomeScreen::FinishEdit()
 {
-    if (commitTimer_)
+    if (editTimer_)
     {
-        lv_timer_delete(commitTimer_);
-        commitTimer_ = nullptr;
+        lv_timer_delete(editTimer_);
+        editTimer_ = nullptr;
     }
     if (!editing_) return;
-    editing_ = false;
+    editing_     = false;
+    editSettled_ = false;
 
     if (fabsf(editSetpoint_ - editStart_) > 0.001f)
         serviceProvider_.getClimateManager().SetUserSetpoint(editSetpoint_);
@@ -230,10 +241,23 @@ void HomeScreen::RefreshTimerCb(lv_timer_t* t)
     self->Refresh();
 }
 
-void HomeScreen::CommitTimerCb(lv_timer_t* t)
+// One timer, two stretches of quiet. The first (kSettleMs) is the buttons being
+// let go: only then does a changed value start to blink, so it never blinks
+// while a guest is still pressing. The second runs out the rest of kCommitMs
+// and ends the edit.
+void HomeScreen::EditTimerCb(lv_timer_t* t)
 {
     auto* self = static_cast<HomeScreen*>(lv_timer_get_user_data(t));
-    self->FinishEdit();   // deletes t
+    if (!self->editSettled_)
+    {
+        self->editSettled_ = true;
+        lv_timer_set_period(t, kCommitMs - kSettleMs);
+        lv_timer_reset(t);
+    }
+    else
+    {
+        self->FinishEdit();   // deletes t
+    }
     self->Refresh();
 }
 

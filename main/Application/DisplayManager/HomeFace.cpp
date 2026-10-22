@@ -215,7 +215,7 @@ void HomeFace::BuildTiles(lv_obj_t* root)
              UiTheme::Cool(), HomeIntent::SetCool);
     MakeTile(root, tiles_[(int)HomeMode::Off],  3, ICON_POWER,     "Power",
              UiTheme::TextDim(), HomeIntent::SetOff);
-    modeChoice_ = true;   // a rebuilt row starts out whole; Apply() lays it out
+    tileLayout_ = TileLayout::None;   // built hidden; Apply() lays the row out
 }
 
 void HomeFace::SetTileEnabled(Tile& tile, bool enabled)
@@ -242,6 +242,7 @@ void HomeFace::MakeTile(lv_obj_t* root, Tile& tile, int index, const char* glyph
     lv_obj_set_style_pad_all(tile.box, 0, 0);
     lv_obj_add_event_cb(tile.box, IntentCb, LV_EVENT_CLICKED, this);
     lv_obj_set_user_data(tile.box, (void*)(uintptr_t)intent);
+    lv_obj_add_flag(tile.box, LV_OBJ_FLAG_HIDDEN);   // until Apply() knows the modes
 
     tile.icon = lv_label_create(tile.box);
     lv_obj_set_style_text_font(tile.icon, &font_icons_32, 0);
@@ -308,14 +309,14 @@ void HomeFace::Apply(const HomeView& v)
 {
     // ── The number ───────────────────────────────────────────
     // The disc holds the room temperature with the setpoint beneath it. While
-    // the setpoint is being dialled it takes the centre and blinks: blinking
-    // says it is not the room temperature, and that it has not been sent yet.
+    // the setpoint is being checked or dialled it takes the centre, and a
+    // changed value blinks once the buttons are let go: the blink says it goes
+    // out shortly.
     char buf[24];
     if (v.showSetpoint) FormatTemp(buf, sizeof(buf), v.setpoint, true);
     else                FormatTemp(buf, sizeof(buf), v.roomTemp, v.roomValid);
 
-    bool numberChanged = strcmp(lv_label_get_text(bigLabel_), buf) != 0;
-    if (numberChanged)
+    if (strcmp(lv_label_get_text(bigLabel_), buf) != 0)
     {
         lv_label_set_text(bigLabel_, buf);
         // The unit is anchored to the number, and the number just changed
@@ -325,19 +326,15 @@ void HomeFace::Apply(const HomeView& v)
         lv_obj_align_to(unitLabel_, bigLabel_, LV_ALIGN_OUT_RIGHT_TOP, 2, kUnitDrop);
     }
 
-    if (v.showSetpoint != blinking_)
+    if (v.blink != blinking_)
     {
-        blinking_ = v.showSetpoint;
+        blinking_ = v.blink;
         if (blinking_) StartBlink();
         else
         {
             lv_anim_delete(bigLabel_, BlinkExec);
             lv_obj_set_style_text_opa(bigLabel_, LV_OPA_COVER, 0);
         }
-    }
-    else if (blinking_ && numberChanged)
-    {
-        StartBlink();   // a press lands on a lit number, never a dimmed one
     }
 
     // The setpoint line, empty while the setpoint itself is in the centre.
@@ -382,20 +379,27 @@ void HomeFace::Apply(const HomeView& v)
                                                    : UiTheme::Surface(), 0);
 
     // ── Mode tiles ───────────────────────────────────────────
-    // When the plant keeps the heating/cooling choice to itself, Auto is the
-    // only mode there is: the other three tiles go, and Auto moves to the
-    // middle rather than sitting alone at the left edge.
-    if (v.modeChoice != modeChoice_)
+    // None until the plant has said which modes there are: drawing all four
+    // on boot and taking three away a moment later showed choices that were
+    // never there. When the plant keeps the heating/cooling choice to itself,
+    // Auto is the only mode — alone in the middle, rather than at the left
+    // edge of a missing row.
+    TileLayout layout = !v.modesKnown ? TileLayout::None
+                      : v.modeChoice  ? TileLayout::Full
+                                      : TileLayout::AutoOnly;
+    if (layout != tileLayout_)
     {
-        modeChoice_ = v.modeChoice;
+        tileLayout_ = layout;
         for (int i = 0; i < 4; ++i)
         {
-            if (i == (int)HomeMode::Auto) continue;
-            if (modeChoice_) lv_obj_remove_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
-            else             lv_obj_add_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
+            bool shown = layout == TileLayout::Full ||
+                         (layout == TileLayout::AutoOnly && i == (int)HomeMode::Auto);
+            if (shown) lv_obj_remove_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
+            else       lv_obj_add_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
         }
         lv_obj_align(tiles_[(int)HomeMode::Auto].box, LV_ALIGN_TOP_LEFT,
-                     modeChoice_ ? TileX(0) : (480 - kTileW) / 2, kTileY);
+                     layout == TileLayout::AutoOnly ? (480 - kTileW) / 2 : TileX(0),
+                     kTileY);
     }
 
     // A plant without cooling dims the Cooling tile rather than hiding it: a

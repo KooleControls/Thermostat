@@ -31,9 +31,14 @@ struct HomeView
 
     /// The big number is the room temperature and the line beneath it the
     /// setpoint — so a guest reads the setpoint without touching anything, and
-    /// a remote override shows as it lands. While the setpoint is being dialled
-    /// it takes the centre, blinking, and the line beneath stays empty.
+    /// a remote override shows as it lands. While the setpoint is being checked
+    /// or dialled it takes the centre, and the line beneath stays empty.
     bool showSetpoint = false;
+
+    /// The setpoint in the centre is a changed value about to be handed over:
+    /// it blinks. Never for a look, and not while the buttons are still being
+    /// pressed — only once they have been let go.
+    bool blink = false;
 
     HomeMode     mode     = HomeMode::Off;
 
@@ -56,6 +61,10 @@ struct HomeView
     /// dims the Cooling tile and makes it untouchable, so a guest is not
     /// offered a mode the building cannot deliver.
     bool coolingAvailable = true;
+
+    /// Whether the plant has said which modes there are (slave config). Until
+    /// it has, no mode tiles are drawn at all.
+    bool modesKnown = false;
 
     /// Whether the guest may pick heating or cooling at all — the plant says
     /// so over OpenTherm (slave config). When it keeps that choice itself the
@@ -156,5 +165,8 @@ private:
     bool      blinking_     = false;   // the number blinks while being dialled
 
     Tile tiles_[4];   // Auto, Heat, Cool, Off — indexed by HomeMode
-    bool modeChoice_ = true;   // what the tile row is laid out for right now
+
+    // What the tile row is laid out for right now.
+    enum class TileLayout : uint8_t { None, AutoOnly, Full };
+    TileLayout tileLayout_ = TileLayout::None;
 };
