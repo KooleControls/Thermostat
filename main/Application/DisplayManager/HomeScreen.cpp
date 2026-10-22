@@ -100,10 +100,14 @@ void HomeScreen::Refresh()
     else if (boiler.coolingActive && !boiler.chActive)
     {
         view.stage = HomeStage::Cooling;
-        // There is no "cooling is running" bit in OT — the flame bit only
-        // speaks for the burner. So cooling shows as standby throughout, which
-        // understates an active cooler rather than inventing a state.
-        view.running = false;
+        // Bit 4 says the plant is in cooling, standby included: the gateway
+        // sets it on entering cooling standby and holds it through the run.
+        // OT has no cooling counterpart of the flame bit, so nothing on the
+        // wire says the cooler is running. The nearest fact is our own
+        // request — in cooling, and asked to cool. The gateway's minimum
+        // on/off times can hold the cooler a little either side of that, so
+        // heating colours exactly and cooling closely.
+        view.running = serviceProvider_.getClimateManager().GetStatus().coolEnable;
     }
     else if (boiler.flame)
     {
@@ -115,7 +119,13 @@ void HomeScreen::Refresh()
     }
     else
     {
-        view.stage   = HomeStage::None;
+        // Nothing running and no stage claimed. The guest's mode is still a
+        // fact, not a guess: in Heat or Cool the system is standing by in that
+        // direction, so it gets that stage's glyph in grey. Auto and Off have
+        // no direction to stand by in and keep the power glyph.
+        if      (view.mode == HomeMode::Heat) view.stage = HomeStage::Heating;
+        else if (view.mode == HomeMode::Cool) view.stage = HomeStage::Cooling;
+        else                                  view.stage = HomeStage::None;
         view.running = false;
     }
 
