@@ -105,6 +105,15 @@ void HomeFace::BuildBadge(lv_obj_t* root)
     lv_label_set_text(gear, LV_SYMBOL_SETTINGS);
     lv_obj_align(gear, LV_ALIGN_TOP_RIGHT, -22, 24);
 
+    // Top centre, on the row of the bluetooth and gear glyphs, when there is no
+    // OpenTherm link. The mode tiles are gone meanwhile (see Apply()).
+    otErrorLabel_ = lv_label_create(root);
+    lv_obj_set_style_text_color(otErrorLabel_, UiTheme::Danger(), 0);
+    lv_obj_set_style_text_font(otErrorLabel_, &lv_font_montserrat_28, 0);
+    lv_label_set_text(otErrorLabel_, "error: OT");
+    lv_obj_align(otErrorLabel_, LV_ALIGN_TOP_MID, 0, 24);
+    lv_obj_add_flag(otErrorLabel_, LV_OBJ_FLAG_HIDDEN);
+
     // The glyph is small; the hit area is not. A transparent pad over the
     // corner is what a finger actually aims at.
     lv_obj_t* gearHit = lv_button_create(root);
@@ -117,7 +126,7 @@ void HomeFace::BuildBadge(lv_obj_t* root)
     lv_obj_set_user_data(gearHit, (void*)(uintptr_t)HomeIntent::OpenSettings);
 }
 
-// The big number, its unit, and the caption that names what is being shown.
+// The big number, its unit, and the line beneath them.
 //
 // The **digits** are what gets centred in the disc, not the digits-plus-unit
 // pair: a "°C" wide enough to shift the number off centre is a "°C" that is too
@@ -130,27 +139,32 @@ void HomeFace::BuildReadout(lv_obj_t* root)
     lv_obj_set_style_text_font(bigLabel_, &font_temp_96, 0);
     lv_obj_set_style_text_align(bigLabel_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(bigLabel_, "--");
-    // Sits a touch below the disc's centre. Optically centring digits is not
-    // the same as centring their box: the box reserves descender room the
-    // digits never use, so a box-centred number reads high.
-    lv_obj_align(bigLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 + 6);
+    // Box-centred on the disc, which centres the digits too: font_temp_96 has
+    // no descender room to correct for. Its line box is 69 px with the
+    // baseline 1 px off the bottom, and the digits are 67-69 px tall, so the
+    // box is the digits. A 6 px drop once made up for descender room this font
+    // does not reserve, and left the number visibly low (92 px above, 81 below).
+    lv_obj_align(bigLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240);
 
     unitLabel_ = lv_label_create(root);
     lv_obj_set_style_text_color(unitLabel_, UiTheme::Text(), 0);
     lv_obj_set_style_text_font(unitLabel_, &lv_font_montserrat_20, 0);
     lv_label_set_text(unitLabel_, "\xC2\xB0" "C");   // UTF-8 degree
 
-    // Only shown while the setpoint is on the dial. At rest the disc holds the
-    // room temperature and nothing else, exactly as the design has it — the
-    // caption exists so the one moment the number means something else is not
-    // silent about it.
+    // The setpoint, at rest, so it can be read without a touch — touching -/+
+    // to look was itself a change, once. While it is being dialled it moves to
+    // the centre and this line stays empty: the room temperature is not moved
+    // down here, so the small number only ever means the setpoint. Just the
+    // value: dim and smaller under the big one, it reads as the target without
+    // a word beside it.
     captionLabel_ = lv_label_create(root);
     lv_obj_set_style_text_color(captionLabel_, UiTheme::TextDim(), 0);
-    lv_obj_set_style_text_font(captionLabel_, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(captionLabel_, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_align(captionLabel_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(captionLabel_, "Setpoint");
-    lv_obj_align(captionLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 + 74);
-    lv_obj_add_flag(captionLabel_, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(captionLabel_, "");
+    lv_obj_align(captionLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 + 72);   // 72 below the number's centre
+
+    blinking_ = false;   // a fresh label; LVGL took any blink with the old one
 }
 
 void HomeFace::BuildNudge(lv_obj_t* root)
@@ -212,7 +226,7 @@ void HomeFace::BuildTiles(lv_obj_t* root)
              UiTheme::Cool(), HomeIntent::SetCool);
     MakeTile(root, tiles_[(int)HomeMode::Off],  3, ICON_POWER,     "Power",
              UiTheme::TextDim(), HomeIntent::SetOff);
-    modeChoice_ = true;   // a rebuilt row starts out whole; Apply() lays it out
+    tileLayout_ = TileLayout::None;   // built hidden; Apply() lays the row out
 }
 
 void HomeFace::SetTileEnabled(Tile& tile, bool enabled)
@@ -239,6 +253,7 @@ void HomeFace::MakeTile(lv_obj_t* root, Tile& tile, int index, const char* glyph
     lv_obj_set_style_pad_all(tile.box, 0, 0);
     lv_obj_add_event_cb(tile.box, IntentCb, LV_EVENT_CLICKED, this);
     lv_obj_set_user_data(tile.box, (void*)(uintptr_t)intent);
+    lv_obj_add_flag(tile.box, LV_OBJ_FLAG_HIDDEN);   // until Apply() knows the modes
 
     tile.icon = lv_label_create(tile.box);
     lv_obj_set_style_text_font(tile.icon, &font_icons_32, 0);
@@ -304,8 +319,10 @@ void HomeFace::SetBadgeGlyph(lv_obj_t* label, HomeStage what, bool running)
 void HomeFace::Apply(const HomeView& v)
 {
     // ── The number ───────────────────────────────────────────
-    // The disc holds the room temperature; nudging swaps it for the setpoint
-    // and the caption appears to say so, until the revert puts it back.
+    // The disc holds the room temperature with the setpoint beneath it. While
+    // the setpoint is being checked or dialled it takes the centre, and a
+    // changed value blinks once the buttons are let go: the blink says it goes
+    // out shortly.
     char buf[24];
     if (v.showSetpoint) FormatTemp(buf, sizeof(buf), v.setpoint, true);
     else                FormatTemp(buf, sizeof(buf), v.roomTemp, v.roomValid);
@@ -320,8 +337,27 @@ void HomeFace::Apply(const HomeView& v)
         lv_obj_align_to(unitLabel_, bigLabel_, LV_ALIGN_OUT_RIGHT_TOP, 2, kUnitDrop);
     }
 
-    if (v.showSetpoint) lv_obj_remove_flag(captionLabel_, LV_OBJ_FLAG_HIDDEN);
-    else                lv_obj_add_flag(captionLabel_, LV_OBJ_FLAG_HIDDEN);
+    if (v.blink != blinking_)
+    {
+        blinking_ = v.blink;
+        if (blinking_) StartBlink();
+        else
+        {
+            lv_anim_delete(bigLabel_, BlinkExec);
+            lv_obj_set_style_text_opa(bigLabel_, LV_OPA_COVER, 0);
+        }
+    }
+
+    // The setpoint line, empty while the setpoint itself is in the centre.
+    buf[0] = '\0';
+    if (!v.showSetpoint)
+    {
+        char sp[8];
+        FormatTemp(sp, sizeof(sp), v.setpoint, true);
+        snprintf(buf, sizeof(buf), "%s" "\xC2\xB0", sp);   // UTF-8 degree
+    }
+    if (strcmp(lv_label_get_text(captionLabel_), buf) != 0)
+        lv_label_set_text(captionLabel_, buf);
 
     // ── Activity badge ───────────────────────────────────────
     // Grey means that stage is not running; the colour means it is. A grey
@@ -354,20 +390,33 @@ void HomeFace::Apply(const HomeView& v)
                                                    : UiTheme::Surface(), 0);
 
     // ── Mode tiles ───────────────────────────────────────────
-    // When the plant keeps the heating/cooling choice to itself, Auto is the
-    // only mode there is: the other three tiles go, and Auto moves to the
-    // middle rather than sitting alone at the left edge.
-    if (v.modeChoice != modeChoice_)
+    // None until the plant has said which modes there are: drawing all four
+    // on boot and taking three away a moment later showed choices that were
+    // never there. When the plant keeps the heating/cooling choice to itself,
+    // Auto is the only mode — alone in the middle, rather than at the left
+    // edge of a missing row. With no OpenTherm link there is no plant to pick
+    // a mode for: no row, and an error line at the top says why.
+    TileLayout layout = (v.otError || !v.modesKnown) ? TileLayout::None
+                      : v.modeChoice                 ? TileLayout::Full
+                                                     : TileLayout::AutoOnly;
+    if (v.otError == lv_obj_has_flag(otErrorLabel_, LV_OBJ_FLAG_HIDDEN))
     {
-        modeChoice_ = v.modeChoice;
+        if (v.otError) lv_obj_remove_flag(otErrorLabel_, LV_OBJ_FLAG_HIDDEN);
+        else           lv_obj_add_flag(otErrorLabel_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (layout != tileLayout_)
+    {
+        tileLayout_ = layout;
         for (int i = 0; i < 4; ++i)
         {
-            if (i == (int)HomeMode::Auto) continue;
-            if (modeChoice_) lv_obj_remove_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
-            else             lv_obj_add_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
+            bool shown = layout == TileLayout::Full ||
+                         (layout == TileLayout::AutoOnly && i == (int)HomeMode::Auto);
+            if (shown) lv_obj_remove_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
+            else       lv_obj_add_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
         }
         lv_obj_align(tiles_[(int)HomeMode::Auto].box, LV_ALIGN_TOP_LEFT,
-                     modeChoice_ ? TileX(0) : (480 - kTileW) / 2, kTileY);
+                     layout == TileLayout::AutoOnly ? (480 - kTileW) / 2 : TileX(0),
+                     kTileY);
     }
 
     // A plant without cooling dims the Cooling tile rather than hiding it: a
@@ -382,6 +431,35 @@ void HomeFace::Apply(const HomeView& v)
         if (selected) lv_obj_remove_flag(tiles_[i].rule, LV_OBJ_FLAG_HIDDEN);
         else          lv_obj_add_flag(tiles_[i].rule, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+// A hard blink — lit, then dim, half a second each — rather than a fade: a fade
+// would redraw the 96 px number every frame, a blink twice a second. The
+// animation hangs off the label, so deleting the label takes it along.
+void HomeFace::StartBlink()
+{
+    lv_anim_delete(bigLabel_, BlinkExec);
+    lv_obj_set_style_text_opa(bigLabel_, LV_OPA_COVER, 0);
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, bigLabel_);
+    lv_anim_set_exec_cb(&a, BlinkExec);
+    lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_20);
+    lv_anim_set_duration(&a, kBlinkMs);
+    lv_anim_set_reverse_duration(&a, kBlinkMs);
+    lv_anim_set_path_cb(&a, lv_anim_path_step);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&a);
+}
+
+// Called every animation tick, mostly with the value already set; only a real
+// change is worth invalidating the number for.
+void HomeFace::BlinkExec(void* obj, int32_t opa)
+{
+    auto* label = static_cast<lv_obj_t*>(obj);
+    if (lv_obj_get_style_text_opa(label, LV_PART_MAIN) != (lv_opa_t)opa)
+        lv_obj_set_style_text_opa(label, (lv_opa_t)opa, 0);
 }
 
 void HomeFace::IntentCb(lv_event_t* e)

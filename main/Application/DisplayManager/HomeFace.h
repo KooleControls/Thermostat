@@ -25,14 +25,20 @@ enum class HomeStage : uint8_t { None, Heating, Cooling };
 
 struct HomeView
 {
-    float setpoint  = 20.0f;
+    float setpoint  = 20.0f;   // the guest's, or the one being dialled
     float roomTemp  = 0.0f;
     bool  roomValid = false;
 
-    /// The big number is the room temperature, except while the setpoint is
-    /// being nudged — then the two swap, and the line beneath always carries
-    /// whichever value the centre is not showing.
+    /// The big number is the room temperature and the line beneath it the
+    /// setpoint — so a guest reads the setpoint without touching anything, and
+    /// a remote override shows as it lands. While the setpoint is being checked
+    /// or dialled it takes the centre, and the line beneath stays empty.
     bool showSetpoint = false;
+
+    /// The setpoint in the centre has been dialled and is about to be handed
+    /// over: it blinks. Never for a look, and not while the buttons are still
+    /// being pressed — only once they have been let go.
+    bool blink = false;
 
     HomeMode     mode     = HomeMode::Off;
 
@@ -56,6 +62,15 @@ struct HomeView
     /// offered a mode the building cannot deliver.
     bool coolingAvailable = true;
 
+    /// Whether the plant has said which modes there are (slave config). Until
+    /// it has, no mode tiles are drawn at all.
+    bool modesKnown = false;
+
+    /// No OpenTherm link for a while — from boot, or since it dropped. The
+    /// tile row goes, since there is no plant to pick a mode for, and an error
+    /// line at the top says why.
+    bool otError = false;
+
     /// Whether the guest may pick heating or cooling at all — the plant says
     /// so over OpenTherm (slave config). When it keeps that choice itself the
     /// thermostat runs in Auto, and Heating, Cooling and Power are not offered.
@@ -78,6 +93,10 @@ class HomeFace
 {
 public:
     using IntentHandler = void (*)(void* user, HomeIntent intent);
+
+    /// Each half of a blink, lit then dimmed. Public so the screen can time an
+    /// edit in whole blinks.
+    static constexpr uint32_t kBlinkMs = 500;
 
     /// Builds the whole tree into `root`. Call once.
     void Build(lv_obj_t* root, IntentHandler handler, void* user);
@@ -131,6 +150,9 @@ private:
                        const char* text, lv_color_t hue, HomeIntent intent);
     static void SetTileEnabled(Tile& tile, bool enabled);
 
+    void        StartBlink();
+    static void BlinkExec(void* obj, int32_t opa);
+
     static void IntentCb(lv_event_t* e);
     static void FormatTemp(char* out, size_t cap, float value, bool valid);
     static void SetBadgeGlyph(lv_obj_t* label, HomeStage what, bool running);
@@ -147,7 +169,12 @@ private:
     lv_obj_t* bigLabel_     = nullptr;
     lv_obj_t* unitLabel_    = nullptr;
     lv_obj_t* captionLabel_ = nullptr;
+    bool      blinking_     = false;   // the number blinks while being dialled
 
     Tile tiles_[4];   // Auto, Heat, Cool, Off — indexed by HomeMode
-    bool modeChoice_ = true;   // what the tile row is laid out for right now
+    lv_obj_t* otErrorLabel_ = nullptr;   // top centre; see HomeView::otError
+
+    // What the tile row is laid out for right now.
+    enum class TileLayout : uint8_t { None, AutoOnly, Full };
+    TileLayout tileLayout_ = TileLayout::None;
 };

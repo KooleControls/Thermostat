@@ -3,6 +3,7 @@
 #include "ClimateManager/ClimateManager.h"
 #include "OpenThermManager/OpenThermManager.h"
 #include "RoomTemperatureManager/RoomTemperatureManager.h"
+#include "esp_timer.h"
 #include <cmath>
 
 namespace {
@@ -35,30 +36,22 @@ void HomeScreen::Build(lv_obj_t* root)
         refreshTimer_ = lv_timer_create(RefreshTimerCb, kRefreshMs, this);
 }
 
-// The revert timer is the one piece of state that can outlive the tree with a
+// The edit timer is the one piece of state that can outlive the tree with a
 // reason to touch it: it is armed by a nudge and survives a walk into the menu,
-// so a rebuild from there would land it on a deleted face. Drop it — a rebuild
-// re-enters through OnShow(), which clears it anyway.
+// so a rebuild from there would land it on a deleted face. A rebuild ends the
+// edit instead — handing over what was dialled, since the guest saw it there —
+// and re-enters through OnShow().
 void HomeScreen::OnDestroy()
 {
-    if (revertTimer_)
-    {
-        lv_timer_delete(revertTimer_);
-        revertTimer_ = nullptr;
-    }
-    showingSetpoint_ = false;
+    FinishEdit();
 }
 
 void HomeScreen::OnShow()
 {
     // Coming back from the menu always lands on the room temperature, never on
-    // a setpoint left on the dial minutes ago.
-    if (revertTimer_)
-    {
-        lv_timer_delete(revertTimer_);
-        revertTimer_ = nullptr;
-    }
-    showingSetpoint_ = false;
+    // a setpoint left on the dial. An edit still open from before the walk into
+    // the menu ends here, the same way the timer would have ended it.
+    FinishEdit();
     Refresh();
 }
 
@@ -68,8 +61,10 @@ void HomeScreen::Refresh()
 
     view.roomValid = serviceProvider_.getRoomTemperatureManager()
                          .GetRoomTemperature(view.roomTemp);
-    view.setpoint     = serviceProvider_.getClimateManager().GetUserSetpoint();
-    view.showSetpoint = showingSetpoint_;
+    view.setpoint     = editing_ ? editSetpoint_
+                                 : serviceProvider_.getClimateManager().GetUserSetpoint();
+    view.showSetpoint = editing_;
+    view.blink        = editing_ && editSettled_ && editMoved_;
 
     view.mode = ToHomeMode(serviceProvider_.getClimateManager().GetMode());
 
@@ -90,11 +85,18 @@ void HomeScreen::Refresh()
     // meanings; this is just no longer throwing the distinction away.
     OtBoilerState boiler = serviceProvider_.getOpenThermManager().GetState();
 
-    // Both from the slave's config (ID 3). Not read yet is not "no cooling":
-    // dimming the tile until the first answer greyed out a mode the guest had
-    // picked, on every boot.
-    view.coolingAvailable = !boiler.configRead || boiler.coolingSupported;
+    // All three from the slave's config (ID 3). Until it has answered the face
+    // draws no mode tiles at all, rather than guessing which modes there are.
+    view.modesKnown       = boiler.configRead;
+    view.coolingAvailable = boiler.coolingSupported;
     view.modeChoice       = boiler.heatCoolByMaster;
+
+    // Counted from boot until the link first comes up, and from the last time
+    // it was up after that. The link layer only calls it down after ~3 s of
+    // failed exchanges, so a pulled wire shows here some 8 s later.
+    int64_t nowUs = esp_timer_get_time();
+    if (boiler.linked) lastLinkedUs_ = nowUs;
+    view.otError = !boiler.linked && (nowUs - lastLinkedUs_) >= kOtErrorUs;
 
     if (boiler.chActive && !boiler.coolingActive)
     {
@@ -152,22 +154,61 @@ void HomeScreen::Refresh()
     face_.Apply(view);
 }
 
+// The first touch only puts the setpoint on the dial; the touches after it move
+// it. Every touch stops any blink and starts the quiet time over.
+//
 // The face shows whole degrees, so the setpoint has to move in whole degrees —
 // a half-degree step would leave every other press with nothing to show for
 // itself. A setpoint already carrying a fraction (an older stored value, or a
 // remote override adopted from the gateway) snaps to the next whole degree in
-// the direction of travel, so the first press still moves the number by one.
+// the direction of travel, so a press still moves the number by one.
 void HomeScreen::Nudge(float direction)
 {
-    auto& climate = serviceProvider_.getClimateManager();
-    float current = climate.GetUserSetpoint();
-    float target  = (direction > 0.0f) ? floorf(current) + kNudgeStep
-                                       : ceilf(current)  - kNudgeStep;
-    climate.NudgeSetpoint(target - current);   // clamped inside
+    if (!editing_)
+    {
+        editing_      = true;
+        editMoved_    = false;
+        editStart_    = serviceProvider_.getClimateManager().GetUserSetpoint();
+        editSetpoint_ = editStart_;
+    }
+    else
+    {
+        float target = (direction > 0.0f) ? floorf(editSetpoint_) + kNudgeStep
+                                          : ceilf(editSetpoint_)  - kNudgeStep;
+        if (target < ClimateManager::kSetpointMin) target = ClimateManager::kSetpointMin;
+        if (target > ClimateManager::kSetpointMax) target = ClimateManager::kSetpointMax;
+        if (fabsf(target - editSetpoint_) > 0.001f) editMoved_ = true;   // not at a limit
+        editSetpoint_ = target;
+    }
 
-    showingSetpoint_ = true;
-    if (revertTimer_) lv_timer_reset(revertTimer_);
-    else revertTimer_ = lv_timer_create(RevertTimerCb, kRevertMs, this);
+    editSettled_ = false;
+    if (editTimer_)
+    {
+        lv_timer_set_period(editTimer_, kSettleMs);
+        lv_timer_reset(editTimer_);
+    }
+    else
+    {
+        editTimer_ = lv_timer_create(EditTimerCb, kSettleMs, this);
+    }
+}
+
+// Ends an edit. Only now does the dialled value reach the climate loop, and
+// from there OpenTherm — and only if it moved: a guest who touched -/+ just to
+// look changes nothing, not even an override that landed meanwhile.
+void HomeScreen::FinishEdit()
+{
+    if (editTimer_)
+    {
+        lv_timer_delete(editTimer_);
+        editTimer_ = nullptr;
+    }
+    if (!editing_) return;
+    editing_     = false;
+    editSettled_ = false;
+
+    if (fabsf(editSetpoint_ - editStart_) > 0.001f)
+        serviceProvider_.getClimateManager().SetUserSetpoint(editSetpoint_);
 }
 
 void HomeScreen::OnIntent(HomeIntent intent)
@@ -177,8 +218,8 @@ void HomeScreen::OnIntent(HomeIntent intent)
     case HomeIntent::NudgeDown: Nudge(-1.0f); break;
     case HomeIntent::NudgeUp:   Nudge(+1.0f); break;
 
-    // The mode is the guest's choice; the thermostat only stores it and lets
-    // the gateway read it. Acting on it is the gateway's job.
+    // The mode is the guest's choice. ClimateManager turns it into which
+    // requests go out; the gateway's timers still decide when it runs.
     case HomeIntent::SetAuto:
         serviceProvider_.getClimateManager().SetMode(ClimateMode::Auto);
         break;
@@ -209,12 +250,23 @@ void HomeScreen::RefreshTimerCb(lv_timer_t* t)
     self->Refresh();
 }
 
-void HomeScreen::RevertTimerCb(lv_timer_t* t)
+// One timer, two stretches of quiet. The first (kSettleMs) is the buttons being
+// let go: only then does a changed value start to blink, so it never blinks
+// while a guest is still pressing. The second runs out the rest of kCommitMs
+// and ends the edit.
+void HomeScreen::EditTimerCb(lv_timer_t* t)
 {
     auto* self = static_cast<HomeScreen*>(lv_timer_get_user_data(t));
-    lv_timer_delete(t);
-    self->revertTimer_ = nullptr;
-    self->showingSetpoint_ = false;
+    if (!self->editSettled_)
+    {
+        self->editSettled_ = true;
+        lv_timer_set_period(t, kCommitMs - kSettleMs);
+        lv_timer_reset(t);
+    }
+    else
+    {
+        self->FinishEdit();   // deletes t
+    }
     self->Refresh();
 }
 
