@@ -89,6 +89,10 @@ class HomeFace
 public:
     using IntentHandler = void (*)(void* user, HomeIntent intent);
 
+    /// Each half of a blink, lit then dimmed. Public so the screen can time an
+    /// edit in whole blinks.
+    static constexpr uint32_t kBlinkMs = 500;
+
     /// Builds the whole tree into `root`. Call once.
     void Build(lv_obj_t* root, IntentHandler handler, void* user);
 
@@ -107,8 +111,6 @@ private:
     /// tops line up. The 96 px font's ascent is much taller than the 28 px
     /// one's, so equal boxes are not equal glyphs — measured, not derived.
     static constexpr int32_t kUnitDrop = 5;
-
-    static constexpr uint32_t kBlinkMs = 500;    // each half of a blink
 
     static constexpr int32_t kNudgeSize = 76;    // -/+ circle width; height likewise
     static constexpr int32_t kTileW     = 100;

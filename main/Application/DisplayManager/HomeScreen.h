@@ -24,8 +24,9 @@
 class HomeScreen final : public Screen
 {
     static constexpr uint32_t kRefreshMs = 1000;
-    static constexpr uint32_t kSettleMs  = 1000;   // quiet time before a change blinks
-    static constexpr uint32_t kCommitMs  = 3000;   // quiet time that ends an edit
+    static constexpr uint32_t kSettleMs  = 1000;   // quiet time before a dialled value blinks
+    static constexpr uint32_t kBlinks    = 3;      // then this many whole blinks, and it goes
+    static constexpr uint32_t kCommitMs  = kSettleMs + kBlinks * 2 * HomeFace::kBlinkMs;
     static constexpr float    kNudgeStep = 1.0f;   // whole degrees, as displayed
 
 public:
