@@ -140,12 +140,12 @@ void HomeFace::BuildReadout(lv_obj_t* root)
     lv_obj_set_style_text_font(unitLabel_, &lv_font_montserrat_20, 0);
     lv_label_set_text(unitLabel_, "\xC2\xB0" "C");   // UTF-8 degree
 
-    // Always shown: whichever of the two values the centre is not showing. At
-    // rest that is the setpoint, so it can be read without a touch — touching
-    // -/+ to look was itself a change, once. While the setpoint is being
-    // dialled it moves to the centre and the room temperature comes here.
-    // Just the value: the dim, smaller number under the big one reads as the
-    // target without a word beside it.
+    // The setpoint, at rest, so it can be read without a touch — touching -/+
+    // to look was itself a change, once. While it is being dialled it moves to
+    // the centre and this line stays empty: the room temperature is not moved
+    // down here, so the small number only ever means the setpoint. Just the
+    // value: dim and smaller under the big one, it reads as the target without
+    // a word beside it.
     captionLabel_ = lv_label_create(root);
     lv_obj_set_style_text_color(captionLabel_, UiTheme::TextDim(), 0);
     lv_obj_set_style_text_font(captionLabel_, &lv_font_montserrat_28, 0);
@@ -340,11 +340,14 @@ void HomeFace::Apply(const HomeView& v)
         StartBlink();   // a press lands on a lit number, never a dimmed one
     }
 
-    // The line beneath carries the other value of the two.
-    char other[8];
-    bool otherValid = v.showSetpoint ? v.roomValid : true;
-    FormatTemp(other, sizeof(other), v.showSetpoint ? v.roomTemp : v.setpoint, otherValid);
-    snprintf(buf, sizeof(buf), otherValid ? "%s" "\xC2\xB0" : "%s", other);   // UTF-8 degree
+    // The setpoint line, empty while the setpoint itself is in the centre.
+    buf[0] = '\0';
+    if (!v.showSetpoint)
+    {
+        char sp[8];
+        FormatTemp(sp, sizeof(sp), v.setpoint, true);
+        snprintf(buf, sizeof(buf), "%s" "\xC2\xB0", sp);   // UTF-8 degree
+    }
     if (strcmp(lv_label_get_text(captionLabel_), buf) != 0)
         lv_label_set_text(captionLabel_, buf);
 

@@ -21,7 +21,7 @@
 class HomeScreen final : public Screen
 {
     static constexpr uint32_t kRefreshMs = 1000;
-    static constexpr uint32_t kCommitMs  = 4000;   // quiet time that ends an edit
+    static constexpr uint32_t kCommitMs  = 3000;   // quiet time that ends an edit
     static constexpr float    kNudgeStep = 1.0f;   // whole degrees, as displayed
 
 public:
