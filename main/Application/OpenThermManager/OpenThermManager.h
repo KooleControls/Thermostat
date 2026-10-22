@@ -14,7 +14,7 @@ struct OtDemand
 {
     bool  chEnable     = false;   // ID 0 master bit 0 — heat demand
     bool  dhwEnable    = false;   // ID 0 master bit 1
-    bool  coolEnable   = false;   // ID 0 master bit 2 — cooling demand
+    bool  coolEnable   = false;   // ID 0 master bit 2 — cooling demand; also ID 7 (0 or 100 %)
     float roomSetpoint = 20.0f;   // °C → ID 16 (adopted from ID 9 on override)
     float dhwSetpoint  = 60.0f;   // °C → ID 56
     float tSet         = 0.0f;    // °C → ID 1 (later: the PID output)
@@ -139,7 +139,7 @@ private:
     bool     lastLoggedLinked_ = false;   // LogLinkTransition edge detector
 
     // Unsupported-ID bookkeeping for the rotation (UNKNOWN-DATAID reply → rare
-    // retry). kSlots (see OpenThermManager.cpp) is currently 14.
-    bool     unsupported_[/*kSlots*/ 14] = {};
+    // retry). kSlots (see OpenThermManager.cpp) is currently 15.
+    bool     unsupported_[/*kSlots*/ 15] = {};
     uint32_t pass_ = 0;
 };
