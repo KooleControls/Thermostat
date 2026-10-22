@@ -105,6 +105,18 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # rendering rather than with settings writes, suspect this first.
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y
 
+# The other half of keeping the scanout alive through a flash write. XIP keeps
+# the cache on, but every flash operation still masks all non-IRAM interrupts
+# (esp_intr_noniram_disable in spi_flash's cache_utils.c), and that included the
+# bounce-buffer refill (GDMA EOF) and VSYNC handlers. Each NVS read or write
+# then left the panel scanning stale bounce data — the picture dropped down —
+# until the first VSYNC after the operation restarted it. Short, so it went
+# unnoticed in use; obvious at boot, where it moved the boot logo for a moment
+# while settings and WiFi read and write their NVS. With the handlers in IRAM
+# they run through the write and refill through the cache XIP keeps on: IDF's
+# rgb_lcd.rst pairs the two for exactly this ("display an OTA progress bar").
+CONFIG_LCD_RGB_ISR_IRAM_SAFE=y
+
 # Console on USB-Serial/JTAG, NOT UART0. UART0's default pins are repurposed
 # on this board: GPIO43 is the LCD reset and GPIO44 the STM32 boot pin — a
 # UART0 console would bit-bang log traffic onto them.
