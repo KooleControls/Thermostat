@@ -35,9 +35,9 @@ struct HomeView
     /// or dialled it takes the centre, and the line beneath stays empty.
     bool showSetpoint = false;
 
-    /// The setpoint in the centre is a changed value about to be handed over:
-    /// it blinks. Never for a look, and not while the buttons are still being
-    /// pressed — only once they have been let go.
+    /// The setpoint in the centre has been dialled and is about to be handed
+    /// over: it blinks. Never for a look, and not while the buttons are still
+    /// being pressed — only once they have been let go.
     bool blink = false;
 
     HomeMode     mode     = HomeMode::Off;

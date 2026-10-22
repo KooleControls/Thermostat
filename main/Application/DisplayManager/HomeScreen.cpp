@@ -63,8 +63,7 @@ void HomeScreen::Refresh()
     view.setpoint     = editing_ ? editSetpoint_
                                  : serviceProvider_.getClimateManager().GetUserSetpoint();
     view.showSetpoint = editing_;
-    view.blink        = editing_ && editSettled_ &&
-                        fabsf(editSetpoint_ - editStart_) > 0.001f;
+    view.blink        = editing_ && editSettled_ && editMoved_;
 
     view.mode = ToHomeMode(serviceProvider_.getClimateManager().GetMode());
 
@@ -160,6 +159,7 @@ void HomeScreen::Nudge(float direction)
     if (!editing_)
     {
         editing_      = true;
+        editMoved_    = false;
         editStart_    = serviceProvider_.getClimateManager().GetUserSetpoint();
         editSetpoint_ = editStart_;
     }
@@ -169,6 +169,7 @@ void HomeScreen::Nudge(float direction)
                                           : ceilf(editSetpoint_)  - kNudgeStep;
         if (target < ClimateManager::kSetpointMin) target = ClimateManager::kSetpointMin;
         if (target > ClimateManager::kSetpointMax) target = ClimateManager::kSetpointMax;
+        if (fabsf(target - editSetpoint_) > 0.001f) editMoved_ = true;   // not at a limit
         editSetpoint_ = target;
     }
 

@@ -17,9 +17,10 @@
 // shows it and the touches after it dial it; nothing reaches the climate loop
 // until the buttons have been left alone for kCommitMs. So a guest can check
 // the setpoint without changing it, and a dialled value goes out over
-// OpenTherm once, not a degree at a time. A changed value blinks for the last
-// stretch of that wait — once the buttons have been quiet for kSettleMs — to
-// say it is about to take effect.
+// OpenTherm once, not a degree at a time. Once a press has moved the value —
+// even back to where it was — it blinks for the last stretch of that wait,
+// after the buttons have been quiet for kSettleMs, to confirm the input is
+// about to take effect. A touch that only looked never blinks.
 class HomeScreen final : public Screen
 {
     static constexpr uint32_t kRefreshMs = 1000;
@@ -55,7 +56,8 @@ private:
     // The edit in progress, if any. The climate loop sees none of it until
     // FinishEdit().
     bool  editing_      = false;
-    bool  editSettled_  = false;  // buttons quiet for kSettleMs: a change blinks
+    bool  editSettled_  = false;  // buttons quiet for kSettleMs: a dialled value blinks
+    bool  editMoved_    = false;  // a press moved the value, even if it came back
     float editStart_    = 0.0f;   // the setpoint when the edit began
     float editSetpoint_ = 0.0f;   // the value on the dial
 };
