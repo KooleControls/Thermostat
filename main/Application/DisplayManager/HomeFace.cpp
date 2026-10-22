@@ -130,10 +130,12 @@ void HomeFace::BuildReadout(lv_obj_t* root)
     lv_obj_set_style_text_font(bigLabel_, &font_temp_96, 0);
     lv_obj_set_style_text_align(bigLabel_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(bigLabel_, "--");
-    // Sits a touch below the disc's centre. Optically centring digits is not
-    // the same as centring their box: the box reserves descender room the
-    // digits never use, so a box-centred number reads high.
-    lv_obj_align(bigLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 + 6);
+    // Box-centred on the disc, which centres the digits too: font_temp_96 has
+    // no descender room to correct for. Its line box is 69 px with the
+    // baseline 1 px off the bottom, and the digits are 67-69 px tall, so the
+    // box is the digits. A 6 px drop once made up for descender room this font
+    // does not reserve, and left the number visibly low (92 px above, 81 below).
+    lv_obj_align(bigLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240);
 
     unitLabel_ = lv_label_create(root);
     lv_obj_set_style_text_color(unitLabel_, UiTheme::Text(), 0);
@@ -151,7 +153,7 @@ void HomeFace::BuildReadout(lv_obj_t* root)
     lv_obj_set_style_text_font(captionLabel_, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_align(captionLabel_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(captionLabel_, "");
-    lv_obj_align(captionLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 + 78);
+    lv_obj_align(captionLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 + 72);   // 72 below the number's centre
 
     blinking_ = false;   // a fresh label; LVGL took any blink with the old one
 }
