@@ -98,5 +98,6 @@ private:
 
     // loop-task-only
     int64_t lastStepUs_ = -1;
+    uint32_t overrideSeen_ = 0;   // OtBoilerState::overrideSeq last adopted
     bool    lastSafe_ = false;   // fault-log edge detector
 };

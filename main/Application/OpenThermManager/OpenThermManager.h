@@ -60,6 +60,12 @@ struct OtBoilerState
     // Remote setpoint override from the boiler/gateway (ID 9). 0 = none.
     // Exposed raw; the setpoint owner (ClimateManager) decides adoption.
     float overrideSetpoint = 0;
+    // A slave may send an override as a pulse — the KC module answers three
+    // reads with the value and then 0 — so the raw value can be gone before
+    // anyone looks. Each override that starts bumps overrideSeq and leaves its
+    // value in overrideLatched.
+    uint32_t overrideSeq = 0;
+    float    overrideLatched = 0;
 };
 
 // OpenTherm MASTER (gateway = slave/boiler emulator). 500 ms cycle:

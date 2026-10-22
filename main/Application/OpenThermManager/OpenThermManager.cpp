@@ -240,6 +240,11 @@ void OpenThermManager::DoOverrideRead(OtLink &link)
         else if (ovr > 30.0f) ovr = 30.0f;
     }
     LOCK(mutex_);
+    if (ovr > 0.0f && ovr != state_.overrideSetpoint)   // one starts: after a 0, or a new value
+    {
+        state_.overrideLatched = ovr;
+        state_.overrideSeq++;
+    }
     state_.overrideSetpoint = ovr;             // ClimateManager adopts it
 }
 
