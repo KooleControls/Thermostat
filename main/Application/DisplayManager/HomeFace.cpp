@@ -218,6 +218,14 @@ void HomeFace::BuildTiles(lv_obj_t* root)
     MakeTile(root, tiles_[(int)HomeMode::Off],  3, ICON_POWER,     "Power",
              UiTheme::TextDim(), HomeIntent::SetOff);
     tileLayout_ = TileLayout::None;   // built hidden; Apply() lays the row out
+
+    // Where the row would be, centred on it, when there is no OpenTherm link.
+    otErrorLabel_ = lv_label_create(root);
+    lv_obj_set_style_text_color(otErrorLabel_, UiTheme::Danger(), 0);
+    lv_obj_set_style_text_font(otErrorLabel_, &lv_font_montserrat_28, 0);
+    lv_label_set_text(otErrorLabel_, "error: OT");
+    lv_obj_align(otErrorLabel_, LV_ALIGN_CENTER, 0, kTileY + kTileH / 2 - 240);
+    lv_obj_add_flag(otErrorLabel_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void HomeFace::SetTileEnabled(Tile& tile, bool enabled)
@@ -385,10 +393,16 @@ void HomeFace::Apply(const HomeView& v)
     // on boot and taking three away a moment later showed choices that were
     // never there. When the plant keeps the heating/cooling choice to itself,
     // Auto is the only mode — alone in the middle, rather than at the left
-    // edge of a missing row.
-    TileLayout layout = !v.modesKnown ? TileLayout::None
-                      : v.modeChoice  ? TileLayout::Full
-                                      : TileLayout::AutoOnly;
+    // edge of a missing row. With no OpenTherm link there is no plant to pick
+    // a mode for, and the row gives way to an error line.
+    TileLayout layout = (v.otError || !v.modesKnown) ? TileLayout::None
+                      : v.modeChoice                 ? TileLayout::Full
+                                                     : TileLayout::AutoOnly;
+    if (v.otError == lv_obj_has_flag(otErrorLabel_, LV_OBJ_FLAG_HIDDEN))
+    {
+        if (v.otError) lv_obj_remove_flag(otErrorLabel_, LV_OBJ_FLAG_HIDDEN);
+        else           lv_obj_add_flag(otErrorLabel_, LV_OBJ_FLAG_HIDDEN);
+    }
     if (layout != tileLayout_)
     {
         tileLayout_ = layout;

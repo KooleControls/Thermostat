@@ -66,6 +66,11 @@ struct HomeView
     /// it has, no mode tiles are drawn at all.
     bool modesKnown = false;
 
+    /// No OpenTherm link for a while — from boot, or since it dropped. The
+    /// tile row gives way to an error line: there is no plant to pick a mode
+    /// for, and an empty bottom edge would not say why.
+    bool otError = false;
+
     /// Whether the guest may pick heating or cooling at all — the plant says
     /// so over OpenTherm (slave config). When it keeps that choice itself the
     /// thermostat runs in Auto, and Heating, Cooling and Power are not offered.
@@ -167,6 +172,7 @@ private:
     bool      blinking_     = false;   // the number blinks while being dialled
 
     Tile tiles_[4];   // Auto, Heat, Cool, Off — indexed by HomeMode
+    lv_obj_t* otErrorLabel_ = nullptr;   // stands in for the row; see HomeView::otError
 
     // What the tile row is laid out for right now.
     enum class TileLayout : uint8_t { None, AutoOnly, Full };

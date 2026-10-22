@@ -28,6 +28,7 @@ class HomeScreen final : public Screen
     static constexpr uint32_t kBlinks    = 3;      // then this many whole blinks, and it goes
     static constexpr uint32_t kCommitMs  = kSettleMs + kBlinks * 2 * HomeFace::kBlinkMs;
     static constexpr float    kNudgeStep = 1.0f;   // whole degrees, as displayed
+    static constexpr int64_t  kOtErrorUs = 5'000'000;   // no OT link this long: say so
 
 public:
     HomeScreen(ServiceProvider& serviceProvider, Navigator& navigator)
@@ -53,6 +54,7 @@ private:
     HomeFace face_;
     lv_timer_t* refreshTimer_ = nullptr;
     lv_timer_t* editTimer_ = nullptr;   // settle, then commit; see EditTimerCb
+    int64_t lastLinkedUs_ = 0;          // OT link last seen up; 0 = boot
 
     // The edit in progress, if any. The climate loop sees none of it until
     // FinishEdit().

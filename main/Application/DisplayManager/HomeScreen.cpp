@@ -3,6 +3,7 @@
 #include "ClimateManager/ClimateManager.h"
 #include "OpenThermManager/OpenThermManager.h"
 #include "RoomTemperatureManager/RoomTemperatureManager.h"
+#include "esp_timer.h"
 #include <cmath>
 
 namespace {
@@ -89,6 +90,13 @@ void HomeScreen::Refresh()
     view.modesKnown       = boiler.configRead;
     view.coolingAvailable = boiler.coolingSupported;
     view.modeChoice       = boiler.heatCoolByMaster;
+
+    // Counted from boot until the link first comes up, and from the last time
+    // it was up after that. The link layer only calls it down after ~3 s of
+    // failed exchanges, so a pulled wire shows here some 8 s later.
+    int64_t nowUs = esp_timer_get_time();
+    if (boiler.linked) lastLinkedUs_ = nowUs;
+    view.otError = !boiler.linked && (nowUs - lastLinkedUs_) >= kOtErrorUs;
 
     if (boiler.chActive && !boiler.coolingActive)
     {
