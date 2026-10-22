@@ -100,10 +100,12 @@ void HomeScreen::Refresh()
     else if (boiler.coolingActive && !boiler.chActive)
     {
         view.stage = HomeStage::Cooling;
-        // There is no "cooling is running" bit in OT — the flame bit only
-        // speaks for the burner. So cooling shows as standby throughout, which
-        // understates an active cooler rather than inventing a state.
-        view.running = false;
+        // Bit 4 is the only cooling bit OT has; there is no cooling flame bit
+        // to say "running" separately. This once read the bit as a stage in
+        // standby and drew a grey snowflake for as long as the cooler ran —
+        // but the gateway clears it again in cooling standby, so it already is
+        // the running signal, and a set bit means cooling is being delivered.
+        view.running = true;
     }
     else if (boiler.flame)
     {
@@ -115,7 +117,13 @@ void HomeScreen::Refresh()
     }
     else
     {
-        view.stage   = HomeStage::None;
+        // Nothing running and no stage claimed. The guest's mode is still a
+        // fact, not a guess: in Heat or Cool the system is standing by in that
+        // direction, so it gets that stage's glyph in grey. Auto and Off have
+        // no direction to stand by in and keep the power glyph.
+        if      (view.mode == HomeMode::Heat) view.stage = HomeStage::Heating;
+        else if (view.mode == HomeMode::Cool) view.stage = HomeStage::Cooling;
+        else                                  view.stage = HomeStage::None;
         view.running = false;
     }
 
