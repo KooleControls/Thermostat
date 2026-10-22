@@ -30,9 +30,10 @@ struct HomeView
     bool  roomValid = false;
 
     /// The big number is the room temperature and the line beneath it the
-    /// setpoint, always — so a guest reads the setpoint without touching
-    /// anything, and a remote override shows as it lands. While the setpoint
-    /// is being dialled it takes the centre, blinking, and the line names it.
+    /// setpoint — so a guest reads the setpoint without touching anything, and
+    /// a remote override shows as it lands. While the setpoint is being dialled
+    /// the two trade places: the setpoint takes the centre, blinking, and the
+    /// room temperature drops to the line.
     bool showSetpoint = false;
 
     HomeMode     mode     = HomeMode::Off;

@@ -140,15 +140,18 @@ void HomeFace::BuildReadout(lv_obj_t* root)
     lv_obj_set_style_text_font(unitLabel_, &lv_font_montserrat_20, 0);
     lv_label_set_text(unitLabel_, "\xC2\xB0" "C");   // UTF-8 degree
 
-    // Always shown. At rest it carries the setpoint, so it can be read without
-    // a touch — touching -/+ to look was itself a change, once. While the
-    // setpoint is being dialled it moves to the centre and this names it.
+    // Always shown: whichever of the two values the centre is not showing. At
+    // rest that is the setpoint, so it can be read without a touch — touching
+    // -/+ to look was itself a change, once. While the setpoint is being
+    // dialled it moves to the centre and the room temperature comes here.
+    // Just the value: the dim, smaller number under the big one reads as the
+    // target without a word beside it.
     captionLabel_ = lv_label_create(root);
     lv_obj_set_style_text_color(captionLabel_, UiTheme::TextDim(), 0);
-    lv_obj_set_style_text_font(captionLabel_, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(captionLabel_, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_align(captionLabel_, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_text(captionLabel_, "");
-    lv_obj_align(captionLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 + 74);
+    lv_obj_align(captionLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 + 78);
 
     blinking_ = false;   // a fresh label; LVGL took any blink with the old one
 }
@@ -337,16 +340,11 @@ void HomeFace::Apply(const HomeView& v)
         StartBlink();   // a press lands on a lit number, never a dimmed one
     }
 
-    if (v.showSetpoint)
-    {
-        snprintf(buf, sizeof(buf), "Setpoint");
-    }
-    else
-    {
-        char sp[8];
-        FormatTemp(sp, sizeof(sp), v.setpoint, true);
-        snprintf(buf, sizeof(buf), "Setpoint %s" "\xC2\xB0", sp);   // UTF-8 degree
-    }
+    // The line beneath carries the other value of the two.
+    char other[8];
+    bool otherValid = v.showSetpoint ? v.roomValid : true;
+    FormatTemp(other, sizeof(other), v.showSetpoint ? v.roomTemp : v.setpoint, otherValid);
+    snprintf(buf, sizeof(buf), otherValid ? "%s" "\xC2\xB0" : "%s", other);   // UTF-8 degree
     if (strcmp(lv_label_get_text(captionLabel_), buf) != 0)
         lv_label_set_text(captionLabel_, buf);
 
