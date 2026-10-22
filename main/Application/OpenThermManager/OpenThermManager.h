@@ -34,8 +34,12 @@ struct OtBoilerState
     bool coolingActive = false;
 
     // slave config (ID 3 high byte) — capabilities
+    bool configRead = false;             // ID 3 has answered at least once
     bool dhwPresent = false;
     bool coolingSupported = false;
+    // Bit 7, inverted: the slave lets the master switch between heating and
+    // cooling. Assumed until ID 3 says otherwise, as it was before this was read.
+    bool heatCoolByMaster = true;
 
     // sensors (f8.8 unless noted)
     float boilerTemp = 0;                // ID 25
@@ -106,7 +110,7 @@ private:
     bool DoStatus(class OtLink &link);            // ID 0 keepalive + status decode
     void DoOverrideRead(class OtLink &link);      // ID 9 → state_.overrideSetpoint
     void DoRotationSlot(class OtLink &link);      // one slot of the rotation
-    size_t NextSlot();                            // dirty-jump, unsupported-skip, advance
+    size_t NextSlot();                            // config first, write burst, unsupported-skip, advance
     void   AdvanceSlot();
     bool   GetWriteValue(uint8_t id, float &v);   // demand value for a write slot
     void   StoreRead(uint8_t id, uint16_t value); // decode a read reply into state_
@@ -129,10 +133,12 @@ private:
 
     OtDemand      demand_;
     OtBoilerState state_;
-    bool demandDirty_ = false;    // set by the demand setters → jump the rotation
+    bool demandDirty_ = false;    // set by the demand setters → write burst
 
     uint32_t cycle_ = 0;
     size_t   slot_ = 0;
+    size_t   configNext_ = 0;          // config slots read since link-up; see NextSlot
+    size_t   burst_ = SIZE_MAX;        // rotation index of the write burst; past the end = none
     int      failStreak_ = 0;
     int      recoverBackoffS_ = 5;
     int64_t  nextRecoverUs_ = 0;

@@ -90,7 +90,11 @@ void HomeScreen::Refresh()
     // meanings; this is just no longer throwing the distinction away.
     OtBoilerState boiler = serviceProvider_.getOpenThermManager().GetState();
 
-    view.coolingAvailable = boiler.coolingSupported;
+    // Both from the slave's config (ID 3). Not read yet is not "no cooling":
+    // dimming the tile until the first answer greyed out a mode the guest had
+    // picked, on every boot.
+    view.coolingAvailable = !boiler.configRead || boiler.coolingSupported;
+    view.modeChoice       = boiler.heatCoolByMaster;
 
     if (boiler.chActive && !boiler.coolingActive)
     {

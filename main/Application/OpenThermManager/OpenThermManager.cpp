@@ -31,19 +31,24 @@ namespace
     constexpr uint8_t ID_MAXTSET_BOUNDS = 49;  // s8/s8 max-CH-setpoint bounds (OT 2.2)
     constexpr uint8_t ID_OEMDIAG  = 115;
 
-    // Fixed rotation: writes interleaved with reads. One slot per cycle.
+    // Fixed rotation: writes interleaved with reads. One slot per cycle. The
+    // slave's config leads, and the first kConfigSlots entries are also read
+    // ahead of everything else whenever the link comes up (see NextSlot).
     struct Slot { uint8_t id; bool write; };
     constexpr Slot kRotation[] = {
+        { ID_SCONFIG,  false }, { ID_MAXTSET_BOUNDS, false },
         { ID_TSET,     true  }, { ID_RELMOD,   false },
         { ID_COOLCTRL, true  }, { ID_TBOILER,  false },
         { ID_TRSET,    true  }, { ID_TDHW,     false },
         { ID_TROOM,    true  }, { ID_TRET,     false },
         { ID_TDHWSET,  true  }, { ID_CHPRESS,  false },
         { ID_TOUTSIDE, false }, { ID_OEMFAULT, false },
-        { ID_OEMDIAG,  false }, { ID_MAXTSET_BOUNDS, false },
-        { ID_SCONFIG,  false },
+        { ID_OEMDIAG,  false },
     };
     constexpr size_t kSlots = sizeof(kRotation) / sizeof(kRotation[0]);
+    constexpr size_t kConfigSlots = 2;
+    static_assert(kRotation[0].id == ID_SCONFIG && kRotation[1].id == ID_MAXTSET_BOUNDS,
+                  "the config slots lead the rotation");
     // Keeps OpenThermManager.h's fixed-size unsupported_[15] member honest.
     static_assert(kSlots == 15, "OpenThermManager::unsupported_ is sized for kSlots == 15");
 
@@ -277,14 +282,32 @@ void OpenThermManager::DoRotationSlot(OtLink &link)
     }
 }
 
-// Pick this cycle's rotation slot: a dirty demand jumps the queue (restart
-// at slot 0 so the writes go out within ~2 s of the change), unsupported IDs
-// are skipped except on the rare retry pass.
+// Pick this cycle's rotation slot.
+//
+// Right after the link comes up the slave's config goes first: the demand is
+// computed from it (ID 49 bounds the water setpoint, ID 3 says whether there
+// is cooling and who picks heating or cooling), and so is what the panel
+// offers.
+//
+// A changed demand then sends every write slot next and lets the rotation
+// resume where it was. Restarting the rotation instead, as this once did,
+// starved its tail whenever the demand changed more often than once a pass —
+// and the heating controller changes it every step.
+//
+// Unsupported IDs are skipped except on the rare retry pass.
 size_t OpenThermManager::NextSlot()
 {
+    if (configNext_ < kConfigSlots)
+        return configNext_++;
+
     {
         LOCK(mutex_);
-        if (demandDirty_) { slot_ = 0; demandDirty_ = false; }
+        if (demandDirty_) { burst_ = 0; demandDirty_ = false; }
+    }
+    while (burst_ < kSlots)
+    {
+        size_t idx = burst_++;
+        if (kRotation[idx].write && !unsupported_[idx]) return idx;
     }
 
     size_t tries = 0;
@@ -352,8 +375,10 @@ void OpenThermManager::StoreRead(uint8_t id, uint16_t value)
     case ID_SCONFIG:
     {
         uint8_t cfg = value >> 8;
+        state_.configRead       = true;
         state_.dhwPresent       = cfg & 0x01;
         state_.coolingSupported = cfg & 0x04;
+        state_.heatCoolByMaster = !(cfg & 0x80);
         break;
     }
     }
@@ -372,6 +397,8 @@ uint16_t OpenThermManager::MasterStatusBits()
 void OpenThermManager::StoreSlaveStatus(uint8_t bits)
 {
     LOCK(mutex_);
+    if (!state_.linked)
+        configNext_ = 0;   // link (back) up: read the slave's config first
     state_.linked        = true;
     state_.fault         = bits & 0x01;
     state_.chActive      = bits & 0x02;
@@ -406,8 +433,10 @@ RequestError OpenThermManager::Cmd_Status(CommandContext& ctx)
     resp.field("dhwActive", s.dhwActive);
     resp.field("flame", s.flame);
     resp.field("coolingActive", s.coolingActive);
+    resp.field("configRead", s.configRead);
     resp.field("dhwPresent", s.dhwPresent);
     resp.field("coolingSupported", s.coolingSupported);
+    resp.field("heatCoolByMaster", s.heatCoolByMaster);
     resp.field("boilerTemp", s.boilerTemp);
     resp.field("returnTemp", s.returnTemp);
     resp.field("dhwTemp", s.dhwTemp);

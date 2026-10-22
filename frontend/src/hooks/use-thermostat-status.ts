@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 import {
   backend,
+  type ClimateMode,
   type ClimateStatus,
   type HotWaterStatus,
   type OtStatus,
@@ -32,7 +33,7 @@ export function useThermostatStatus() {
   }, [connection, refresh])
 
   // Control actions DO toast on failure. Each reply is the fresh status.
-  const setMode = useCallback((mode: "off" | "heat" | "cool") => {
+  const setMode = useCallback((mode: ClimateMode) => {
     backend
       .setClimate({ mode })
       .then(setClimate)

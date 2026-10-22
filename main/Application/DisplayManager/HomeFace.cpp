@@ -212,6 +212,7 @@ void HomeFace::BuildTiles(lv_obj_t* root)
              UiTheme::Cool(), HomeIntent::SetCool);
     MakeTile(root, tiles_[(int)HomeMode::Off],  3, ICON_POWER,     "Power",
              UiTheme::TextDim(), HomeIntent::SetOff);
+    modeChoice_ = true;   // a rebuilt row starts out whole; Apply() lays it out
 }
 
 void HomeFace::SetTileEnabled(Tile& tile, bool enabled)
@@ -224,14 +225,11 @@ void HomeFace::SetTileEnabled(Tile& tile, bool enabled)
 void HomeFace::MakeTile(lv_obj_t* root, Tile& tile, int index, const char* glyph,
                         const char* text, lv_color_t hue, HomeIntent intent)
 {
-    constexpr int32_t kRowW = 4 * kTileW + 3 * kTileGap;
-    int32_t x = (480 - kRowW) / 2 + index * (kTileW + kTileGap);
-
     tile.hue = hue;
 
     tile.box = lv_button_create(root);
     lv_obj_set_size(tile.box, kTileW, kTileH);
-    lv_obj_align(tile.box, LV_ALIGN_TOP_LEFT, x, 480 - kTileH - 18);
+    lv_obj_align(tile.box, LV_ALIGN_TOP_LEFT, TileX(index), kTileY);
     lv_obj_set_style_radius(tile.box, 14, 0);
     lv_obj_set_style_bg_color(tile.box, UiTheme::Surface(), 0);
     lv_obj_set_style_bg_color(tile.box, hue, LV_STATE_PRESSED);
@@ -356,8 +354,24 @@ void HomeFace::Apply(const HomeView& v)
                                                    : UiTheme::Surface(), 0);
 
     // ── Mode tiles ───────────────────────────────────────────
-    // Cooling is the only tile that can be unavailable, and it is dimmed
-    // rather than hidden so the row keeps its shape on every installation.
+    // When the plant keeps the heating/cooling choice to itself, Auto is the
+    // only mode there is: the other three tiles go, and Auto moves to the
+    // middle rather than sitting alone at the left edge.
+    if (v.modeChoice != modeChoice_)
+    {
+        modeChoice_ = v.modeChoice;
+        for (int i = 0; i < 4; ++i)
+        {
+            if (i == (int)HomeMode::Auto) continue;
+            if (modeChoice_) lv_obj_remove_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
+            else             lv_obj_add_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
+        }
+        lv_obj_align(tiles_[(int)HomeMode::Auto].box, LV_ALIGN_TOP_LEFT,
+                     modeChoice_ ? TileX(0) : (480 - kTileW) / 2, kTileY);
+    }
+
+    // A plant without cooling dims the Cooling tile rather than hiding it: a
+    // missing cooler is no reason to reshape the row.
     SetTileEnabled(tiles_[(int)HomeMode::Cool], v.coolingAvailable);
 
     for (int i = 0; i < 4; ++i)

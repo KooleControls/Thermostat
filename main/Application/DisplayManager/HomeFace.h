@@ -55,6 +55,11 @@ struct HomeView
     /// dims the Cooling tile and makes it untouchable, so a guest is not
     /// offered a mode the building cannot deliver.
     bool coolingAvailable = true;
+
+    /// Whether the guest may pick heating or cooling at all — the plant says
+    /// so over OpenTherm (slave config). When it keeps that choice itself the
+    /// thermostat runs in Auto, and Heating, Cooling and Power are not offered.
+    bool modeChoice = true;
 };
 
 /// What a touch means. The face raises these; it never acts on them.
@@ -97,6 +102,13 @@ private:
     static constexpr int32_t kTileW     = 100;
     static constexpr int32_t kTileH     = 96;
     static constexpr int32_t kTileGap   = 10;
+    static constexpr int32_t kTileY     = 480 - kTileH - 18;
+
+    /// Left edge of the tile in row position `index` (0..3).
+    static constexpr int32_t TileX(int index)
+    {
+        return (480 - (4 * kTileW + 3 * kTileGap)) / 2 + index * (kTileW + kTileGap);
+    }
 
     struct Tile
     {
@@ -137,4 +149,5 @@ private:
     lv_obj_t* captionLabel_ = nullptr;
 
     Tile tiles_[4];   // Auto, Heat, Cool, Off — indexed by HomeMode
+    bool modeChoice_ = true;   // what the tile row is laid out for right now
 };
