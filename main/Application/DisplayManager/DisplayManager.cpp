@@ -2,8 +2,11 @@
 #include "SettingsManager/SettingsManager.h"
 #include "CommandManager/CommandManager.h"
 #include "Board.h"
+#include "BootLogo.h"
 #include "JsonScope.h"
 #include "JsonReader.h"
+#include "esp_cache.h"
+#include "esp_lcd_panel_rgb.h"
 #include "esp_lvgl_port.h"
 #include "esp_log.h"
 #include <cstring>
@@ -11,6 +14,63 @@
 DisplayManager::DisplayManager(ServiceProvider &serviceProvider)
     : serviceProvider_(serviceProvider)
 {
+}
+
+// Draws into both framebuffers, since which one scans out first is the
+// driver's business, and LVGL later adopts the same two buffers: its first
+// frame is a full redraw that swaps in over the logo, so there is no gap.
+void DisplayManager::ShowBootLogo()
+{
+    Board& board = serviceProvider_.getBoard();
+    esp_lcd_panel_handle_t panel = board.GetPanel();
+    if (panel == nullptr) return;   // headless, or the panel failed to come up
+
+    void* fbs[2] = {};
+    size_t count = 2;
+    if (esp_lcd_rgb_panel_get_frame_buffer(panel, 2, &fbs[0], &fbs[1]) != ESP_OK)
+    {
+        count = 1;
+        if (esp_lcd_rgb_panel_get_frame_buffer(panel, 1, &fbs[0]) != ESP_OK)
+        {
+            ESP_LOGW(TAG, "No framebuffer to draw the boot logo into");
+            return;
+        }
+    }
+
+    constexpr int W = BoardConfig::LCD_H_RES;
+    constexpr int H = BoardConfig::LCD_V_RES;
+    const BootLogo& logo = kBootLogo;
+    const int x0 = (W - logo.w) / 2;
+    const int y0 = (H - logo.h) / 2;
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        auto* fb = static_cast<uint16_t*>(fbs[i]);
+        for (int p = 0; p < W * H; ++p) fb[p] = logo.bg;
+
+        int x = 0, y = 0;   // position inside the logo
+        for (size_t r = 0; r < logo.runs; ++r)
+        {
+            uint16_t n = logo.rle[2 * r];
+            const uint16_t colour = logo.rle[2 * r + 1];
+            while (n--)
+            {
+                fb[(y0 + y) * W + x0 + x] = colour;
+                if (++x == logo.w) { x = 0; ++y; }
+            }
+        }
+
+        // The scanout reads these through the bounce buffers' CPU copy today,
+        // which sees the cache; write back anyway, so a layout that DMAs
+        // straight from PSRAM shows the logo too.
+        esp_cache_msync(fb, W * H * sizeof(uint16_t),
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    }
+
+    // Full brightness, as DisplayManager::Init leaves it by default; the
+    // brightness setting is not registered yet this early.
+    board.SetBacklightPercent(100);
+    ESP_LOGI(TAG, "Boot logo up");
 }
 
 void DisplayManager::Init()
