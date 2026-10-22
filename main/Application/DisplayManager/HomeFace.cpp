@@ -105,6 +105,15 @@ void HomeFace::BuildBadge(lv_obj_t* root)
     lv_label_set_text(gear, LV_SYMBOL_SETTINGS);
     lv_obj_align(gear, LV_ALIGN_TOP_RIGHT, -22, 24);
 
+    // Top centre, on the row of the bluetooth and gear glyphs, when there is no
+    // OpenTherm link. The mode tiles are gone meanwhile (see Apply()).
+    otErrorLabel_ = lv_label_create(root);
+    lv_obj_set_style_text_color(otErrorLabel_, UiTheme::Danger(), 0);
+    lv_obj_set_style_text_font(otErrorLabel_, &lv_font_montserrat_28, 0);
+    lv_label_set_text(otErrorLabel_, "error: OT");
+    lv_obj_align(otErrorLabel_, LV_ALIGN_TOP_MID, 0, 24);
+    lv_obj_add_flag(otErrorLabel_, LV_OBJ_FLAG_HIDDEN);
+
     // The glyph is small; the hit area is not. A transparent pad over the
     // corner is what a finger actually aims at.
     lv_obj_t* gearHit = lv_button_create(root);
@@ -218,14 +227,6 @@ void HomeFace::BuildTiles(lv_obj_t* root)
     MakeTile(root, tiles_[(int)HomeMode::Off],  3, ICON_POWER,     "Power",
              UiTheme::TextDim(), HomeIntent::SetOff);
     tileLayout_ = TileLayout::None;   // built hidden; Apply() lays the row out
-
-    // Where the row would be, centred on it, when there is no OpenTherm link.
-    otErrorLabel_ = lv_label_create(root);
-    lv_obj_set_style_text_color(otErrorLabel_, UiTheme::Danger(), 0);
-    lv_obj_set_style_text_font(otErrorLabel_, &lv_font_montserrat_28, 0);
-    lv_label_set_text(otErrorLabel_, "error: OT");
-    lv_obj_align(otErrorLabel_, LV_ALIGN_CENTER, 0, kTileY + kTileH / 2 - 240);
-    lv_obj_add_flag(otErrorLabel_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void HomeFace::SetTileEnabled(Tile& tile, bool enabled)
@@ -394,7 +395,7 @@ void HomeFace::Apply(const HomeView& v)
     // never there. When the plant keeps the heating/cooling choice to itself,
     // Auto is the only mode — alone in the middle, rather than at the left
     // edge of a missing row. With no OpenTherm link there is no plant to pick
-    // a mode for, and the row gives way to an error line.
+    // a mode for: no row, and an error line at the top says why.
     TileLayout layout = (v.otError || !v.modesKnown) ? TileLayout::None
                       : v.modeChoice                 ? TileLayout::Full
                                                      : TileLayout::AutoOnly;
