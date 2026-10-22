@@ -25,13 +25,14 @@ enum class HomeStage : uint8_t { None, Heating, Cooling };
 
 struct HomeView
 {
-    float setpoint  = 20.0f;
+    float setpoint  = 20.0f;   // the guest's, or the one being dialled
     float roomTemp  = 0.0f;
     bool  roomValid = false;
 
-    /// The big number is the room temperature, except while the setpoint is
-    /// being nudged — then the two swap, and the line beneath always carries
-    /// whichever value the centre is not showing.
+    /// The big number is the room temperature and the line beneath it the
+    /// setpoint, always — so a guest reads the setpoint without touching
+    /// anything, and a remote override shows as it lands. While the setpoint
+    /// is being dialled it takes the centre, blinking, and the line names it.
     bool showSetpoint = false;
 
     HomeMode     mode     = HomeMode::Off;
@@ -98,6 +99,8 @@ private:
     /// one's, so equal boxes are not equal glyphs — measured, not derived.
     static constexpr int32_t kUnitDrop = 5;
 
+    static constexpr uint32_t kBlinkMs = 500;    // each half of a blink
+
     static constexpr int32_t kNudgeSize = 76;    // -/+ circle width; height likewise
     static constexpr int32_t kTileW     = 100;
     static constexpr int32_t kTileH     = 96;
@@ -131,6 +134,9 @@ private:
                        const char* text, lv_color_t hue, HomeIntent intent);
     static void SetTileEnabled(Tile& tile, bool enabled);
 
+    void        StartBlink();
+    static void BlinkExec(void* obj, int32_t opa);
+
     static void IntentCb(lv_event_t* e);
     static void FormatTemp(char* out, size_t cap, float value, bool valid);
     static void SetBadgeGlyph(lv_obj_t* label, HomeStage what, bool running);
@@ -147,6 +153,7 @@ private:
     lv_obj_t* bigLabel_     = nullptr;
     lv_obj_t* unitLabel_    = nullptr;
     lv_obj_t* captionLabel_ = nullptr;
+    bool      blinking_     = false;   // the number blinks while being dialled
 
     Tile tiles_[4];   // Auto, Heat, Cool, Off — indexed by HomeMode
     bool modeChoice_ = true;   // what the tile row is laid out for right now

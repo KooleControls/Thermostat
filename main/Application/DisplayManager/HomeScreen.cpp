@@ -35,30 +35,22 @@ void HomeScreen::Build(lv_obj_t* root)
         refreshTimer_ = lv_timer_create(RefreshTimerCb, kRefreshMs, this);
 }
 
-// The revert timer is the one piece of state that can outlive the tree with a
+// The commit timer is the one piece of state that can outlive the tree with a
 // reason to touch it: it is armed by a nudge and survives a walk into the menu,
-// so a rebuild from there would land it on a deleted face. Drop it — a rebuild
-// re-enters through OnShow(), which clears it anyway.
+// so a rebuild from there would land it on a deleted face. A rebuild ends the
+// edit instead — handing over what was dialled, since the guest saw it there —
+// and re-enters through OnShow().
 void HomeScreen::OnDestroy()
 {
-    if (revertTimer_)
-    {
-        lv_timer_delete(revertTimer_);
-        revertTimer_ = nullptr;
-    }
-    showingSetpoint_ = false;
+    FinishEdit();
 }
 
 void HomeScreen::OnShow()
 {
     // Coming back from the menu always lands on the room temperature, never on
-    // a setpoint left on the dial minutes ago.
-    if (revertTimer_)
-    {
-        lv_timer_delete(revertTimer_);
-        revertTimer_ = nullptr;
-    }
-    showingSetpoint_ = false;
+    // a setpoint left on the dial. An edit still open from before the walk into
+    // the menu ends here, the same way the timer would have ended it.
+    FinishEdit();
     Refresh();
 }
 
@@ -68,8 +60,9 @@ void HomeScreen::Refresh()
 
     view.roomValid = serviceProvider_.getRoomTemperatureManager()
                          .GetRoomTemperature(view.roomTemp);
-    view.setpoint     = serviceProvider_.getClimateManager().GetUserSetpoint();
-    view.showSetpoint = showingSetpoint_;
+    view.setpoint     = editing_ ? editSetpoint_
+                                 : serviceProvider_.getClimateManager().GetUserSetpoint();
+    view.showSetpoint = editing_;
 
     view.mode = ToHomeMode(serviceProvider_.getClimateManager().GetMode());
 
@@ -152,22 +145,50 @@ void HomeScreen::Refresh()
     face_.Apply(view);
 }
 
+// The first touch only puts the setpoint on the dial; the touches after it move
+// it. Every touch restarts the quiet time that ends the edit.
+//
 // The face shows whole degrees, so the setpoint has to move in whole degrees —
 // a half-degree step would leave every other press with nothing to show for
 // itself. A setpoint already carrying a fraction (an older stored value, or a
 // remote override adopted from the gateway) snaps to the next whole degree in
-// the direction of travel, so the first press still moves the number by one.
+// the direction of travel, so a press still moves the number by one.
 void HomeScreen::Nudge(float direction)
 {
-    auto& climate = serviceProvider_.getClimateManager();
-    float current = climate.GetUserSetpoint();
-    float target  = (direction > 0.0f) ? floorf(current) + kNudgeStep
-                                       : ceilf(current)  - kNudgeStep;
-    climate.NudgeSetpoint(target - current);   // clamped inside
+    if (!editing_)
+    {
+        editing_      = true;
+        editStart_    = serviceProvider_.getClimateManager().GetUserSetpoint();
+        editSetpoint_ = editStart_;
+    }
+    else
+    {
+        float target = (direction > 0.0f) ? floorf(editSetpoint_) + kNudgeStep
+                                          : ceilf(editSetpoint_)  - kNudgeStep;
+        if (target < ClimateManager::kSetpointMin) target = ClimateManager::kSetpointMin;
+        if (target > ClimateManager::kSetpointMax) target = ClimateManager::kSetpointMax;
+        editSetpoint_ = target;
+    }
 
-    showingSetpoint_ = true;
-    if (revertTimer_) lv_timer_reset(revertTimer_);
-    else revertTimer_ = lv_timer_create(RevertTimerCb, kRevertMs, this);
+    if (commitTimer_) lv_timer_reset(commitTimer_);
+    else commitTimer_ = lv_timer_create(CommitTimerCb, kCommitMs, this);
+}
+
+// Ends an edit. Only now does the dialled value reach the climate loop, and
+// from there OpenTherm — and only if it moved: a guest who touched -/+ just to
+// look changes nothing, not even an override that landed meanwhile.
+void HomeScreen::FinishEdit()
+{
+    if (commitTimer_)
+    {
+        lv_timer_delete(commitTimer_);
+        commitTimer_ = nullptr;
+    }
+    if (!editing_) return;
+    editing_ = false;
+
+    if (fabsf(editSetpoint_ - editStart_) > 0.001f)
+        serviceProvider_.getClimateManager().SetUserSetpoint(editSetpoint_);
 }
 
 void HomeScreen::OnIntent(HomeIntent intent)
@@ -177,8 +198,8 @@ void HomeScreen::OnIntent(HomeIntent intent)
     case HomeIntent::NudgeDown: Nudge(-1.0f); break;
     case HomeIntent::NudgeUp:   Nudge(+1.0f); break;
 
-    // The mode is the guest's choice; the thermostat only stores it and lets
-    // the gateway read it. Acting on it is the gateway's job.
+    // The mode is the guest's choice. ClimateManager turns it into which
+    // requests go out; the gateway's timers still decide when it runs.
     case HomeIntent::SetAuto:
         serviceProvider_.getClimateManager().SetMode(ClimateMode::Auto);
         break;
@@ -209,12 +230,10 @@ void HomeScreen::RefreshTimerCb(lv_timer_t* t)
     self->Refresh();
 }
 
-void HomeScreen::RevertTimerCb(lv_timer_t* t)
+void HomeScreen::CommitTimerCb(lv_timer_t* t)
 {
     auto* self = static_cast<HomeScreen*>(lv_timer_get_user_data(t));
-    lv_timer_delete(t);
-    self->revertTimer_ = nullptr;
-    self->showingSetpoint_ = false;
+    self->FinishEdit();   // deletes t
     self->Refresh();
 }
 

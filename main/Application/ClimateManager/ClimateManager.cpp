@@ -57,19 +57,6 @@ float ClimateManager::GetUserSetpoint() const
     return userSetpoint_;
 }
 
-void ClimateManager::NudgeSetpoint(float deltaC)
-{
-    LOCK(mutex_);
-    float sp = userSetpoint_ + deltaC;
-    if (sp < kSetpointMin) sp = kSetpointMin;
-    if (sp > kSetpointMax) sp = kSetpointMax;
-    if (fabsf(sp - userSetpoint_) < 0.001f) return;   // clamped, no change
-    userSetpoint_ = sp;
-    settingsDirty_ = true;
-    lastChangeUs_ = esp_timer_get_time();
-    // Takes effect on the next ControlStep; persisted later by MaybeCommitSettings.
-}
-
 void ClimateManager::SetUserSetpoint(float celsius)
 {
     LOCK(mutex_);
@@ -79,6 +66,7 @@ void ClimateManager::SetUserSetpoint(float celsius)
     userSetpoint_ = celsius;
     settingsDirty_ = true;
     lastChangeUs_ = esp_timer_get_time();
+    // Takes effect on the next ControlStep; persisted later by MaybeCommitSettings.
 }
 
 ClimateMode ClimateManager::GetMode() const

@@ -117,7 +117,7 @@ void HomeFace::BuildBadge(lv_obj_t* root)
     lv_obj_set_user_data(gearHit, (void*)(uintptr_t)HomeIntent::OpenSettings);
 }
 
-// The big number, its unit, and the caption that names what is being shown.
+// The big number, its unit, and the line beneath them.
 //
 // The **digits** are what gets centred in the disc, not the digits-plus-unit
 // pair: a "°C" wide enough to shift the number off centre is a "°C" that is too
@@ -140,17 +140,17 @@ void HomeFace::BuildReadout(lv_obj_t* root)
     lv_obj_set_style_text_font(unitLabel_, &lv_font_montserrat_20, 0);
     lv_label_set_text(unitLabel_, "\xC2\xB0" "C");   // UTF-8 degree
 
-    // Only shown while the setpoint is on the dial. At rest the disc holds the
-    // room temperature and nothing else, exactly as the design has it — the
-    // caption exists so the one moment the number means something else is not
-    // silent about it.
+    // Always shown. At rest it carries the setpoint, so it can be read without
+    // a touch — touching -/+ to look was itself a change, once. While the
+    // setpoint is being dialled it moves to the centre and this names it.
     captionLabel_ = lv_label_create(root);
     lv_obj_set_style_text_color(captionLabel_, UiTheme::TextDim(), 0);
     lv_obj_set_style_text_font(captionLabel_, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_align(captionLabel_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(captionLabel_, "Setpoint");
+    lv_label_set_text(captionLabel_, "");
     lv_obj_align(captionLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 + 74);
-    lv_obj_add_flag(captionLabel_, LV_OBJ_FLAG_HIDDEN);
+
+    blinking_ = false;   // a fresh label; LVGL took any blink with the old one
 }
 
 void HomeFace::BuildNudge(lv_obj_t* root)
@@ -304,13 +304,15 @@ void HomeFace::SetBadgeGlyph(lv_obj_t* label, HomeStage what, bool running)
 void HomeFace::Apply(const HomeView& v)
 {
     // ── The number ───────────────────────────────────────────
-    // The disc holds the room temperature; nudging swaps it for the setpoint
-    // and the caption appears to say so, until the revert puts it back.
+    // The disc holds the room temperature with the setpoint beneath it. While
+    // the setpoint is being dialled it takes the centre and blinks: blinking
+    // says it is not the room temperature, and that it has not been sent yet.
     char buf[24];
     if (v.showSetpoint) FormatTemp(buf, sizeof(buf), v.setpoint, true);
     else                FormatTemp(buf, sizeof(buf), v.roomTemp, v.roomValid);
 
-    if (strcmp(lv_label_get_text(bigLabel_), buf) != 0)
+    bool numberChanged = strcmp(lv_label_get_text(bigLabel_), buf) != 0;
+    if (numberChanged)
     {
         lv_label_set_text(bigLabel_, buf);
         // The unit is anchored to the number, and the number just changed
@@ -320,8 +322,33 @@ void HomeFace::Apply(const HomeView& v)
         lv_obj_align_to(unitLabel_, bigLabel_, LV_ALIGN_OUT_RIGHT_TOP, 2, kUnitDrop);
     }
 
-    if (v.showSetpoint) lv_obj_remove_flag(captionLabel_, LV_OBJ_FLAG_HIDDEN);
-    else                lv_obj_add_flag(captionLabel_, LV_OBJ_FLAG_HIDDEN);
+    if (v.showSetpoint != blinking_)
+    {
+        blinking_ = v.showSetpoint;
+        if (blinking_) StartBlink();
+        else
+        {
+            lv_anim_delete(bigLabel_, BlinkExec);
+            lv_obj_set_style_text_opa(bigLabel_, LV_OPA_COVER, 0);
+        }
+    }
+    else if (blinking_ && numberChanged)
+    {
+        StartBlink();   // a press lands on a lit number, never a dimmed one
+    }
+
+    if (v.showSetpoint)
+    {
+        snprintf(buf, sizeof(buf), "Setpoint");
+    }
+    else
+    {
+        char sp[8];
+        FormatTemp(sp, sizeof(sp), v.setpoint, true);
+        snprintf(buf, sizeof(buf), "Setpoint %s" "\xC2\xB0", sp);   // UTF-8 degree
+    }
+    if (strcmp(lv_label_get_text(captionLabel_), buf) != 0)
+        lv_label_set_text(captionLabel_, buf);
 
     // ── Activity badge ───────────────────────────────────────
     // Grey means that stage is not running; the colour means it is. A grey
@@ -382,6 +409,35 @@ void HomeFace::Apply(const HomeView& v)
         if (selected) lv_obj_remove_flag(tiles_[i].rule, LV_OBJ_FLAG_HIDDEN);
         else          lv_obj_add_flag(tiles_[i].rule, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+// A hard blink — lit, then dim, half a second each — rather than a fade: a fade
+// would redraw the 96 px number every frame, a blink twice a second. The
+// animation hangs off the label, so deleting the label takes it along.
+void HomeFace::StartBlink()
+{
+    lv_anim_delete(bigLabel_, BlinkExec);
+    lv_obj_set_style_text_opa(bigLabel_, LV_OPA_COVER, 0);
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, bigLabel_);
+    lv_anim_set_exec_cb(&a, BlinkExec);
+    lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_20);
+    lv_anim_set_duration(&a, kBlinkMs);
+    lv_anim_set_reverse_duration(&a, kBlinkMs);
+    lv_anim_set_path_cb(&a, lv_anim_path_step);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&a);
+}
+
+// Called every animation tick, mostly with the value already set; only a real
+// change is worth invalidating the number for.
+void HomeFace::BlinkExec(void* obj, int32_t opa)
+{
+    auto* label = static_cast<lv_obj_t*>(obj);
+    if (lv_obj_get_style_text_opa(label, LV_PART_MAIN) != (lv_opa_t)opa)
+        lv_obj_set_style_text_opa(label, (lv_opa_t)opa, 0);
 }
 
 void HomeFace::IntentCb(lv_event_t* e)
