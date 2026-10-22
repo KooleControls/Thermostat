@@ -100,12 +100,14 @@ void HomeScreen::Refresh()
     else if (boiler.coolingActive && !boiler.chActive)
     {
         view.stage = HomeStage::Cooling;
-        // Bit 4 is the only cooling bit OT has; there is no cooling flame bit
-        // to say "running" separately. This once read the bit as a stage in
-        // standby and drew a grey snowflake for as long as the cooler ran —
-        // but the gateway clears it again in cooling standby, so it already is
-        // the running signal, and a set bit means cooling is being delivered.
-        view.running = true;
+        // Bit 4 says the plant is in cooling, standby included: the gateway
+        // sets it on entering cooling standby and holds it through the run.
+        // OT has no cooling counterpart of the flame bit, so nothing on the
+        // wire says the cooler is running. The nearest fact is our own
+        // request — in cooling, and asked to cool. The gateway's minimum
+        // on/off times can hold the cooler a little either side of that, so
+        // heating colours exactly and cooling closely.
+        view.running = serviceProvider_.getClimateManager().GetStatus().coolEnable;
     }
     else if (boiler.flame)
     {
