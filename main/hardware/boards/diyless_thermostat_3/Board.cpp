@@ -104,11 +104,12 @@ void Board::Init()
         cfg.pclk_active_neg = BoardConfig::LCD_PCLK_ACTIVE_NEG;
         cfg.pclk_idle_high = BoardConfig::LCD_PCLK_IDLE_HIGH;
         cfg.clk_src = LCD_CLK_SRC_PLL160M;   // DIYLESS pins PLL160M (anti-jitter)
-        // Two PSRAM framebuffers, no bounce buffers: LVGL renders into them
-        // directly and they swap on VSYNC. The reasoning, and the measurements
-        // that chose it over bounce-buffer mode, are in DisplayManager::InitLvgl.
+        // Two PSRAM framebuffers that LVGL renders into directly and swaps on
+        // VSYNC, scanned out through 10-line bounce buffers in internal RAM.
+        // The bounce buffers are what keep a flash write from shifting the
+        // picture; the reasoning is in DisplayManager::InitLvgl.
         cfg.num_fbs = 2;
-        cfg.bounce_buffer_lines = 0;
+        cfg.bounce_buffer_lines = 10;
         cfg.reset_gpio = (gpio_num_t)BoardConfig::LCD_PIN_RESET;
         cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
         cfg.init_cmds = DIYLESS_ST7701_INIT;

@@ -13,8 +13,9 @@ void Screen::SetLabelText(lv_obj_t* label, const char* text)
 
 lv_obj_t* Screen::AddIconButton(lv_obj_t* parent, const char* icon)
 {
+    // Round under a finger: the press veil is the whole button.
     lv_obj_t* btn = lv_button_create(parent);
-    lv_obj_set_size(btn, UiTheme::IconBtn, UiTheme::IconBtn);
+    lv_obj_set_size(btn, UiTheme::IconBtn, UiTheme::RoundHeight(UiTheme::IconBtn));
     lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, 0);
     // Press() and not Surface(): a tint of the card colour over a background
     // the card colour already resembles is no feedback at all — on the dark
@@ -98,7 +99,7 @@ Screen::MenuRow Screen::AddMenuRow(lv_obj_t* list, const char* icon, const char*
     // because the glyph has to be centred in a fixed box whatever its width —
     // a padlock and a chevron are not the same number of pixels wide.
     lv_obj_t* box = lv_obj_create(card);
-    lv_obj_set_size(box, UiTheme::IconBox, UiTheme::IconBox);
+    lv_obj_set_size(box, UiTheme::IconBox, UiTheme::RoundHeight(UiTheme::IconBox));
     lv_obj_align(box, LV_ALIGN_LEFT_MID, -UiTheme::Pad / 2, 0);
     lv_obj_set_style_bg_color(box, UiTheme::AccentSoft(), 0);
     lv_obj_set_style_radius(box, 12, 0);

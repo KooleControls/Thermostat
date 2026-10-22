@@ -36,6 +36,14 @@ namespace BoardConfig
     static constexpr int LCD_H_RES = 480;
     static constexpr int LCD_V_RES = 480;
 
+    // Physical size of the active area, in µm. Not square, though the pixel
+    // grid is: a pixel is 2.4% wider than it is tall, so anything drawn W x W
+    // shows as an oval lying on its side. 71.86 x 70.18 mm is the usual
+    // datasheet figure for these 4" ST7701S 480x480 panels; this unit measured
+    // 71.65 x 70.00 mm, the same ratio within 0.04%.
+    static constexpr int LCD_ACTIVE_W_UM = 71860;
+    static constexpr int LCD_ACTIVE_H_UM = 70180;
+
     // Timing from diyless-thermostat-3.yaml. Do not raise the pixel clock.
     //
     // 16 MHz was tried, to buy latency: over the 522x518 total below, 10 MHz is

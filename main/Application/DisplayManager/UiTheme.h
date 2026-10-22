@@ -81,13 +81,6 @@ namespace UiTheme
     inline lv_color_t Heat()    { return Pick(0xE03A3A, 0xD92B2B); }
     inline lv_color_t Cool()    { return Pick(0x3B82F6, 0x1D6FE0); }
 
-    // The home readout disc, top and bottom of its vertical gradient. Here
-    // rather than in HomeFace because the pair is a palette decision: the disc
-    // is lit from the top in both modes, but on light it is a white disc lifting
-    // off grey, not a dark one sinking into black.
-    inline lv_color_t DiscTop()    { return Pick(0x24262B, 0xFFFFFF); }
-    inline lv_color_t DiscBottom() { return Pick(0x141519, 0xE6E6EB); }
-
     /// A style selector is a part OR'd with a state, but the build is gnu++26,
     /// where a bitwise OR between two different enum types is an error — go
     /// through the selector type instead.
@@ -103,4 +96,33 @@ namespace UiTheme
     constexpr int32_t Radius = 14;    // every card, everywhere
     constexpr int32_t Gap = 8;        // between cards in a list
     constexpr int32_t IconBox = 48;   // the tinted square holding a menu row's icon
+
+    // The pixel's shape, as its pitch in nm. Square until DisplayManager passes
+    // on the board's figures — which is also the right answer for anything that
+    // shows these screens on square pixels, such as a browser simulator. Same
+    // threading as g_mode: written once at startup, before anything is built.
+    inline int32_t g_pitchXNm = 1;
+    inline int32_t g_pitchYNm = 1;
+
+    inline void SetPixelPitch(int32_t xNm, int32_t yNm)
+    {
+        g_pitchXNm = xNm;
+        g_pitchYNm = yNm;
+    }
+
+    /// Rows a shape `w` columns wide needs to come out round, or square. On this
+    /// board's panel a pixel is 2.4% wider than it is tall, so a W x W circle
+    /// shows as an oval lying on its side (the 236 px home disc measured 35.18 x
+    /// 34.58 mm); this is what corrects it.
+    ///
+    /// For shapes the eye judges as round or square: circles, knobs, square
+    /// tiles. Not for text or icon glyphs, which cannot be stretched on one axis
+    /// short of a transform layer per label, and not for corner radii, where the
+    /// correction stays under half a pixel. Below about 21 px it rounds to
+    /// nothing anyway.
+    inline int32_t RoundHeight(int32_t w) { return (w * g_pitchXNm + g_pitchYNm / 2) / g_pitchYNm; }
+
+    /// The inverse: columns a shape `h` rows tall needs, for widgets whose
+    /// height is the given and whose width is ours to choose.
+    inline int32_t RoundWidth(int32_t h) { return (h * g_pitchYNm + g_pitchXNm / 2) / g_pitchXNm; }
 }

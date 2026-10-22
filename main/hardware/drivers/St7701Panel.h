@@ -64,11 +64,19 @@ struct St7701Config
     //     fed from the wrong offset and the image slips vertically.
     //
     //   num_fbs 2 + bounce_buffer_lines 0
-    //     Two framebuffers in PSRAM, DMA streaming straight from them, no
-    //     interrupt and no deadline to miss. Lets LVGL render directly into the
-    //     buffers and swap on VSYNC — one render pass instead of one per
-    //     bounce-buffer's worth of lines, no staging copy, and no tearing.
-    //     Costs a second full framebuffer of PSRAM.
+    //     Two framebuffers in PSRAM, DMA streaming straight from them. Lets
+    //     LVGL render directly into the buffers and swap on VSYNC — one render
+    //     pass, no staging copy, no tearing. Costs a second full framebuffer of
+    //     PSRAM. It has a deadline too, only a hidden one: the DMA's FIFO, a few
+    //     microseconds of pixels, and PSRAM shares its SPI bus with the flash,
+    //     so a burst of flash traffic can outlast it and shift the picture.
+    //
+    //   num_fbs 2 + bounce_buffer_lines N
+    //     Both of the above: LVGL still renders into two PSRAM framebuffers in
+    //     one pass, and the DMA reads internal RAM, so the deadline is N lines
+    //     of scanout instead of a FIFO's worth. The refill is the ISR memcpy
+    //     again, which needs the cache on during flash writes; on this board
+    //     SPIRAM_XIP_FROM_PSRAM keeps it on.
     size_t num_fbs = 1;
     int bounce_buffer_lines = 10;   // 0 disables bounce-buffer mode entirely
 
@@ -175,6 +183,28 @@ public:
 
     esp_lcd_panel_handle_t panel() const { return panel_; }
     bool ok() const { return panel_ != nullptr; }
+
+    /// Put a shifted picture back in register, at the next VSYNC.
+    ///
+    /// The shift: the frame buffers are in PSRAM, which on the S3 shares one SPI
+    /// bus with the flash, so a flash write (NVS, a bond, OTA) can hold the bus
+    /// long enough to starve the LCD's DMA. The LCD then clocks out dummy bytes
+    /// while the DMA waits, and in stream mode — where a pixel's place is only a
+    /// count of clocks since VSYNC — the two stay out of step for good. Nothing
+    /// reports it: the S3 has no LCD underrun event, and the DMA side never
+    /// underflows, because it is the LCD that fills the gap (IDF's rgb_lcd.rst).
+    ///
+    /// A restart re-arms the DMA from the top of frame buffer 0, so on the
+    /// frame it happens that buffer is shown even if the other is current; the
+    /// next frame is the current one again. Meant to be harmless on a picture
+    /// that is not shifted, so that it can be applied blind; the `ui resync`
+    /// bench command exists to confirm that on the panel. Not the per-VBlank
+    /// restart, which this frame-buffer layout cannot take — see the board's
+    /// sdkconfig.defaults.
+    void RestartDma()
+    {
+        if (panel_ != nullptr) esp_lcd_rgb_panel_restart(panel_);
+    }
 
 private:
     esp_lcd_panel_handle_t panel_ = nullptr;

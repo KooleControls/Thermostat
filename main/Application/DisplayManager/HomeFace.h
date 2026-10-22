@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lvgl.h"
+#include "UiTheme.h"
 #include <cstdint>
 
 // The thermostat face, as pure presentation.
@@ -82,7 +83,8 @@ public:
 
 private:
     // ── Geometry (480x480) ───────────────────────────────────────
-    static constexpr int32_t kDiscSize = 236;    // the dark disc behind the number
+    static constexpr int32_t kDiscW    = 236;    // the disc behind the number; its
+                                                 // height is UiTheme::RoundHeight
     static constexpr int32_t kDiscCx   = 240;
     static constexpr int32_t kDiscCy   = 208;
 
@@ -91,7 +93,7 @@ private:
     /// one's, so equal boxes are not equal glyphs — measured, not derived.
     static constexpr int32_t kUnitDrop = 5;
 
-    static constexpr int32_t kNudgeSize = 76;    // -/+ circle diameter
+    static constexpr int32_t kNudgeSize = 76;    // -/+ circle width; height likewise
     static constexpr int32_t kTileW     = 100;
     static constexpr int32_t kTileH     = 96;
     static constexpr int32_t kTileGap   = 10;

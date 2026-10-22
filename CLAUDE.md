@@ -130,4 +130,5 @@ changes.
 
 - C++17, no exceptions/RTTI-heavy patterns; `snprintf` with `sizeof` bounds, no `strcpy`/`strcat`.
 - JSON is generated with `lib/json/JsonWriter.h` and parsed with `JsonReader` (no external JSON lib); `JsonScope.h` provides RAII `JsonObject`/`JsonArray` with auto-close.
+- Text drawn on the panel is ASCII plus `°` and `•` (and the `LV_SYMBOL_*` icons): LVGL's built-in Montserrat fonts carry nothing else, so an em dash, ellipsis, arrow or curly quote renders as an empty box. Fine in comments and log lines, which never reach the panel.
 - Firmware version derives from the latest uppercase-`V` git tag (`V0.1.0` → `0.1.0`), or from CI-injected `-DSOFTWARE_VERSION_MAJOR/MINOR/PATCH`, in the root CMakeLists.

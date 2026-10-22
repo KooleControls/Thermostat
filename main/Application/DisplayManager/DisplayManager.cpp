@@ -35,6 +35,11 @@ void DisplayManager::Init()
     // whether or not this unit has a panel to show it on.
     UiTheme::SetMode(SettingsMenuScreen::ThemeMode());
 
+    // Also before anything is built: the screens size their round shapes from
+    // it. The panel's pixels are not square (see UiTheme::RoundHeight).
+    UiTheme::SetPixelPitch(serviceProvider_.getBoard().GetPixelPitchXNm(),
+                           serviceProvider_.getBoard().GetPixelPitchYNm());
+
     // Likewise for uiGo — headless it reports the shell's idea of the current
     // screen and navigates nothing, which is a truthful answer rather than a
     // missing command.
@@ -117,11 +122,22 @@ bool DisplayManager::InitLvgl()
     //     48 passes. Direct mode is ONE.
     //   * The staging buffer then had to be copied into the framebuffer. In
     //     direct mode LVGL renders into the framebuffer, so that copy is gone.
-    //   * No bounce buffers means no GDMA EOF interrupt every 480 us with a CPU
-    //     memcpy out of PSRAM, so the deadline that produced the vertical slip
-    //     no longer exists to be missed.
-    //   * Frees ~38 KB of internal DRAM (19 KB staging + 19 KB bounce buffers),
-    //     which is what the BLE stack was starved of.
+    //   * Frees the 19 KB staging buffer of internal DRAM, which is what the BLE
+    //     stack was starved of.
+    //
+    // The bounce buffers went with it at first, and are back under the direct
+    // mode: 10 lines, 19 KB of internal RAM. Streaming straight out of PSRAM
+    // left the DMA a few microseconds of FIFO, and PSRAM shares its SPI bus
+    // with the flash, so a burst of flash traffic — NimBLE storing a bond at
+    // the end of every pairing — starved it and shifted the picture for good.
+    // Fed from internal RAM, the DMA has ~500 us of slack instead. The refill
+    // is a CPU memcpy out of PSRAM in an ISR, the deadline once blamed for a
+    // vertical slip. That slip predates SPIRAM_XIP_FROM_PSRAM, when every flash
+    // write turned the cache off and the refill could not run at all — the
+    // likely cause, not a confirmed one. If it slips anyway, the driver sees
+    // the missed refill and restarts at the next VSYNC: one bad frame, not a
+    // permanent shift. bb_mode tells the port to swap on the bounce frame's
+    // end rather than on VSYNC.
     //
     // The old comment here said rendering into PSRAM competes with the panel DMA
     // and produced artifacts. That was measured without double buffering and
@@ -145,7 +161,7 @@ bool DisplayManager::InitLvgl()
     disp_cfg.flags.direct_mode = true;
 
     lvgl_port_display_rgb_cfg_t rgb_cfg = {};
-    rgb_cfg.flags.bb_mode = false;
+    rgb_cfg.flags.bb_mode = true;
     rgb_cfg.flags.avoid_tearing = true;
 
     lvDisplay_ = lvgl_port_add_disp_rgb(&disp_cfg, &rgb_cfg);
@@ -210,6 +226,7 @@ void DisplayManager::Go(ScreenId id)
     }
     Resolve(id)->Load();
     current_ = id;
+    ResyncPanel();
     lvgl_port_unlock();
 }
 
@@ -242,6 +259,7 @@ void DisplayManager::Restyle()
 
     current->Load();
     if (outgoing) lv_obj_delete(outgoing);
+    ResyncPanel();   // the theme setting was just written to flash
 
     lvgl_port_unlock();
     ESP_LOGI(TAG, "Restyled — %s theme", UiTheme::IsLight() ? "light" : "dark");
@@ -260,6 +278,24 @@ const char* DisplayManager::ScreenName(ScreenId id)
         case ScreenId::BleTest:  return "bletest";
     }
     return "home";
+}
+
+RequestError DisplayManager::Cmd_UiResync(CommandContext& ctx)
+{
+    RETURN_IF_ERROR(ctx.readArgs());
+
+    // Through the same queue as the automatic ones, so it levels the frame
+    // buffers first; this runs on the command task, hence the lock.
+    if (lvDisplay_ != nullptr && lvgl_port_lock(0))
+    {
+        ResyncPanel();
+        lvgl_port_unlock();
+    }
+
+    JsonObject resp(ctx.out);
+    resp.field("ok", true);
+    resp.field("headless", lvDisplay_ == nullptr);
+    return RequestError::Ok;
 }
 
 RequestError DisplayManager::Cmd_UiTheme(CommandContext& ctx)
@@ -339,9 +375,42 @@ void DisplayManager::ServiceBacklight(uint32_t idleMs)
     backlightFull_ = full;
 }
 
+// A sideways shift of the picture is permanent (see Board::ResyncPanel) and
+// cannot be detected, so it is undone blind: after every screen change, which
+// makes a shift last until the next tap through the menus at most, and when a
+// screen asks after a flash write of its own. Deferred, not done on the spot,
+// so the change that asked for it has finished drawing first. Must be called
+// with the LVGL lock held.
+void DisplayManager::ResyncPanel()
+{
+    resyncPending_ = true;
+    resyncRequestedMs_ = lv_tick_get();
+}
+
+// The restart shows frame buffer 0 for one frame, whichever buffer is current.
+// In direct mode LVGL brings the other buffer up to date only at the start of
+// its next refresh, so straight after a screen change one of the two still
+// holds the previous screen — and restarting then flashed that screen up for a
+// frame, half the time. So both are levelled first: a one-pixel invalidation
+// makes the next refresh copy every pending area across, and lv_refr_now runs
+// it here, flip included. After that both buffers hold the same picture and
+// the restart has nothing to show but the screen already on the panel.
+void DisplayManager::ServicePanelResync()
+{
+    if (!resyncPending_ || lv_tick_elaps(resyncRequestedMs_) < 300) return;
+    resyncPending_ = false;
+
+    lv_area_t pixel = { 0, 0, 0, 0 };
+    lv_obj_invalidate_area(lv_screen_active(), &pixel);
+    lv_refr_now(lvDisplay_);
+
+    serviceProvider_.getBoard().ResyncPanel();
+}
+
 void DisplayManager::TickCb(lv_timer_t *t)
 {
     auto *self = static_cast<DisplayManager *>(lv_timer_get_user_data(t));
+    self->ServicePanelResync();
     uint32_t idleMs = lv_display_get_inactive_time(self->lvDisplay_);
 
     // The site test is carried around untouched for minutes on end: it has to
@@ -363,4 +432,5 @@ void DisplayManager::TickCb(lv_timer_t *t)
     ESP_LOGI(TAG, "Idle — returning to home screen");
     self->homeScreen_.Load();
     self->current_ = ScreenId::Home;
+    self->ResyncPanel();
 }

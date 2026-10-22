@@ -30,6 +30,12 @@ public:
     /// rather than reached through DisplayManager so screens keep their single
     /// dependency on the shell.
     virtual void Restyle() = 0;
+
+    /// Undo a sideways shift of the picture, once the screen has settled. A
+    /// flash write can cause one (see Board::ResyncPanel); the shell already
+    /// does this after every screen change, so this is for a screen that just
+    /// caused a write without one — the gateway screen, pairing or unpairing.
+    virtual void ResyncPanel() = 0;
 };
 
 // One full-screen page.

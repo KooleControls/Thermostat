@@ -96,6 +96,9 @@ public:
     bool StartScan();
     bool Scanning() const;
 
+    /// How far into its ScanDurationMs the running scan is; 0 when none runs.
+    uint32_t ScanElapsedMs() const;
+
     /// Copy out what the current/last scan has heard. Returns the count.
     int GetPeers(Peer* out, int max) const;
 
@@ -103,11 +106,30 @@ public:
     /// install-code digits as TEXT — empty means "no code, rely on the stored
     /// bond". Text, not a number, because "000000" is a perfectly valid passkey
     /// and a numeric 0 cannot be told apart from "none given". Remembers the peer
-    /// so the link comes back by itself after a reboot or a dropout.
+    /// so the link comes back by itself after a reboot or a dropout, and its
+    /// name and gateway id so it can be named while it does.
+    bool Connect(const Peer& peer, const char* code);
+
+    /// The same, by address alone (`ble connect`): the name and id come from
+    /// the scan table, or are kept when it is the gateway already on record.
     bool Connect(const ble_addr_t& addr, const char* code);
 
     /// Drop the link, forget the peer and delete its bond.
     void Forget();
+
+    /// The gateway on record: what Connect() last paired with, until Forget().
+    /// Name and id are as it advertised them then; `dgid` 0 means it gave none.
+    /// False when nothing is paired.
+    bool GetPaired(Peer& out) const;
+
+    /// How the last pairing attempt ended, when it was something the installer
+    /// can act on rather than a dropout to retry. Only one so far: the install
+    /// code was wrong.
+    enum class PairFailure : uint8_t { None, WrongCode };
+
+    /// The last attempt's failure and, in `who`, the gateway it was with.
+    /// Cleared by the next Connect(), StartScan() or Forget().
+    PairFailure GetPairFailure(Peer* who = nullptr) const;
 
     LinkState GetLinkState() const;
 
@@ -133,6 +155,7 @@ private:
     void StartConnect();                               // uses target_
     void ScheduleReconnect();
     void DropLink(const char* why);
+    void RejectInstallCode();
     void StartDiscovery();
     void SetState(LinkState s);
 
@@ -178,6 +201,8 @@ private:
     inline static BoolSetting   enableSetting_{ "ble.enable", "BLE Enable", true };
     inline static StringSetting peerSetting_{ "ble.peer", "BLE Gateway Address", "" };
     inline static UInt32Setting peerTypeSetting_{ "ble.peerType", "BLE Gateway Address Type", 0 };
+    inline static StringSetting peerNameSetting_{ "ble.peerName", "BLE Gateway Name", "" };
+    inline static UInt32Setting peerIdSetting_{ "ble.peerId", "BLE Gateway Id", 0 };
 
     ServiceProvider& serviceProvider_;
     InitState initState_;
@@ -186,12 +211,19 @@ private:
     bool    stackUp_ = false;      // NimBLE host running
     bool    synced_ = false;       // controller synced, own address known
     bool    scanning_ = false;
+    int64_t scanStartUs_ = 0;      // esp_timer time the running scan began
     uint8_t ownAddrType_ = 0;
     Peer    peers_[MaxPeers];
 
     LinkState  link_ = LinkState::Down;
     ble_addr_t target_{};
     bool       haveTarget_ = false;
+    // What target_ is called, mirrored from the settings above so the screen can
+    // ask twice a second without reading NVS.
+    char       targetName_[MaxNameLen + 1] = {};
+    uint32_t   targetDgid_ = 0;
+    PairFailure pairFailure_ = PairFailure::None;
+    Peer        failedPeer_{};               // who pairFailure_ was with
     uint32_t   pendingPasskey_ = 0;      // only meaningful while havePasskey_
     bool       havePasskey_ = false;     // set between Connect() and pairing
     uint16_t   connHandle_ = BLE_HS_CONN_HANDLE_NONE;

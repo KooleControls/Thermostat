@@ -34,26 +34,32 @@ void HomeFace::Build(lv_obj_t* root, IntentHandler handler, void* user)
 // The disc the readout sits on.
 //
 // A filled circle rather than an outline: it lifts the number off the
-// background without drawing a line around it. The vertical gradient is what
-// stops it reading as a flat hole — top edge lit, bottom settling back toward
-// the background. Both ends come from the palette, so on the light theme it is
-// a white disc rising off grey rather than a dark one sinking into black.
-// Static, and not clickable.
+// background without drawing a line around it. Surface(), like the -/+ beside
+// it, so it reads as raised in both themes — a white disc rising off grey on
+// light, a dark grey one off black. Static, and not clickable.
+//
+// Flat, not a gradient. A top-lit gradient was tried, and this panel's RGB565
+// cannot carry one this subtle: across the disc it had 3 levels of red and
+// blue and 5 of green, stepping on different rows, so it showed as stripes of
+// changing hue. Dithered smooth it needed a 171 KB image, and was then too
+// faint to see — the flat fill is its average colour, at no cost.
+//
+// Taller than wide (see UiTheme::RoundHeight). LV_RADIUS_CIRCLE on that box
+// draws a stadium, which strays at most 0.74 px from the true ellipse here.
 void HomeFace::BuildDisc(lv_obj_t* root)
 {
+    const int32_t discH = UiTheme::RoundHeight(kDiscW);   // 242 on this panel
+
     lv_obj_t* disc = lv_obj_create(root);
     lv_obj_remove_style_all(disc);
-    lv_obj_set_size(disc, kDiscSize, kDiscSize);
-    lv_obj_align(disc, LV_ALIGN_TOP_LEFT,
-                 kDiscCx - kDiscSize / 2, kDiscCy - kDiscSize / 2);
+    lv_obj_set_size(disc, kDiscW, discH);
+    lv_obj_align(disc, LV_ALIGN_TOP_LEFT, kDiscCx - kDiscW / 2, kDiscCy - discH / 2);
     lv_obj_remove_flag(disc, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(disc, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_set_style_radius(disc, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(disc, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(disc, UiTheme::DiscTop(), 0);
-    lv_obj_set_style_bg_grad_color(disc, UiTheme::DiscBottom(), 0);
-    lv_obj_set_style_bg_grad_dir(disc, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_color(disc, UiTheme::Surface(), 0);
 }
 
 // Top-left activity badge + the top-right bluetooth/gear pair.
@@ -162,8 +168,10 @@ lv_obj_t* HomeFace::MakeNudge(lv_obj_t* root, bool plus, lv_color_t hue,
     constexpr int32_t kBarLen   = 34;
     constexpr int32_t kBarThick = 5;
 
+    // LV_RADIUS_CIRCLE on the 76 x 78 box draws a stadium rather than an
+    // ellipse, but at this size the two part by a quarter pixel at most.
     lv_obj_t* btn = lv_button_create(root);
-    lv_obj_set_size(btn, kNudgeSize, kNudgeSize);
+    lv_obj_set_size(btn, kNudgeSize, UiTheme::RoundHeight(kNudgeSize));
     lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(btn, UiTheme::Surface(), 0);
     lv_obj_set_style_bg_color(btn, hue, LV_STATE_PRESSED);

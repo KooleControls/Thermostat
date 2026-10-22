@@ -5,10 +5,24 @@
 
 static const char* TAG = "BleScreen";
 
+// A gateway in one phrase, the way the list names it: by name, then by gateway
+// id, and by address only when it gave neither.
+static void DescribePeer(const BleManager::Peer& peer, char* out, size_t cap)
+{
+    const bool hasId = peer.hasDgid && peer.dgid != 0;
+    const unsigned long id = static_cast<unsigned long>(peer.dgid);
+
+    if (peer.name[0] != '\0' && hasId) snprintf(out, cap, "%s, id %lu", peer.name, id);
+    else if (peer.name[0] != '\0')     snprintf(out, cap, "%s", peer.name);
+    else if (hasId)                    snprintf(out, cap, "gateway id %lu", id);
+    else                               BleManager::FormatAddr(peer.addr, out, cap);
+}
+
 void BleScreen::Build(lv_obj_t* root)
 {
     lv_obj_t* back = AddHeader(root, "Gateway", LV_SYMBOL_LEFT);
     lv_obj_add_event_cb(back, BackCb, LV_EVENT_CLICKED, this);
+    scanBar_.Build(root);
 
     statusLabel_ = lv_label_create(root);
     lv_obj_set_style_text_font(statusLabel_, &lv_font_montserrat_20, 0);
@@ -18,6 +32,7 @@ void BleScreen::Build(lv_obj_t* root)
     lv_obj_set_style_text_align(statusLabel_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(statusLabel_, LV_ALIGN_TOP_MID, 0, UiTheme::HeaderH);
     lv_label_set_text(statusLabel_, "");
+    statusWarn_ = false;   // a new label, in TextDim()
 
     // ── List view: rescan + forget, then the gateways we heard ────
     listView_ = lv_obj_create(root);
@@ -117,15 +132,22 @@ void BleScreen::Build(lv_obj_t* root)
 void BleScreen::OnShow()
 {
     ShowListView();
+    BleManager& ble = serviceProvider_.getBleManager();
+    ble.StartScan();
+    // No scan (the stack is down): draw what the manager last heard, which may
+    // have changed while this screen was away.
+    if (!ble.Scanning()) listStale_ = true;
+    lastLink_ = ble.GetLinkState();   // a link already up is not news
     RefreshStatus();
-    listStale_ = true;
-    serviceProvider_.getBleManager().StartScan();
 }
 
+// The status line belongs to the list view. It sits where the code view's
+// prompt does, so left up it drew straight through "Install code for ...".
 void BleScreen::ShowListView()
 {
     lv_obj_add_flag(codeView_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(listView_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(statusLabel_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void BleScreen::ShowCodeView(const BleManager::Peer& peer)
@@ -137,6 +159,7 @@ void BleScreen::ShowCodeView(const BleManager::Peer& peer)
     lv_textarea_set_text(codeInput_, "");
 
     lv_obj_add_flag(listView_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(statusLabel_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(codeView_, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -144,44 +167,96 @@ void BleScreen::RefreshStatus()
 {
     BleManager& ble = serviceProvider_.getBleManager();
 
-    // Rescanning while connecting would cancel the attempt, and unpairing is
-    // meaningless with nothing paired.
+    // A scan already running is not restarted.
     bool scanning = ble.Scanning();
     if (scanning) lv_obj_add_state(rescanButton_, LV_STATE_DISABLED);
     else          lv_obj_remove_state(rescanButton_, LV_STATE_DISABLED);
 
-    switch (ble.GetLinkState())
+    // The scan line follows the scan, whoever started it. A BLE scan runs for a
+    // fixed time from a known start, so the line is exact, including for a scan
+    // the web UI began before this screen was opened; one cut short by a
+    // pairing finishes early.
+    if (scanning && !scanBar_.Running())
+        scanBar_.Start(static_cast<uint32_t>(BleManager::ScanDurationMs), ble.ScanElapsedMs());
+    else if (!scanning && scanBar_.Running())
+        scanBar_.Finish();
+
+    // Unpair is live whenever something is paired, which includes the gaps
+    // between reconnect attempts to a gateway that is off — the moment someone
+    // is most likely to want it — and is meaningless with nothing paired.
+    BleManager::Peer paired;
+    const bool isPaired = ble.GetPaired(paired);
+    if (isPaired) lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
+    else          lv_obj_add_state(forgetButton_, LV_STATE_DISABLED);
+
+    char who[56];
+    if (isPaired) DescribePeer(paired, who, sizeof(who));
+    else          snprintf(who, sizeof(who), "the gateway");
+
+    // A link coming up has just written to flash — a new bond, at the end of a
+    // pairing — and that is when the picture shifted. This screen does not
+    // change, so the shell's resync after a screen change would not come.
+    const BleManager::LinkState link = ble.GetLinkState();
+    if (link == BleManager::LinkState::Ready && lastLink_ != BleManager::LinkState::Ready)
+        navigator_.ResyncPanel();
+    lastLink_ = link;
+
+    char status[96];
+    bool warn = false;
+    switch (link)
     {
         case BleManager::LinkState::Ready:
-            SetLabelText(statusLabel_, LV_SYMBOL_OK "  Paired and connected");
-            lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
+            snprintf(status, sizeof(status), LV_SYMBOL_OK "  Connected to %s", who);
             break;
         case BleManager::LinkState::Connecting:
-            SetLabelText(statusLabel_, "Connecting...");
-            lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
+            snprintf(status, sizeof(status), "Connecting to %s...", who);
             break;
         case BleManager::LinkState::Securing:
-            SetLabelText(statusLabel_, "Pairing...");
-            lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
+            snprintf(status, sizeof(status), "Pairing with %s...", who);
             break;
         case BleManager::LinkState::Discovering:
-            SetLabelText(statusLabel_, "Reading the gateway's services...");
-            lv_obj_remove_state(forgetButton_, LV_STATE_DISABLED);
+            snprintf(status, sizeof(status), "Reading the gateway's services...");
             break;
         case BleManager::LinkState::Down:
-            SetLabelText(statusLabel_, scanning ? "Looking for gateways..."
-                                                : "Not connected — pick a gateway");
-            lv_obj_add_state(forgetButton_, LV_STATE_DISABLED);
+        {
+            BleManager::Peer failed;
+            if (scanning)      snprintf(status, sizeof(status), "Looking for gateways...");
+            else if (isPaired) snprintf(status, sizeof(status), "Paired with %s, not connected", who);
+            else if (ble.GetPairFailure(&failed) == BleManager::PairFailure::WrongCode)
+            {
+                char failedWho[56];
+                DescribePeer(failed, failedWho, sizeof(failedWho));
+                snprintf(status, sizeof(status), "Wrong install code for %s", failedWho);
+                warn = true;
+            }
+            else               snprintf(status, sizeof(status), "Not connected: pick a gateway");
             break;
+        }
+    }
+    SetLabelText(statusLabel_, status);
+
+    // Red only for what the installer has to act on; compared first, because
+    // setting a style redraws the label even when nothing changed.
+    if (warn != statusWarn_)
+    {
+        lv_obj_set_style_text_color(statusLabel_, warn ? UiTheme::Danger() : UiTheme::TextDim(), 0);
+        statusWarn_ = warn;
     }
 
-    // A scan that has finished gets drawn once, not every half second.
-    if (!scanning && listStale_)
+    // The list follows the scan, as on the WiFi screen: emptied when one starts,
+    // and drawn once, not every half second, when it ends. Emptied whoever
+    // started it — the web UI's `ble scan` too — because the manager empties
+    // its own table then, and rows left up would be gateways it no longer has.
+    if (scanning && !listStale_)
+    {
+        lv_obj_clean(peerList_);
+        listStale_ = true;
+    }
+    else if (!scanning && listStale_)
     {
         listStale_ = false;
         RebuildPeerList();
     }
-    if (scanning) listStale_ = true;
 }
 
 void BleScreen::RebuildPeerList()
@@ -249,7 +324,7 @@ void BleScreen::Connect()
     BleManager::FormatAddr(selected_.addr, addr, sizeof(addr));
     ESP_LOGI(TAG, "Pairing with %s", addr);
 
-    serviceProvider_.getBleManager().Connect(selected_.addr, code);
+    serviceProvider_.getBleManager().Connect(selected_, code);   // name and id too
 
     ShowListView();
     RefreshStatus();
@@ -274,15 +349,15 @@ void BleScreen::BackCb(lv_event_t* e)
 void BleScreen::RescanCb(lv_event_t* e)
 {
     auto* self = static_cast<BleScreen*>(lv_event_get_user_data(e));
-    self->listStale_ = true;
     self->serviceProvider_.getBleManager().StartScan();
-    self->RefreshStatus();
+    self->RefreshStatus();   // empties the list now, not on the next tick
 }
 
 void BleScreen::ForgetCb(lv_event_t* e)
 {
     auto* self = static_cast<BleScreen*>(lv_event_get_user_data(e));
-    self->serviceProvider_.getBleManager().Forget();
+    self->serviceProvider_.getBleManager().Forget();   // deletes the bond: a flash write
+    self->navigator_.ResyncPanel();
     self->RefreshStatus();
 }
 
