@@ -17,6 +17,7 @@ namespace
     constexpr uint8_t ID_TSET     = 1;
     constexpr uint8_t ID_SCONFIG  = 3;
     constexpr uint8_t ID_OEMFAULT = 5;
+    constexpr uint8_t ID_COOLCTRL = 7;   // cooling control signal, f8.8 percent
     constexpr uint8_t ID_TROVRD   = 9;
     constexpr uint8_t ID_TRSET    = 16;
     constexpr uint8_t ID_RELMOD   = 17;
@@ -34,16 +35,17 @@ namespace
     struct Slot { uint8_t id; bool write; };
     constexpr Slot kRotation[] = {
         { ID_TSET,     true  }, { ID_RELMOD,   false },
-        { ID_TRSET,    true  }, { ID_TBOILER,  false },
-        { ID_TROOM,    true  }, { ID_TDHW,     false },
-        { ID_TDHWSET,  true  }, { ID_TRET,     false },
-        { ID_CHPRESS,  false }, { ID_TOUTSIDE, false },
-        { ID_OEMFAULT, false }, { ID_OEMDIAG,  false },
-        { ID_MAXTSET_BOUNDS, false }, { ID_SCONFIG, false },
+        { ID_COOLCTRL, true  }, { ID_TBOILER,  false },
+        { ID_TRSET,    true  }, { ID_TDHW,     false },
+        { ID_TROOM,    true  }, { ID_TRET,     false },
+        { ID_TDHWSET,  true  }, { ID_CHPRESS,  false },
+        { ID_TOUTSIDE, false }, { ID_OEMFAULT, false },
+        { ID_OEMDIAG,  false }, { ID_MAXTSET_BOUNDS, false },
+        { ID_SCONFIG,  false },
     };
     constexpr size_t kSlots = sizeof(kRotation) / sizeof(kRotation[0]);
-    // Keeps OpenThermManager.h's fixed-size unsupported_[14] member honest.
-    static_assert(kSlots == 14, "OpenThermManager::unsupported_ is sized for kSlots == 14");
+    // Keeps OpenThermManager.h's fixed-size unsupported_[15] member honest.
+    static_assert(kSlots == 15, "OpenThermManager::unsupported_ is sized for kSlots == 15");
 
 }
 
@@ -316,6 +318,12 @@ bool OpenThermManager::GetWriteValue(uint8_t id, float &v)
         v = demand_.tSet;
         if (v < state_.maxTSetLower) v = (demand_.chEnable && v > 0) ? state_.maxTSetLower : 0;
         if (v > state_.maxTSetUpper) v = state_.maxTSetUpper;
+        return true;
+    case ID_COOLCTRL:
+        // Full or nothing, following the cooling request bit, until there is
+        // a cooling controller to modulate it. The gateway switches its relay
+        // on the bit; this is here for a slave that reads the percentage.
+        v = demand_.coolEnable ? 100.0f : 0.0f;
         return true;
     case ID_TRSET:   v = demand_.roomSetpoint; return true;
     case ID_TDHWSET: v = demand_.dhwSetpoint;  return true;
