@@ -47,6 +47,12 @@ public:
 
     void Init();
 
+    /// The boot logo and the firmware version under it, straight into the
+    /// panel's framebuffers, and the backlight on. Meant to run before Init() — before LVGL exists — as early in boot
+    /// as the panel can be up (Board::InitDisplay). LVGL's first frame replaces
+    /// it. No-op without a panel.
+    void ShowBootLogo();
+
     /// Switch screens. Safe to call from any task — takes the LVGL lock itself.
     /// ScreenId::Pin resolves to the settings menu when no PIN is stored, so the
     /// gate policy stays here with the PinGate rather than in the home screen.

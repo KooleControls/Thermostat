@@ -31,6 +31,7 @@ set(SOURCE_FILES_LIST
     "Application/DisplayManager/InfoScreen.cpp"
     "Application/DisplayManager/fonts/font_temp_96.c"
     "Application/DisplayManager/fonts/font_icons_32.c"
+    "Application/DisplayManager/images/boot_logo.c"
     "Application/UpdateManager/UpdateManager.cpp"
     "Application/UpdateManager/PartitionWriter.cpp"
     "Application/SettingsManager/SettingsManager.cpp"
@@ -91,6 +92,7 @@ set(COMPONENT_REQUIRES
     esp_driver_uart
     mdns
     esp_lcd
+    esp_mm
     lvgl__lvgl
     espressif__esp_lvgl_port
     espressif__esp_lcd_touch

@@ -2,15 +2,148 @@
 #include "SettingsManager/SettingsManager.h"
 #include "CommandManager/CommandManager.h"
 #include "Board.h"
+#include "BootLogo.h"
 #include "JsonScope.h"
 #include "JsonReader.h"
+#include "esp_app_desc.h"
+#include "esp_cache.h"
+#include "esp_lcd_panel_rgb.h"
 #include "esp_lvgl_port.h"
 #include "esp_log.h"
+#include <cstdio>
 #include <cstring>
+
+namespace {
+
+constexpr uint16_t Rgb565(uint32_t rgb)
+{
+    return (uint16_t)(((rgb >> 19) & 0x1F) << 11 | ((rgb >> 10) & 0x3F) << 5 | ((rgb >> 3) & 0x1F));
+}
+
+// `a` of `fg` over `bg`, a in 0..255.
+uint16_t Blend565(uint16_t fg, uint16_t bg, uint32_t a)
+{
+    auto mix = [a](uint32_t f, uint32_t b) { return (f * a + b * (255 - a) + 127) / 255; };
+    return (uint16_t)(mix(fg >> 11, bg >> 11) << 11 |
+                      mix((fg >> 5) & 0x3F, (bg >> 5) & 0x3F) << 5 |
+                      mix(fg & 0x1F, bg & 0x1F));
+}
+
+// One line of text, centred, for the boot logo — before LVGL exists, so the
+// glyphs are read straight out of one of its built-in fonts. The lookup is
+// LVGL's own (pure: no heap, no LVGL state); the bitmap is decoded here, which
+// covers the plain 4 bpp layout the Montserrat fonts use and nothing else.
+void DrawBootText(uint16_t* fb, int fbW, int fbH, int top, const char* text,
+                  const lv_font_t* font, uint16_t colour)
+{
+    auto* fdsc = static_cast<const lv_font_fmt_txt_dsc_t*>(font->dsc);
+    if (fdsc->bitmap_format != LV_FONT_FMT_TXT_PLAIN || fdsc->bpp != 4 || fdsc->stride != 0)
+        return;
+
+    int width = 0;
+    for (const char* c = text; *c; ++c)
+    {
+        lv_font_glyph_dsc_t g = {};
+        if (font->get_glyph_dsc(font, &g, (uint8_t)c[0], (uint8_t)c[1])) width += g.adv_w;
+    }
+
+    int penX = (fbW - width) / 2;
+    const int baseline = top + font->line_height - font->base_line;
+    for (const char* c = text; *c; ++c)
+    {
+        lv_font_glyph_dsc_t g = {};
+        if (!font->get_glyph_dsc(font, &g, (uint8_t)c[0], (uint8_t)c[1])) continue;
+
+        // Nibbles run on across rows: the font has no row stride.
+        const uint8_t* bits = fdsc->glyph_bitmap + fdsc->glyph_dsc[g.gid.index].bitmap_index;
+        const int gx = penX + g.ofs_x;
+        const int gy = baseline - g.box_h - g.ofs_y;
+        for (int i = 0; i < g.box_w * g.box_h; ++i)
+        {
+            const uint32_t nibble = (i & 1) ? (bits[i >> 1] & 0x0F) : (bits[i >> 1] >> 4);
+            const int x = gx + i % g.box_w;
+            const int y = gy + i / g.box_w;
+            if (nibble == 0 || x < 0 || x >= fbW || y < 0 || y >= fbH) continue;
+            uint16_t& px = fb[y * fbW + x];
+            px = Blend565(colour, px, nibble * 17);
+        }
+        penX += g.adv_w;
+    }
+}
+
+}   // namespace
 
 DisplayManager::DisplayManager(ServiceProvider &serviceProvider)
     : serviceProvider_(serviceProvider)
 {
+}
+
+// Draws into both framebuffers, since which one scans out first is the
+// driver's business, and LVGL later adopts the same two buffers: its first
+// frame is a full redraw that swaps in over the logo, so there is no gap.
+void DisplayManager::ShowBootLogo()
+{
+    Board& board = serviceProvider_.getBoard();
+    esp_lcd_panel_handle_t panel = board.GetPanel();
+    if (panel == nullptr) return;   // headless, or the panel failed to come up
+
+    void* fbs[2] = {};
+    size_t count = 2;
+    if (esp_lcd_rgb_panel_get_frame_buffer(panel, 2, &fbs[0], &fbs[1]) != ESP_OK)
+    {
+        count = 1;
+        if (esp_lcd_rgb_panel_get_frame_buffer(panel, 1, &fbs[0]) != ESP_OK)
+        {
+            ESP_LOGW(TAG, "No framebuffer to draw the boot logo into");
+            return;
+        }
+    }
+
+    constexpr int W = BoardConfig::LCD_H_RES;
+    constexpr int H = BoardConfig::LCD_V_RES;
+    const BootLogo& logo = kBootLogo;
+    const int x0 = (W - logo.w) / 2;
+    const int y0 = (H - logo.h) / 2;
+
+    // The firmware version under the logo, as the release tag spells it, so a
+    // unit says what it runs before anything else is up. Grey of the light
+    // theme's dim text: the theme itself is not set yet.
+    char version[40];
+    snprintf(version, sizeof(version), "V%s", esp_app_get_description()->version);
+    constexpr int kVersionGap = 24;   // logo bottom to text top
+    constexpr uint16_t kVersionColour = Rgb565(0x8A8A8E);
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        auto* fb = static_cast<uint16_t*>(fbs[i]);
+        for (int p = 0; p < W * H; ++p) fb[p] = logo.bg;
+
+        int x = 0, y = 0;   // position inside the logo
+        for (size_t r = 0; r < logo.runs; ++r)
+        {
+            uint16_t n = logo.rle[2 * r];
+            const uint16_t colour = logo.rle[2 * r + 1];
+            while (n--)
+            {
+                fb[(y0 + y) * W + x0 + x] = colour;
+                if (++x == logo.w) { x = 0; ++y; }
+            }
+        }
+
+        DrawBootText(fb, W, H, y0 + logo.h + kVersionGap, version,
+                     &lv_font_montserrat_20, kVersionColour);
+
+        // The scanout reads these through the bounce buffers' CPU copy today,
+        // which sees the cache; write back anyway, so a layout that DMAs
+        // straight from PSRAM shows the logo too.
+        esp_cache_msync(fb, W * H * sizeof(uint16_t),
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    }
+
+    // Full brightness, as DisplayManager::Init leaves it by default; the
+    // brightness setting is not registered yet this early.
+    board.SetBacklightPercent(100);
+    ESP_LOGI(TAG, "Boot logo up");
 }
 
 void DisplayManager::Init()
