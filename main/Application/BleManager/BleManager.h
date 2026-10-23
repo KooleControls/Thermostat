@@ -61,6 +61,12 @@ public:
     // fails on the spot would otherwise retry in a tight loop on the host task.
     static constexpr int64_t FastReconnectDelayUs = 100LL * 1000;
 
+    // How long the paired gateway may be out of reach before the guest's mode
+    // stops being in force (ClimateManager::SetModeChoice). Long enough to ride
+    // out a reconnect, so a Cool run is not flipped to Auto and back, and to let
+    // the link come up after a reboot.
+    static constexpr int64_t ModeGraceUs = 2LL * 60 * 1000 * 1000;
+
     // Below this much free internal DRAM the stack is not started at all: the
     // controller needs tens of KB of it and the host task a 4 KB stack, and both
     // failure modes are bad (a controller assert boot-loops the panel; a failed
@@ -160,6 +166,7 @@ private:
 
     void StartConnect();                               // uses target_
     void ScheduleReconnect();
+    void StartModeGrace();
     void DropLink(const char* why);
     void RejectInstallCode();
     void StartDiscovery();
@@ -177,6 +184,7 @@ private:
     static void OnSyncTrampoline();
     static void OnResetTrampoline(int reason);
     static void ReconnectTimerCb(void* arg);
+    static void ModeGraceTimerCb(void* arg);
     static int  SvcDiscTrampoline(uint16_t conn, const struct ble_gatt_error* error,
                                   const struct ble_gatt_svc* svc, void* arg);
     static int  ChrDiscTrampoline(uint16_t conn, const struct ble_gatt_error* error,
@@ -244,6 +252,7 @@ private:
     uint16_t   inboundCccd_ = 0;
 
     esp_timer_handle_t reconnectTimer_ = nullptr;
+    esp_timer_handle_t modeGraceTimer_ = nullptr;
     std::atomic<bool>  fastReconnect_{false};
 
     // ── Session transport ───────────────────────────────────────

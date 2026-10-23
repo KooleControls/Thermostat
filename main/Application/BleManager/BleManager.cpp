@@ -3,6 +3,7 @@
 #include "CommandManager/CommandManager.h"
 #include "CommandEnvelope.h"   // protocol::RunCommandSession — names, dispatches, closes
 #include "SettingsManager/SettingsManager.h"
+#include "ClimateManager/ClimateManager.h"
 #include "JsonScope.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -58,6 +59,8 @@ void BleManager::Init()
 
     if (!enableSetting_.Get())
     {
+        // No link, so no gateway ever learns the guest's mode: it picks it.
+        serviceProvider_.getClimateManager().SetModeChoice(false);
         ESP_LOGI(TAG, "Initialized (BLE disabled by setting)");
         init.SetReady();
         return;
@@ -93,6 +96,15 @@ void BleManager::Init()
     timerArgs.arg = this;
     timerArgs.name = "ble_reconnect";
     esp_timer_create(&timerArgs, &reconnectTimer_);
+
+    timerArgs.callback = &BleManager::ModeGraceTimerCb;
+    timerArgs.name = "ble_mode_grace";
+    esp_timer_create(&timerArgs, &modeGraceTimer_);
+
+    // A paired gateway gets the same grace to come up after a reboot as after a
+    // dropout. With none paired, nothing will ever hear the guest's mode.
+    if (haveTarget_) StartModeGrace();
+    else             serviceProvider_.getClimateManager().SetModeChoice(false);
 
     // Transport resources before the stack: the queue must exist before the first
     // notification can arrive. Buffers go to PSRAM — internal DRAM is what the
@@ -588,6 +600,29 @@ void BleManager::ReconnectTimerCb(void* arg)
     if (self) self->StartConnect();
 }
 
+// The gateway is out of reach: the guest's mode stays in force for ModeGraceUs
+// in case it comes back. Not restarted while it is already counting, or once it
+// has run out — a failed reconnect every few seconds must not keep pushing the
+// moment back.
+void BleManager::StartModeGrace()
+{
+    if (modeGraceTimer_ == nullptr || esp_timer_is_active(modeGraceTimer_)) return;
+    if (!serviceProvider_.getClimateManager().ModeChoice()) return;
+    esp_timer_start_once(modeGraceTimer_, ModeGraceUs);
+}
+
+// Only the KC gateway learns the guest's mode, and only over this link. Out of
+// reach for ModeGraceUs, the thermostat is run the way the one it replaces is:
+// Auto, with the gateway choosing heating or cooling from the requests.
+void BleManager::ModeGraceTimerCb(void* arg)
+{
+    auto* self = static_cast<BleManager*>(arg);
+    if (self == nullptr || self->GetLinkState() == LinkState::Ready) return;   // back just in time
+    ESP_LOGW(TAG, "Gateway out of reach for %lld s, it picks the mode until it is back",
+             static_cast<long long>(ModeGraceUs / 1000000));
+    self->serviceProvider_.getClimateManager().SetModeChoice(false);
+}
+
 void BleManager::DropLink(const char* why)
 {
     uint16_t handle;
@@ -633,6 +668,10 @@ void BleManager::Forget()
     peerCodeSetting_.Set("");
 
     if (reconnectTimer_) esp_timer_stop(reconnectTimer_);
+
+    // No gateway left to hear the guest's mode, and none coming back.
+    if (modeGraceTimer_) esp_timer_stop(modeGraceTimer_);
+    serviceProvider_.getClimateManager().SetModeChoice(false);
 
     uint16_t handle;
     {
@@ -808,6 +847,7 @@ int BleManager::OnGapEvent(struct ble_gap_event* event)
                 passkeyUsed_ = false;
             }
             ScheduleReconnect();
+            StartModeGrace();
             return 0;
 
         case BLE_GAP_EVENT_ENC_CHANGE:
@@ -1124,6 +1164,10 @@ int BleManager::OnSubscribed(const struct ble_gatt_error* error)
         link_ = LinkState::Ready;
         mtu = mtu_;
     }
+
+    // The gateway can read the guest's mode again.
+    if (modeGraceTimer_) esp_timer_stop(modeGraceTimer_);
+    serviceProvider_.getClimateManager().SetModeChoice(true);
 
     // One session chunk = one GATT write, so the usable payload is the MTU less
     // the 3-byte ATT header and the 3-byte session header.

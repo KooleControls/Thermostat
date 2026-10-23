@@ -234,7 +234,7 @@ void HomeFace::BuildTiles(lv_obj_t* root)
              UiTheme::Cool(), HomeIntent::SetCool);
     MakeTile(root, tiles_[(int)HomeMode::Off],  3, ICON_POWER,     "Power",
              UiTheme::TextDim(), HomeIntent::SetOff);
-    tilesShown_ = false;   // built hidden; Apply() shows the row
+    tileLayout_ = TileLayout::None;   // built hidden; Apply() lays the row out
 }
 
 void HomeFace::SetTileEnabled(Tile& tile, bool enabled)
@@ -402,22 +402,31 @@ void HomeFace::Apply(const HomeView& v)
     // ── Mode tiles ───────────────────────────────────────────
     // None until the plant has said which modes there are: drawing all four
     // on boot and dimming Cooling a moment later offered a mode that was never
-    // there. With no OpenTherm link there is no plant to pick a mode for: no
-    // row, and an error line at the top says why.
-    bool tilesShown = !v.otError && v.modesKnown;
+    // there. While the guest has no choice of mode, Auto is the only one —
+    // alone in the middle, rather than at the left edge of a missing row. With
+    // no OpenTherm link there is no plant to pick a mode for: no row, and an
+    // error line at the top says why.
+    TileLayout layout = (v.otError || !v.modesKnown) ? TileLayout::None
+                      : v.modeChoice                 ? TileLayout::Full
+                                                     : TileLayout::AutoOnly;
     if (v.otError == lv_obj_has_flag(otErrorLabel_, LV_OBJ_FLAG_HIDDEN))
     {
         if (v.otError) lv_obj_remove_flag(otErrorLabel_, LV_OBJ_FLAG_HIDDEN);
         else           lv_obj_add_flag(otErrorLabel_, LV_OBJ_FLAG_HIDDEN);
     }
-    if (tilesShown != tilesShown_)
+    if (layout != tileLayout_)
     {
-        tilesShown_ = tilesShown;
+        tileLayout_ = layout;
         for (int i = 0; i < 4; ++i)
         {
-            if (tilesShown) lv_obj_remove_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
-            else            lv_obj_add_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
+            bool shown = layout == TileLayout::Full ||
+                         (layout == TileLayout::AutoOnly && i == (int)HomeMode::Auto);
+            if (shown) lv_obj_remove_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
+            else       lv_obj_add_flag(tiles_[i].box, LV_OBJ_FLAG_HIDDEN);
         }
+        lv_obj_align(tiles_[(int)HomeMode::Auto].box, LV_ALIGN_TOP_LEFT,
+                     layout == TileLayout::AutoOnly ? (480 - kTileW) / 2 : TileX(0),
+                     kTileY);
     }
 
     // A plant without cooling dims the Cooling tile rather than hiding it: a

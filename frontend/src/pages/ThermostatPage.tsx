@@ -70,13 +70,18 @@ export default function ThermostatPage() {
     dhwTimer.current = setTimeout(() => setDhwSetpoint(next), DEBOUNCE_MS)
   }
 
-  // Same row as the panel.
+  // Same row as the panel. Without a gateway on BLE to hear the pick, Auto is
+  // the only mode there is.
   const coolingSupported = ot?.coolingSupported ?? false
   const modes: Array<{ key: ClimateMode; label: string }> = [
     { key: "auto", label: "Auto" },
-    { key: "heat", label: "Heat" },
-    ...(coolingSupported ? [{ key: "cool" as const, label: "Cool" }] : []),
-    { key: "off", label: "Off" },
+    ...(climate.modeChoice
+      ? [
+          { key: "heat" as const, label: "Heat" },
+          ...(coolingSupported ? [{ key: "cool" as const, label: "Cool" }] : []),
+          { key: "off" as const, label: "Off" },
+        ]
+      : []),
   ]
 
   return (

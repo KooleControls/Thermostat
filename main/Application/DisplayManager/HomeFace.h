@@ -70,6 +70,11 @@ struct HomeView
     /// tile row goes, since there is no plant to pick a mode for, and an error
     /// line at the top says why.
     bool otError = false;
+
+    /// Whether the guest may pick a mode at all. Only a gateway on BLE learns
+    /// the pick; without one the thermostat runs in Auto and the gateway picks
+    /// heating or cooling, so Heating, Cooling and Power are not offered.
+    bool modeChoice = true;
 };
 
 /// What a touch means. The face raises these; it never acts on them.
@@ -170,5 +175,7 @@ private:
     Tile tiles_[4];   // Auto, Heat, Cool, Off — indexed by HomeMode
     lv_obj_t* otErrorLabel_ = nullptr;   // top centre; see HomeView::otError
 
-    bool tilesShown_ = false;   // whether the tile row is up right now
+    // What the tile row is laid out for right now.
+    enum class TileLayout : uint8_t { None, AutoOnly, Full };
+    TileLayout tileLayout_ = TileLayout::None;
 };

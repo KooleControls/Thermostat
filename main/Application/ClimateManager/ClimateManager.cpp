@@ -72,7 +72,24 @@ void ClimateManager::SetUserSetpoint(float celsius)
 ClimateMode ClimateManager::GetMode() const
 {
     LOCK(mutex_);
-    return mode_;
+    return ModeInForceLocked();
+}
+
+bool ClimateManager::ModeChoice() const
+{
+    LOCK(mutex_);
+    return modeChoice_;
+}
+
+// Takes effect on the next ControlStep, like a picked mode. The pick itself is
+// untouched, so it is in force again the moment the choice comes back.
+void ClimateManager::SetModeChoice(bool choice)
+{
+    LOCK(mutex_);
+    if (choice == modeChoice_) return;
+    modeChoice_ = choice;
+    if (choice) ESP_LOGI(TAG, "Mode choice back: the %s pick is in force", ClimateModeName(mode_));
+    else        ESP_LOGI(TAG, "Mode choice withdrawn: running in auto, %s pick kept", ClimateModeName(mode_));
 }
 
 void ClimateManager::SetMode(ClimateMode mode)
@@ -122,7 +139,7 @@ void ClimateManager::ControlStep()
 
     ClimateMode mode;
     float userSp;
-    { LOCK(mutex_); mode = mode_; userSp = userSetpoint_; }
+    { LOCK(mutex_); mode = ModeInForceLocked(); userSp = userSetpoint_; }
 
     if (!roomValid)
     {
@@ -271,16 +288,19 @@ RequestError ClimateManager::Cmd_ClimateStatus(CommandContext& ctx)
 void ClimateManager::WriteStatus(Stream &out)
 {
     ClimateMode mode;
+    bool choice;
     float userSp;
     ClimateStatus s;
     {
         LOCK(mutex_);
-        mode = mode_;
+        mode = ModeInForceLocked();
+        choice = modeChoice_;
         userSp = userSetpoint_;
         s = status_;
     }
     JsonObject resp(out);
-    resp.field("mode", ClimateModeName(mode));
+    resp.field("mode", ClimateModeName(mode));   // in force, which is the pick whenever the gateway can read it
+    resp.field("modeChoice", choice);
     resp.field("userSetpoint", userSp);
     resp.field("activeSetpoint", s.activeSetpoint);
     resp.field("roomTemp", s.roomTemp);

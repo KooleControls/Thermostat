@@ -54,8 +54,17 @@ public:
     // On-screen UI control surface (calls, not JSON commands).
     float GetUserSetpoint() const;
     void  SetUserSetpoint(float celsius);// clamped to [5,30]; persisted lazily (see MaybeCommitSettings)
-    ClimateMode GetMode() const;
-    void  SetMode(ClimateMode mode);     // persisted lazily, same as the setpoint
+    ClimateMode GetMode() const;         // the mode in force; see ModeChoice
+    void  SetMode(ClimateMode mode);     // the guest's pick; persisted lazily, same as the setpoint
+
+    /// Whether the guest's pick is the mode in force. Over OpenTherm the plant
+    /// never learns which tile was pressed, so a link that does carry the pick
+    /// withdraws the choice while the plant cannot hear it. The thermostat then
+    /// runs in Auto — the room's needs both ways, the plant picks the side —
+    /// and the pick waits, stored, for the choice to come back. True until a
+    /// link says otherwise, so a thermostat without one keeps every mode.
+    bool ModeChoice() const;
+    void SetModeChoice(bool choice);
 
     /// What the last control step computed. Same snapshot the climateStatus
     /// command reports; a copy, so the caller holds no lock.
@@ -86,7 +95,9 @@ private:
     PidController pid_;
 
     // live config + last-step snapshot (guarded by mutex_)
-    ClimateMode mode_ = ClimateMode::Auto;
+    ClimateMode mode_ = ClimateMode::Auto;   // the guest's pick, in force only with modeChoice_
+    bool modeChoice_ = true;
+    ClimateMode ModeInForceLocked() const { return modeChoice_ ? mode_ : ClimateMode::Auto; }
     float userSetpoint_ = 20.0f;
     ClimateStatus status_;
 
