@@ -24,6 +24,7 @@ set(SOURCE_FILES_LIST
     "Application/DisplayManager/HomeFace.cpp"
     "Application/DisplayManager/PinGate.cpp"
     "Application/DisplayManager/PinScreen.cpp"
+    "Application/DisplayManager/ResetDialog.cpp"
     "Application/DisplayManager/SettingsMenuScreen.cpp"
     "Application/DisplayManager/WifiScreen.cpp"
     "Application/DisplayManager/BleScreen.cpp"

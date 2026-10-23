@@ -534,11 +534,35 @@ void DisplayManager::ServicePanelResync()
     serviceProvider_.getBoard().ResyncPanel();
 }
 
+// The BOOT button on the back raises the reset dialog over whatever is up. It
+// has to be held for kBootHoldTicks first, and let go before it can raise the
+// dialog again.
+void DisplayManager::ServiceBootButton(uint32_t idleMs)
+{
+    // Left unanswered, the dialog goes the way the service menu does.
+    if (resetDialog_.IsOpen() && idleMs >= kIdleTimeoutMs)
+        resetDialog_.Close();
+
+    if (!serviceProvider_.getBoard().BootButtonPressed())
+    {
+        bootHeldTicks_ = 0;
+        return;
+    }
+    if (bootHeldTicks_ >= kBootHoldTicks) return;   // this press already asked
+    if (++bootHeldTicks_ < kBootHoldTicks) return;
+
+    ESP_LOGI(TAG, "BOOT button pressed, asking whether to reset");
+    resetDialog_.Show();
+    // The button is not a touch, so the panel would stay dimmed without this.
+    lv_display_trigger_activity(lvDisplay_);
+}
+
 void DisplayManager::TickCb(lv_timer_t *t)
 {
     auto *self = static_cast<DisplayManager *>(lv_timer_get_user_data(t));
     self->ServicePanelResync();
     uint32_t idleMs = lv_display_get_inactive_time(self->lvDisplay_);
+    self->ServiceBootButton(idleMs);
 
     // The site test is carried around untouched for minutes on end: it has to
     // stay bright, and dropping back to home would end the test mode halfway

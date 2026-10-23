@@ -23,7 +23,7 @@
 // Owns the shared I2C master bus (GT911 + AHT20 sit on SDA17/SCL18) and
 // every driver instance. Exposes the duck-typed capability surface the
 // application compiles against. This board has no user LED and exposes
-// no Led role. Display/touch/OT-link drivers arrive with their feature
+// no Led role. Its one button is the BOOT strap (BootButtonPressed). Display/touch/OT-link drivers arrive with their feature
 // items (thermostat-ui, opentherm-link) and will be owned here too.
 // ──────────────────────────────────────────────────────────────
 
@@ -73,6 +73,10 @@ public:
     void SetBacklightPercent(uint8_t percent);
     uint8_t GetBacklightPercent() const { return backlightPercent_; }
 
+    /// Whether the BOOT button on the back is held right now. Takes ~10 µs
+    /// with interrupts off on the calling core, so poll it, but not in a loop.
+    bool BootButtonPressed();
+
 
 private:
     ServiceProvider &serviceProvider_;
@@ -93,4 +97,8 @@ private:
     static constexpr ledc_channel_t kBacklightChannel = LEDC_CHANNEL_0;
     static constexpr ledc_timer_bit_t kBacklightResolution = LEDC_TIMER_10_BIT;
     static constexpr uint32_t kBacklightMaxDuty = (1u << 10) - 1;
+
+    // How long GPIO0 is let go before it is read: a few time constants of the
+    // pull-up against the pin and the panel input it shares.
+    static constexpr uint32_t kBootButtonSettleUs = 10;
 };

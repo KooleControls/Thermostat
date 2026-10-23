@@ -1,7 +1,12 @@
 #include "Board.h"
 #include "DisplayInit.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "driver/uart.h"
+#include "hal/gpio_ll.h"
+
+static_assert(BoardConfig::LCD_DATA_PINS[5] == BoardConfig::BOOT_BUTTON_PIN,
+              "Board::BootButtonPressed() is written for BOOT sharing the panel's G0 line");
 
 Board::Board(ServiceProvider &ctx)
     : serviceProvider_(ctx)
@@ -164,6 +169,37 @@ void Board::InitDisplay()
         if (!panel_.Init(cfg))
             ESP_LOGE(TAG, "ST7701 panel init failed (continuing headless)");
     }
+
+    // The BOOT button shares GPIO0 with the panel's G0 line, which the panel
+    // has just routed. Reading it needs the pad's input buffer, and a pull-up
+    // to read high once the LCD lets go (see BootButtonPressed).
+    gpio_input_enable(static_cast<gpio_num_t>(BoardConfig::BOOT_BUTTON_PIN));
+    gpio_pullup_en(static_cast<gpio_num_t>(BoardConfig::BOOT_BUTTON_PIN));
+}
+
+// GPIO0 is the panel's G0 line, driven by the LCD peripheral through the GPIO
+// matrix with its output always enabled, and that drive drowns the button out.
+// So the pin is let go for a moment: the output enable is handed from the
+// peripheral to the GPIO enable register and switched off, the pull-up or a
+// held button sets the level, and the routing is put back as it was. The panel
+// shows the pull-up's level in green's least significant bit for about a
+// hundred pixels, once per poll, which nobody can see.
+bool Board::BootButtonPressed()
+{
+    constexpr uint32_t pin = BoardConfig::BOOT_BUTTON_PIN;
+    static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
+
+    portENTER_CRITICAL(&lock);
+    const uint32_t routing = GPIO.func_out_sel_cfg[pin].val;
+    GPIO.func_out_sel_cfg[pin].oen_sel = 1;   // the enable register decides now
+    gpio_ll_output_disable(&GPIO, pin);
+    esp_rom_delay_us(kBootButtonSettleUs);
+    const int level = gpio_ll_get_level(&GPIO, pin);
+    gpio_ll_output_enable(&GPIO, pin);        // driving again before the hand-back
+    GPIO.func_out_sel_cfg[pin].val = routing;
+    portEXIT_CRITICAL(&lock);
+
+    return level == 0;   // the button pulls to ground
 }
 
 void Board::SetBacklightPercent(uint8_t percent)

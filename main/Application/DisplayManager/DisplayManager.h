@@ -11,6 +11,7 @@
 #include "BleScreen.h"
 #include "InfoScreen.h"
 #include "BleTestScreen.h"
+#include "ResetDialog.h"
 #include "CommandManager/CommandEntry.h"
 #include "TypedSettings.h"
 #include "lvgl.h"
@@ -36,6 +37,10 @@ class DisplayManager final : public Navigator
     /// Backstop poll for the touch controller once INT drives the reads.
     /// Not the press path — see ArmTouchBackstop().
     static constexpr uint32_t kTouchBackstopMs = 100;
+
+    /// Ticks in a row the BOOT button has to read as held before it counts:
+    /// 0.2 s, a deliberate press rather than a stray reading.
+    static constexpr uint8_t kBootHoldTicks = 2;
 
 public:
     explicit DisplayManager(ServiceProvider& serviceProvider);
@@ -71,6 +76,7 @@ private:
     Screen* Resolve(ScreenId id);
     void ServiceBacklight(uint32_t idleMs);
     void ServicePanelResync();
+    void ServiceBootButton(uint32_t idleMs);
     static void TickCb(lv_timer_t* t);
 
     static const char* ScreenName(ScreenId id);
@@ -142,8 +148,13 @@ private:
     BleScreen bleScreen_{serviceProvider_, *this};
     InfoScreen infoScreen_{serviceProvider_, *this};
     BleTestScreen bleTestScreen_{serviceProvider_, *this};
+    ResetDialog resetDialog_{serviceProvider_};
 
     ScreenId current_ = ScreenId::Home;
+
+    /// How many ticks the BOOT button has read as held, up to kBootHoldTicks,
+    /// where it stays until the button is let go: one question per press.
+    uint8_t bootHeldTicks_ = 0;
 
     /// Which of the two levels is currently on the panel. Tracked so the tick
     /// only writes LEDC on a transition rather than ten times a second.
