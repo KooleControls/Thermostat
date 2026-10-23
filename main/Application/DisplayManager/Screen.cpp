@@ -86,6 +86,12 @@ lv_obj_t* Screen::AddCard(lv_obj_t* parent, int32_t height)
     lv_obj_set_style_border_color(card, UiTheme::Line(), 0);
     lv_obj_set_style_shadow_width(card, 0, 0);
     lv_obj_set_style_pad_hor(card, UiTheme::Pad, 0);
+    // Disabled sinks halfway into the ground, fill, hairline and label alike
+    // (a recolour reaches the children). LVGL's theme washes it with a fixed
+    // light grey instead, which fades a card on the light palette but lifts it
+    // on the dark one, so a dead button outshone the live one beside it.
+    lv_obj_set_style_recolor(card, UiTheme::Bg(), LV_STATE_DISABLED);
+    lv_obj_set_style_recolor_opa(card, LV_OPA_50, LV_STATE_DISABLED);
     return card;
 }
 
@@ -155,4 +161,48 @@ Screen::MenuRow Screen::AddMenuRow(lv_obj_t* list, const char* icon, const char*
     }
 
     return MenuRow{ card, sub };
+}
+
+// ── Text entry ──────────────────────────────────────────────────────────
+//
+// Every colour LVGL's theme gives these widgets is overridden here, including
+// the ones a dark screen never shows a difference on, so light and dark come
+// out of the same code. Where the theme styles a state, ours has to name the
+// same state: LVGL picks the most specific state first and only then prefers a
+// local style, so a local style in the default state loses to a theme one in,
+// say, the focused state (the only one the theme draws the cursor in).
+
+lv_obj_t* Screen::AddTextField(lv_obj_t* parent, const char* placeholder)
+{
+    lv_obj_t* ta = lv_textarea_create(parent);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_placeholder_text(ta, placeholder);
+    lv_obj_set_style_text_font(ta, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(ta, UiTheme::Text(), 0);
+    lv_obj_set_style_bg_color(ta, UiTheme::Surface(), 0);
+    lv_obj_set_style_radius(ta, UiTheme::Radius, 0);
+    lv_obj_set_style_border_width(ta, 1, 0);
+    lv_obj_set_style_border_color(ta, UiTheme::Line(), 0);
+    lv_obj_set_style_text_color(ta, UiTheme::TextDim(), LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_set_style_border_color(ta, UiTheme::Text(), UiTheme::Sel(LV_PART_CURSOR, LV_STATE_FOCUSED));
+    return ta;
+}
+
+lv_obj_t* Screen::AddKeyboard(lv_obj_t* parent, lv_obj_t* textarea)
+{
+    lv_obj_t* kb = lv_keyboard_create(parent);
+    lv_obj_set_style_bg_opa(kb, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(kb, 0, 0);
+    lv_obj_set_style_radius(kb, 8, LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(kb, UiTheme::Surface(), LV_PART_ITEMS);
+    lv_obj_set_style_text_color(kb, UiTheme::Text(), LV_PART_ITEMS);
+    // The checked keys are the keyboard's own controls (tick, backspace, the
+    // mode keys): a step off the character keys, as on a phone. The theme
+    // gives them a text colour of their own, so ours is repeated.
+    lv_obj_set_style_bg_color(kb, UiTheme::SurfacePressed(), UiTheme::Sel(LV_PART_ITEMS, LV_STATE_CHECKED));
+    lv_obj_set_style_text_color(kb, UiTheme::Text(), UiTheme::Sel(LV_PART_ITEMS, LV_STATE_CHECKED));
+    lv_obj_set_style_bg_color(kb, UiTheme::Accent(), UiTheme::Sel(LV_PART_ITEMS, LV_STATE_PRESSED));
+    lv_obj_set_style_text_color(kb, UiTheme::OnAccent(), UiTheme::Sel(LV_PART_ITEMS, LV_STATE_PRESSED));
+    lv_keyboard_set_textarea(kb, textarea);
+    return kb;
 }

@@ -155,6 +155,16 @@ protected:
                               const char* subtitle, bool chevron = true,
                               int32_t reserveRight = 44);
 
+    /// A one-line text field in the card's colours. LVGL's own theme is built
+    /// once, light, and never hears about the palette, so a field left to it is
+    /// a white bar on the dark screens. Size and position are the caller's.
+    static lv_obj_t* AddTextField(lv_obj_t* parent, const char* placeholder);
+
+    /// An on-screen keyboard typing into `textarea`, its keys styled like the
+    /// PIN pad's. Same reason as AddTextField; size, position, mode and the
+    /// READY/CANCEL handlers are the caller's.
+    static lv_obj_t* AddKeyboard(lv_obj_t* parent, lv_obj_t* textarea);
+
     /// lv_label_set_text() that skips identical text.
     ///
     /// LVGL invalidates a label on every set_text, whether or not the string
