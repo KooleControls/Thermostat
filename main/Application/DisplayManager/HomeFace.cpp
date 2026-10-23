@@ -164,6 +164,14 @@ void HomeFace::BuildReadout(lv_obj_t* root)
     lv_label_set_text(captionLabel_, "");
     lv_obj_align(captionLabel_, LV_ALIGN_CENTER, kDiscCx - 240, kDiscCy - 240 + 72);   // 72 below the number's centre
 
+    // The degree sign is a label of its own, as the unit is for the number
+    // above: centring "16°" as one string put the middle of the line on the 6,
+    // and the digits off-centre under the room temperature.
+    captionUnitLabel_ = lv_label_create(root);
+    lv_obj_set_style_text_color(captionUnitLabel_, UiTheme::TextDim(), 0);
+    lv_obj_set_style_text_font(captionUnitLabel_, &lv_font_montserrat_28, 0);
+    lv_label_set_text(captionUnitLabel_, "");
+
     blinking_ = false;   // a fresh label; LVGL took any blink with the old one
 }
 
@@ -348,16 +356,18 @@ void HomeFace::Apply(const HomeView& v)
         }
     }
 
-    // The setpoint line, empty while the setpoint itself is in the centre.
+    // The setpoint line, empty while the setpoint itself is in the centre. Set
+    // out like the number: the digits centred, the degree sign anchored to
+    // their right edge, and re-anchored whenever the digits change width.
     buf[0] = '\0';
-    if (!v.showSetpoint)
-    {
-        char sp[8];
-        FormatTemp(sp, sizeof(sp), v.setpoint, true);
-        snprintf(buf, sizeof(buf), "%s" "\xC2\xB0", sp);   // UTF-8 degree
-    }
+    if (!v.showSetpoint) FormatTemp(buf, sizeof(buf), v.setpoint, true);
     if (strcmp(lv_label_get_text(captionLabel_), buf) != 0)
+    {
         lv_label_set_text(captionLabel_, buf);
+        lv_label_set_text(captionUnitLabel_, buf[0] != '\0' ? "\xC2\xB0" : "");   // UTF-8 degree
+        lv_obj_update_layout(captionLabel_);
+        lv_obj_align_to(captionUnitLabel_, captionLabel_, LV_ALIGN_OUT_RIGHT_TOP, 0, 0);
+    }
 
     // ── Activity badge ───────────────────────────────────────
     // Grey means that stage is not running; the colour means it is. A grey

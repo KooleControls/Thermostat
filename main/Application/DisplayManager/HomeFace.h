@@ -163,7 +163,8 @@ private:
     lv_obj_t* bleIcon_      = nullptr;
     lv_obj_t* bigLabel_     = nullptr;
     lv_obj_t* unitLabel_    = nullptr;
-    lv_obj_t* captionLabel_ = nullptr;
+    lv_obj_t* captionLabel_ = nullptr;   // the setpoint's digits, centred
+    lv_obj_t* captionUnitLabel_ = nullptr;   // its degree sign, off their right edge
     bool      blinking_     = false;   // the number blinks while being dialled
 
     Tile tiles_[4];   // Auto, Heat, Cool, Off — indexed by HomeMode
