@@ -6,6 +6,7 @@
 #include "JsonScope.h"
 #include "nvs_flash.h"
 #include "esp_wifi.h"
+#include "esp_mac.h"
 #include "esp_log.h"
 #include "mdns.h"
 
@@ -81,6 +82,10 @@ void NetworkManager::Init()
     mdns_hostname_set(hostName);
     mdns_instance_name_set(deviceName);
     mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
+
+    uint8_t apMac[6] = {};
+    ESP_ERROR_CHECK(esp_read_mac(apMac, ESP_MAC_WIFI_SOFTAP));
+    snprintf(apSsid_, sizeof(apSsid_), "%s-%02X%02X%02X", ApSsidPrefix, apMac[3], apMac[4], apMac[5]);
 
     // Setup connect timeout timer
     connectTimer_.Init("sta_timeout", pdMS_TO_TICKS(StaConnectTimeoutMs), false);
@@ -178,7 +183,7 @@ void NetworkManager::GetStaSsid(char* out, size_t maxLen) const
 
 void NetworkManager::GetApSsid(char* out, size_t maxLen) const
 {
-    snprintf(out, maxLen, "%s", DefaultApSsid);
+    snprintf(out, maxLen, "%s", apSsid_);
 }
 
 void NetworkManager::AttemptStaConnect()
@@ -206,8 +211,8 @@ void NetworkManager::FallbackToAP()
     wifi_interface_.Stop();
 
     staConnecting_ = false;
-    ESP_LOGW(TAG, "Falling back to AP mode: '%s'", DefaultApSsid);
-    wifi_interface_.StartAP(DefaultApSsid, DefaultApPassword);
+    ESP_LOGW(TAG, "Falling back to AP mode: '%s'", apSsid_);
+    wifi_interface_.StartAP(apSsid_, DefaultApPassword);
 }
 
 void NetworkManager::HandleNetworkEvent(const NetworkEvent& event)
