@@ -17,7 +17,10 @@ class NetworkManager {
     static constexpr int StaConnectTimeoutMs = 10000;
     static constexpr int MaxStaRetries = 3;
 
-    static constexpr const char* DefaultApSsid = "KC Thermostat-AP";
+    // The AP's SSID is this plus the last three bytes of its own MAC (its
+    // BSSID), "KC Thermostat-A1B2C3": with several units in range, a fixed
+    // name gave no way to tell which one you were joining.
+    static constexpr const char* ApSsidPrefix = "KC Thermostat";
     static constexpr const char* DefaultApPassword = ""; // Open network
 
 public:
@@ -70,6 +73,8 @@ private:
 
     InitState initState;
     WiFiInterface wifi_interface_;
+
+    char apSsid_[33] = {};   // set once in Init(), from ApSsidPrefix and the MAC
 
     // STA connection state
     char staSsid_[33] = {};

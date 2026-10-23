@@ -8,7 +8,7 @@ The **KC Thermostat** is an OpenTherm room thermostat (OT master) that pairs wit
 
 ## What's Included
 
-- **WiFi** — Station mode with automatic AP fallback (`KC Thermostat-AP`) after failed connections
+- **WiFi** — Station mode with automatic AP fallback (`KC Thermostat-XXXXXX`, the last three bytes of its MAC) after failed connections
 - **Web UI** — React + TypeScript dashboard served from flash, accessible from any browser
 - **OTA Updates** — Dual-partition firmware updates and independent web UI updates, no USB after initial flash
 - **Live Console** — Stream device logs to the browser in real time over WebSocket
@@ -203,7 +203,7 @@ The CI pipeline produces two artifacts per release:
 
 1. On boot, attempts to connect to the configured WiFi network (stored in NVS)
 2. Retries up to 3 times on failure
-3. Falls back to an open access point (`KC Thermostat-AP`) if all retries fail
+3. Falls back to an open access point (`KC Thermostat-XXXXXX`, unique per unit and shown on its WiFi screen) if all retries fail
 4. Connect to the AP and access the web UI to configure WiFi credentials
 
 ---
