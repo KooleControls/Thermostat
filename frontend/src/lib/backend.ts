@@ -732,7 +732,10 @@ export interface PartitionsResponse {
 export type ClimateMode = "auto" | "heat" | "cool" | "off"
 
 export interface ClimateStatus {
+  /** The mode in force: always "auto" while modeChoice is false. */
   mode: ClimateMode
+  /** A gateway on BLE can hear the guest's pick; without one it picks the side. */
+  modeChoice: boolean
   userSetpoint: number
   activeSetpoint: number
   roomTemp: number
