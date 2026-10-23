@@ -4,7 +4,9 @@
 // What the guest picked on the panel. It decides which requests go out over
 // OpenTherm (see ClimateManager::ControlStep), and the gateway also reads it;
 // the gateway's state machine still owns the changeover and its timings. Auto
-// leaves the choice of direction with the gateway, as it always was.
+// leaves the choice of direction with the gateway, as it always was — and Auto
+// is all there is while the plant keeps that choice itself (OT ID 3 bit 7, see
+// ClimateManager::EffectiveMode).
 enum class ClimateMode { Off = 0, Heat = 1, Cool = 2, Auto = 3 };
 
 inline const char *ClimateModeName(ClimateMode m)

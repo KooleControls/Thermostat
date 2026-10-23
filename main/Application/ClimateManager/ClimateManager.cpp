@@ -71,8 +71,19 @@ void ClimateManager::SetUserSetpoint(float celsius)
 
 ClimateMode ClimateManager::GetMode() const
 {
-    LOCK(mutex_);
-    return mode_;
+    ClimateMode picked;
+    { LOCK(mutex_); picked = mode_; }
+    return EffectiveMode(picked, serviceProvider_.getOpenThermManager().GetState());
+}
+
+// The mode in force. The guest's pick holds only while the plant lets the
+// thermostat switch between heating and cooling (OT ID 3 bit 7). When the
+// plant keeps that choice itself, the thermostat runs in Auto — reporting the
+// room's needs in both directions, as the Honeywell does there — and the
+// stored pick waits for the choice to come back.
+ClimateMode ClimateManager::EffectiveMode(ClimateMode picked, const OtBoilerState &boiler)
+{
+    return boiler.heatCoolByMaster ? picked : ClimateMode::Auto;
 }
 
 void ClimateManager::SetMode(ClimateMode mode)
@@ -123,6 +134,7 @@ void ClimateManager::ControlStep()
     ClimateMode mode;
     float userSp;
     { LOCK(mutex_); mode = mode_; userSp = userSetpoint_; }
+    mode = EffectiveMode(mode, boiler);
 
     if (!roomValid)
     {
@@ -279,6 +291,8 @@ void ClimateManager::WriteStatus(Stream &out)
         userSp = userSetpoint_;
         s = status_;
     }
+    // The gateway reads "mode" from here over BLE, so it is the mode in force.
+    mode = EffectiveMode(mode, serviceProvider_.getOpenThermManager().GetState());
     JsonObject resp(out);
     resp.field("mode", ClimateModeName(mode));
     resp.field("userSetpoint", userSp);

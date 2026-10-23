@@ -37,6 +37,9 @@ struct OtBoilerState
     bool configRead = false;             // ID 3 has answered at least once
     bool dhwPresent = false;
     bool coolingSupported = false;
+    // Bit 7, inverted: the slave lets the master switch between heating and
+    // cooling. Assumed until ID 3 says otherwise, as it was before this was read.
+    bool heatCoolByMaster = true;
 
     // sensors (f8.8 unless noted)
     float boilerTemp = 0;                // ID 25

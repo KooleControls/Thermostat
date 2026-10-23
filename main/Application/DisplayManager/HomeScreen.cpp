@@ -85,10 +85,11 @@ void HomeScreen::Refresh()
     // meanings; this is just no longer throwing the distinction away.
     OtBoilerState boiler = serviceProvider_.getOpenThermManager().GetState();
 
-    // Both from the slave's config (ID 3). Until it has answered the face
+    // All three from the slave's config (ID 3). Until it has answered the face
     // draws no mode tiles at all, rather than guessing which modes there are.
     view.modesKnown       = boiler.configRead;
     view.coolingAvailable = boiler.coolingSupported;
+    view.modeChoice       = boiler.heatCoolByMaster;
 
     // Counted from boot until the link first comes up, and from the last time
     // it was up after that. The link layer only calls it down after ~3 s of

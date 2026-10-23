@@ -70,13 +70,19 @@ export default function ThermostatPage() {
     dhwTimer.current = setTimeout(() => setDhwSetpoint(next), DEBOUNCE_MS)
   }
 
-  // Same row as the panel.
+  // Same row as the panel. While the plant keeps the heat/cool choice itself
+  // (OT ID 3 bit 7), Auto is the only mode there is.
   const coolingSupported = ot?.coolingSupported ?? false
+  const modeChoice = ot?.heatCoolByMaster ?? true
   const modes: Array<{ key: ClimateMode; label: string }> = [
     { key: "auto", label: "Auto" },
-    { key: "heat", label: "Heat" },
-    ...(coolingSupported ? [{ key: "cool" as const, label: "Cool" }] : []),
-    { key: "off", label: "Off" },
+    ...(modeChoice
+      ? [
+          { key: "heat" as const, label: "Heat" },
+          ...(coolingSupported ? [{ key: "cool" as const, label: "Cool" }] : []),
+          { key: "off" as const, label: "Off" },
+        ]
+      : []),
   ]
 
   return (

@@ -291,7 +291,8 @@ void OpenThermManager::DoRotationSlot(OtLink &link)
 //
 // Right after the link comes up the slave's config goes first: the demand is
 // computed from it (ID 49 bounds the water setpoint, ID 3 says whether there
-// is cooling), and so is what the panel offers.
+// is cooling and who picks heating or cooling), and so is what the panel
+// offers.
 //
 // A changed demand then sends every write slot next and lets the rotation
 // resume where it was. Restarting the rotation instead, as this once did,
@@ -382,6 +383,7 @@ void OpenThermManager::StoreRead(uint8_t id, uint16_t value)
         state_.configRead       = true;
         state_.dhwPresent       = cfg & 0x01;
         state_.coolingSupported = cfg & 0x04;
+        state_.heatCoolByMaster = !(cfg & 0x80);
         break;
     }
     }
@@ -439,6 +441,7 @@ RequestError OpenThermManager::Cmd_Status(CommandContext& ctx)
     resp.field("configRead", s.configRead);
     resp.field("dhwPresent", s.dhwPresent);
     resp.field("coolingSupported", s.coolingSupported);
+    resp.field("heatCoolByMaster", s.heatCoolByMaster);
     resp.field("boilerTemp", s.boilerTemp);
     resp.field("returnTemp", s.returnTemp);
     resp.field("dhwTemp", s.dhwTemp);
