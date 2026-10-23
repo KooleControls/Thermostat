@@ -10,8 +10,6 @@
 #include "PidController.h"
 #include <cstdint>
 
-struct OtBoilerState;
-
 // What the last control step computed — filled by ControlStep(), read by the
 // climateStatus command. Grouped so both sides copy one value under the lock.
 // (mode_/userSetpoint_ are the live config, kept separate from this mirror.)
@@ -56,7 +54,7 @@ public:
     // On-screen UI control surface (calls, not JSON commands).
     float GetUserSetpoint() const;
     void  SetUserSetpoint(float celsius);// clamped to [5,30]; persisted lazily (see MaybeCommitSettings)
-    ClimateMode GetMode() const;         // the mode in force; see EffectiveMode
+    ClimateMode GetMode() const;
     void  SetMode(ClimateMode mode);     // persisted lazily, same as the setpoint
 
     /// What the last control step computed. Same snapshot the climateStatus
@@ -68,7 +66,6 @@ private:
     void ControlStep();
     void MaybeCommitSettings();   // flush mode/setpoint to NVS once input has gone quiet
     float OutputToTSet(float output, float loBound, float hiBound);
-    static ClimateMode EffectiveMode(ClimateMode picked, const OtBoilerState &boiler);
     void  PushSafeState();
     RequestError Cmd_ClimateSet(CommandContext& ctx);
     RequestError Cmd_ClimateStatus(CommandContext& ctx);
@@ -89,7 +86,7 @@ private:
     PidController pid_;
 
     // live config + last-step snapshot (guarded by mutex_)
-    ClimateMode mode_ = ClimateMode::Auto;   // the guest's pick, not always in force
+    ClimateMode mode_ = ClimateMode::Auto;
     float userSetpoint_ = 20.0f;
     ClimateStatus status_;
 

@@ -732,7 +732,6 @@ export interface PartitionsResponse {
 export type ClimateMode = "auto" | "heat" | "cool" | "off"
 
 export interface ClimateStatus {
-  /** The mode in force: always "auto" while the plant keeps the heat/cool choice. */
   mode: ClimateMode
   userSetpoint: number
   activeSetpoint: number
@@ -763,8 +762,6 @@ export interface OtStatus {
   configRead: boolean
   dhwPresent: boolean
   coolingSupported: boolean
-  /** The plant lets the thermostat pick heating or cooling (OT ID 3 bit 7 clear). */
-  heatCoolByMaster: boolean
   boilerTemp: number
   returnTemp: number
   dhwTemp: number
