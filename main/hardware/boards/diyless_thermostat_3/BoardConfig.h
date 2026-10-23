@@ -111,6 +111,14 @@ namespace BoardConfig
     static constexpr int OT_STM32_BOOT0 = 44;  // ESPHome opentherm boot_pin
     static constexpr int OT_STM32_NRST  = 13;  // ESPHome opentherm reset_pin
 
+    // ── BOOT button (the small button on the back) ─────────────────
+    // The ESP32-S3's BOOT strap, and the board's only button: held at power-up
+    // it starts the ROM downloader, and the panel stays dark (verified on the
+    // bench). At runtime GPIO0 is also the panel's G0 data line
+    // (LCD_DATA_PINS[5]), and the LCD drives it hard enough to drown the button
+    // out; Board::BootButtonPressed() reads it anyway.
+    static constexpr int BOOT_BUTTON_PIN = 0;
+
     // Whether to enable display colour inversion (yaml: invert_colors: true).
     static constexpr bool LCD_INVERT_COLOR = true;
 
