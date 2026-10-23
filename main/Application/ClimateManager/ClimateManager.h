@@ -35,10 +35,13 @@ class ClimateManager
     static constexpr int     LoopDelayMs = 5000;
     static constexpr int64_t kCommitIdleUs = 5'000'000;   // defer NVS write until setpoint/mode is quiet this long
     static constexpr float kFrostSetpointC = 5.0f;
+
+public:
+    // The guest's setpoint range. Public so a value being dialled on the panel
+    // stays inside it before it is ever handed over.
     static constexpr float kSetpointMin = 5.0f;
     static constexpr float kSetpointMax = 30.0f;
 
-public:
     explicit ClimateManager(ServiceProvider &serviceProvider);
 
     ClimateManager(const ClimateManager &) = delete;
@@ -50,8 +53,7 @@ public:
 
     // On-screen UI control surface (calls, not JSON commands).
     float GetUserSetpoint() const;
-    void  NudgeSetpoint(float deltaC);   // ±, clamped to [5,30]; persisted lazily (see MaybeCommitSettings)
-    void  SetUserSetpoint(float celsius);// absolute, same clamping and lazy persistence
+    void  SetUserSetpoint(float celsius);// clamped to [5,30]; persisted lazily (see MaybeCommitSettings)
     ClimateMode GetMode() const;
     void  SetMode(ClimateMode mode);     // persisted lazily, same as the setpoint
 
@@ -95,5 +97,6 @@ private:
 
     // loop-task-only
     int64_t lastStepUs_ = -1;
+    uint32_t overrideSeen_ = 0;   // OtBoilerState::overrideSeq last adopted
     bool    lastSafe_ = false;   // fault-log edge detector
 };

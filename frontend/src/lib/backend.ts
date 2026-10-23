@@ -487,7 +487,7 @@ class BackendService {
 
   /** mode and/or setpoint; reply is the full fresh climate status. */
   async setClimate(params: {
-    mode?: "off" | "heat" | "cool"
+    mode?: ClimateMode
     setpoint?: number
   }): Promise<ClimateStatus> {
     return this.send<ClimateStatus>("climate set", params)
@@ -729,8 +729,10 @@ export interface PartitionsResponse {
   partitions: Partition[]
 }
 
+export type ClimateMode = "auto" | "heat" | "cool" | "off"
+
 export interface ClimateStatus {
-  mode: "off" | "heat" | "cool"
+  mode: ClimateMode
   userSetpoint: number
   activeSetpoint: number
   roomTemp: number
@@ -757,6 +759,7 @@ export interface OtStatus {
   dhwActive: boolean
   flame: boolean
   coolingActive: boolean
+  configRead: boolean
   dhwPresent: boolean
   coolingSupported: boolean
   boilerTemp: number

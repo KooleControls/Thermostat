@@ -57,19 +57,6 @@ float ClimateManager::GetUserSetpoint() const
     return userSetpoint_;
 }
 
-void ClimateManager::NudgeSetpoint(float deltaC)
-{
-    LOCK(mutex_);
-    float sp = userSetpoint_ + deltaC;
-    if (sp < kSetpointMin) sp = kSetpointMin;
-    if (sp > kSetpointMax) sp = kSetpointMax;
-    if (fabsf(sp - userSetpoint_) < 0.001f) return;   // clamped, no change
-    userSetpoint_ = sp;
-    settingsDirty_ = true;
-    lastChangeUs_ = esp_timer_get_time();
-    // Takes effect on the next ControlStep; persisted later by MaybeCommitSettings.
-}
-
 void ClimateManager::SetUserSetpoint(float celsius)
 {
     LOCK(mutex_);
@@ -79,6 +66,7 @@ void ClimateManager::SetUserSetpoint(float celsius)
     userSetpoint_ = celsius;
     settingsDirty_ = true;
     lastChangeUs_ = esp_timer_get_time();
+    // Takes effect on the next ControlStep; persisted later by MaybeCommitSettings.
 }
 
 ClimateMode ClimateManager::GetMode() const
@@ -153,34 +141,34 @@ void ClimateManager::ControlStep()
         lastSafe_ = false;
     }
 
-    bool  overrideActive = false;
-    float activeSp;
+    // Adopt each remote override (OT ID 9) once, as our own setpoint (RAM only —
+    // deliberately NOT persisted): the display follows it and we stop
+    // re-requesting the pre-override value, so the gateway sees its cap
+    // satisfied and stops re-capping — otherwise ID 16 oscillates. The user
+    // can still nudge away from it afterwards; on reboot we boot to the stored
+    // value and the gateway re-caps, so it self-heals.
+    //
+    // It comes from the latch, not the raw value: the KC module sends an
+    // override as a ~3 s pulse, and sampling the raw value once a step missed
+    // two in five — and an old gateway never re-sends a missed one.
+    bool overrideActive = false;
+    if (boiler.overrideSeq != overrideSeen_)
+    {
+        overrideSeen_ = boiler.overrideSeq;
+        if (mode != ClimateMode::Off)
+        {
+            float ov = boiler.overrideLatched;
+            if (ov < kSetpointMin) ov = kSetpointMin;
+            if (ov > kSetpointMax) ov = kSetpointMax;
+            { LOCK(mutex_); userSetpoint_ = ov; userSp = ov; }
+            overrideActive = true;
+            ESP_LOGI(TAG, "Remote override adopted: setpoint %.1f", ov);
+        }
+    }
     if (mode != ClimateMode::Off && boiler.overrideSetpoint > 0.0f)
-    {
-        // Adopt the gateway's remote override as our own setpoint (RAM only —
-        // deliberately NOT persisted): the display follows it and we stop
-        // re-requesting the pre-override value, so the gateway sees its cap
-        // satisfied and stops re-capping — otherwise ID 16 oscillates. The
-        // user can still nudge locally afterwards; on reboot we boot to the
-        // stored value and the gateway re-caps, so it self-heals.
-        float ov = boiler.overrideSetpoint;
-        if (ov < kSetpointMin) ov = kSetpointMin;
-        if (ov > kSetpointMax) ov = kSetpointMax;
-        activeSp = ov;
         overrideActive = true;
-        { LOCK(mutex_); userSetpoint_ = ov; userSp = ov; }
-    }
-    else if (mode == ClimateMode::Off)
-    {
-        activeSp = kFrostSetpointC;
-    }
-    else
-    {
-        activeSp = userSp;
-    }
 
-    if (overrideActive && !status_.overrideActive)
-        ESP_LOGI(TAG, "Remote override adopted: setpoint %.1f", activeSp);
+    float activeSp = (mode == ClimateMode::Off) ? kFrostSetpointC : userSp;
 
     // Over OpenTherm the mode can only be said one way: by which requests go on
     // the wire. A boiler never learns which tile the guest pressed, so a heat

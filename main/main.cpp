@@ -12,6 +12,13 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "Starting up...");
 
     g_appContext.getConsoleManager().Init();
+
+    // The panel first, and the logo on it, before anything slow: the rest of
+    // boot keeps the screen dark for ~1.7 s, most of it the OpenTherm
+    // co-processor's warm-up in Board::Init.
+    g_appContext.getBoard().InitDisplay();
+    g_appContext.getDisplayManager().ShowBootLogo();
+
     g_appContext.getSettingsManager().Init();
     g_appContext.getSystemManager().Init();
     g_appContext.getNetworkManager().Init();

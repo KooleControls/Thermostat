@@ -17,6 +17,9 @@ void Board::Init()
         return;
     }
 
+    // Usually done already, early in app_main, for the boot logo.
+    InitDisplay();
+
     // Shared I2C bus (GT911 touch + AHT20 sensor on SDA17/SCL18).
     i2c_master_bus_config_t cfg = {};
     cfg.i2c_port = I2C_NUM_0;
@@ -55,8 +58,50 @@ void Board::Init()
             ESP_LOGI(TAG, "SoC die: %.1f degC", die);
     }
 
-    // Backlight PWM — starts at 0 %, so the panel stays dark until
-    // DisplayManager has a first frame up.
+    // GT911 touch on the shared I2C bus (auto-probe 0x5D/0x14).
+    if (i2cBus_)
+    {
+        Gt911Config tcfg{};
+        tcfg.bus = i2cBus_;
+        tcfg.x_max = BoardConfig::LCD_H_RES;
+        tcfg.y_max = BoardConfig::LCD_V_RES;
+        // INT is wired, so LVGL can be told about a touch instead of asking
+        // every 33 ms. There is no ESP-controlled touch reset line, which also
+        // means the driver skips the INT-level address-select dance during
+        // reset (it needs both pins) — so claiming INT cannot move the GT911
+        // off the address we probed for.
+        tcfg.intr = (gpio_num_t)BoardConfig::TOUCH_PIN_INT;
+        tcfg.intr_any_edge = true;
+        if (!touch_.Init(tcfg))
+            ESP_LOGW(TAG, "GT911 touch init failed (continuing without touch)");
+    }
+
+    // STM32L051 OpenTherm co-processor (owns the OT PHY). Init resets it
+    // into its app (~900 ms warm-up) and Handshake says hello. After the
+    // panel (InitDisplay, above): the panel's 3-wire SPI init uses GPIO11/12,
+    // which otLink_.Init() then reclaims (gpio_reset_pin) as its UART.
+    if (otLink_.Init(UART_NUM_1, BoardConfig::OT_UART_TX, BoardConfig::OT_UART_RX,
+                     BoardConfig::OT_STM32_BOOT0, BoardConfig::OT_STM32_NRST))
+    {
+        if (!otLink_.Handshake())
+            ESP_LOGW(TAG, "STM32 OT co-processor not responding (manager will retry)");
+    }
+    else
+    {
+        ESP_LOGE(TAG, "OT link UART init failed");
+    }
+
+    init.SetReady();
+    ESP_LOGI(TAG, "Initialized");
+}
+
+void Board::InitDisplay()
+{
+    if (displayInited_) return;
+    displayInited_ = true;
+
+    // Backlight PWM — starts at 0 %, so the panel stays dark until there is
+    // something on it: the boot logo, or DisplayManager's first frame.
     {
         ledc_timer_config_t timer = {};
         timer.speed_mode = LEDC_LOW_SPEED_MODE;
@@ -78,9 +123,9 @@ void Board::Init()
             ESP_LOGE(TAG, "backlight PWM init failed: %s", esp_err_to_name(bkErr));
     }
 
-    // ST7701 panel. MUST init before the OT link below: the 3-wire SPI init
-    // uses GPIO11/12, which otLink_.Init() then reclaims (gpio_reset_pin) as
-    // its UART. auto_del_panel_io stays false (true blanks this panel).
+    // ST7701 panel. MUST init before the OT link in Init(): the 3-wire SPI
+    // init uses GPIO11/12, which otLink_.Init() then reclaims (gpio_reset_pin)
+    // as its UART. auto_del_panel_io stays false (true blanks this panel).
     {
         St7701Config cfg{};
         cfg.spi_cs  = (gpio_num_t)BoardConfig::LCD_SPI_CS;
@@ -119,40 +164,6 @@ void Board::Init()
         if (!panel_.Init(cfg))
             ESP_LOGE(TAG, "ST7701 panel init failed (continuing headless)");
     }
-
-    // GT911 touch on the shared I2C bus (auto-probe 0x5D/0x14).
-    if (i2cBus_)
-    {
-        Gt911Config tcfg{};
-        tcfg.bus = i2cBus_;
-        tcfg.x_max = BoardConfig::LCD_H_RES;
-        tcfg.y_max = BoardConfig::LCD_V_RES;
-        // INT is wired, so LVGL can be told about a touch instead of asking
-        // every 33 ms. There is no ESP-controlled touch reset line, which also
-        // means the driver skips the INT-level address-select dance during
-        // reset (it needs both pins) — so claiming INT cannot move the GT911
-        // off the address we probed for.
-        tcfg.intr = (gpio_num_t)BoardConfig::TOUCH_PIN_INT;
-        tcfg.intr_any_edge = true;
-        if (!touch_.Init(tcfg))
-            ESP_LOGW(TAG, "GT911 touch init failed (continuing without touch)");
-    }
-
-    // STM32L051 OpenTherm co-processor (owns the OT PHY). Init resets it
-    // into its app (~900 ms warm-up) and Handshake says hello.
-    if (otLink_.Init(UART_NUM_1, BoardConfig::OT_UART_TX, BoardConfig::OT_UART_RX,
-                     BoardConfig::OT_STM32_BOOT0, BoardConfig::OT_STM32_NRST))
-    {
-        if (!otLink_.Handshake())
-            ESP_LOGW(TAG, "STM32 OT co-processor not responding (manager will retry)");
-    }
-    else
-    {
-        ESP_LOGE(TAG, "OT link UART init failed");
-    }
-
-    init.SetReady();
-    ESP_LOGI(TAG, "Initialized");
 }
 
 void Board::SetBacklightPercent(uint8_t percent)

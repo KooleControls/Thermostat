@@ -41,6 +41,11 @@ public:
 
     void Init();
 
+    /// Brings up the backlight PWM (at 0 %) and the panel, and nothing else, so
+    /// the boot logo can go up before the slow part of Init() — the OpenTherm
+    /// co-processor's warm-up alone is ~0.9 s. Init() calls it if nobody has.
+    void InitDisplay();
+
     TemperatureSensor &GetTemperatureSensor() { return ambientSensor_; }
     HumiditySensor &GetHumiditySensor() { return ambientSensor_; }
     OtLink &GetOtLink() { return otLink_; }
@@ -82,6 +87,7 @@ private:
     SocTemperature socTemp_;
 
     uint8_t backlightPercent_ = 0;
+    bool displayInited_ = false;
 
     static constexpr ledc_timer_t kBacklightTimer = LEDC_TIMER_0;
     static constexpr ledc_channel_t kBacklightChannel = LEDC_CHANNEL_0;
