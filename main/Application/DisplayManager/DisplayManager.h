@@ -54,8 +54,6 @@ public:
     void ShowBootLogo();
 
     /// Switch screens. Safe to call from any task — takes the LVGL lock itself.
-    /// ScreenId::Pin resolves to the settings menu when no PIN is stored, so the
-    /// gate policy stays here with the PinGate rather than in the home screen.
     void Go(ScreenId id) override;
 
     /// Re-read the palette from the theme setting and rebuild every screen.
@@ -87,9 +85,8 @@ private:
 
     /// `uiGo` — drive navigation from a bench client instead of a fingertip.
     ///   {"screen":"home"|"pin"|"settings"|"wifi"|"ble"|"info"|"bletest"}
-    /// Reports the screen actually shown, which is not always the one asked
-    /// for: Pin resolves to Settings when no PIN is stored. Omitting "screen"
-    /// just reads the current one back.
+    /// Reports the screen actually shown. Omitting "screen" just reads the
+    /// current one back.
     ///
     /// Exists because a screen change is the heaviest thing the panel does — a
     /// full-screen redraw — and measuring it had meant asking someone to tap
@@ -136,9 +133,8 @@ private:
     InitState initState_;
     lv_display_t* lvDisplay_ = nullptr;
 
-    PinGate pinGate_;
-
     // Declaration order matters: these take serviceProvider_ and *this.
+    PinGate pinGate_{serviceProvider_};
     HomeScreen homeScreen_{serviceProvider_, *this};
     PinScreen pinScreen_{pinGate_, *this};
     SettingsMenuScreen settingsScreen_{serviceProvider_, *this};

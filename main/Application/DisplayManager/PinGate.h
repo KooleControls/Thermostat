@@ -1,42 +1,39 @@
 #pragma once
 
-#include "SettingsManager/SettingsManager.h"
-#include "TypedSettings.h"
-#include <cstring>
+#include "ServiceProvider.h"
+#include <cstddef>
 
-// The display's access gate: owns the PIN and answers "is this code right?".
+// The display's access gate: knows which code opens the service menu and
+// answers "is this code right?".
 //
-// Deliberately *not* Authenticator (that is the web credential): this is a short
-// numeric code typed on a touch keypad, and its default is non-empty so a unit
-// is gated out of the box. Empty PIN means the gate is off — same convention as
-// web.password, where empty disables auth.
+// The code is six digits and is never typed in anywhere: with a gateway paired
+// it is that gateway's install code, which the installer already has; with none
+// it is 000000. Deliberately *not* Authenticator (that is the web credential).
 //
 // A plain class, not a manager: DisplayManager holds it and hands it to the PIN
-// screen, which keeps that screen free of any settings knowledge.
+// screen, which keeps that screen free of any knowledge of the gateway link.
 class PinGate
 {
 public:
-    static constexpr size_t MaxLen = 8;
+    static constexpr size_t Len = 6;
 
-    void Register(SettingsManager& settings) { settings.Register({ &pin_ }); }
+    explicit PinGate(ServiceProvider& serviceProvider) : serviceProvider_(serviceProvider) {}
 
-    /// False when no PIN is stored — the settings menu then opens directly.
-    bool Required() const
-    {
-        char stored[MaxLen + 1] = {};
-        pin_.Get(stored, sizeof(stored));
-        return stored[0] != '\0';
-    }
+    bool Check(const char* entered) const;
 
-    bool Check(const char* entered) const
-    {
-        if (entered == nullptr) return false;
-        char stored[MaxLen + 1] = {};
-        pin_.Get(stored, sizeof(stored));
-        return std::strcmp(entered, stored) == 0;
-    }
+    /// Whose code it is, for the installer standing at the panel: the paired
+    /// gateway's name in `name` and its gateway id in `id`, either of which may
+    /// come back empty, and its address in `name` when it gave neither (so
+    /// `nameCap` is at least 18). False when no gateway is paired, and the code
+    /// is 000000.
+    bool Owner(char* name, size_t nameCap, char* id, size_t idCap) const;
+
+    /// Whether the code is the paired gateway's install code. Not for a gateway
+    /// paired before install codes were kept: that still opens with 000000.
+    bool UsesInstallCode() const;
 
 private:
-    // NVS keys are limited to 15 characters.
-    inline static StringSetting pin_{ "ui.pin", "Display PIN", "0000" };
+    static constexpr const char* kUnpairedCode = "000000";
+
+    ServiceProvider& serviceProvider_;
 };

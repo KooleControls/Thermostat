@@ -1,5 +1,6 @@
 #include "PinScreen.h"
 #include "esp_log.h"
+#include <cstdio>
 #include <cstring>
 
 static const char* TAG = "PinScreen";
@@ -12,26 +13,41 @@ static const char* kKeypadMap[] = {
     LV_SYMBOL_BACKSPACE, "0", LV_SYMBOL_OK, ""
 };
 
+// Top to bottom under the header: whose code it is (up to three lines), the
+// masked entry, the verdict, and the keypad in what is left. The keypad gave
+// up some height to the owner lines; its keys are still over 50 px tall.
+static constexpr int32_t kOwnerY = UiTheme::HeaderH;
+static constexpr int32_t kEntryY = kOwnerY + 72;
+static constexpr int32_t kErrorY = kEntryY + 56;
+static constexpr int32_t kPadY   = kErrorY + 28;
+
 void PinScreen::Build(lv_obj_t* root)
 {
     lv_obj_t* cancel = AddHeader(root, "Enter code", LV_SYMBOL_CLOSE);
     lv_obj_add_event_cb(cancel, CancelCb, LV_EVENT_CLICKED, this);
 
+    ownerLabel_ = lv_label_create(root);
+    lv_obj_set_width(ownerLabel_, 480 - 2 * UiTheme::Pad);
+    lv_obj_set_style_text_font(ownerLabel_, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(ownerLabel_, UiTheme::TextDim(), 0);
+    lv_obj_set_style_text_align(ownerLabel_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(ownerLabel_, LV_ALIGN_TOP_MID, 0, kOwnerY);
+
     entryLabel_ = lv_label_create(root);
     lv_obj_set_style_text_font(entryLabel_, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(entryLabel_, UiTheme::Text(), 0);
     lv_obj_set_style_text_letter_space(entryLabel_, 8, 0);
-    lv_obj_align(entryLabel_, LV_ALIGN_TOP_MID, 0, UiTheme::HeaderH + 8);
+    lv_obj_align(entryLabel_, LV_ALIGN_TOP_MID, 0, kEntryY);
 
     errorLabel_ = lv_label_create(root);
     lv_obj_set_style_text_font(errorLabel_, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(errorLabel_, UiTheme::Danger(), 0);
     lv_label_set_text(errorLabel_, "");
-    lv_obj_align(errorLabel_, LV_ALIGN_TOP_MID, 0, UiTheme::HeaderH + 76);
+    lv_obj_align(errorLabel_, LV_ALIGN_TOP_MID, 0, kErrorY);
 
     lv_obj_t* pad = lv_buttonmatrix_create(root);
     lv_buttonmatrix_set_map(pad, kKeypadMap);
-    lv_obj_set_size(pad, 480 - 2 * UiTheme::Pad, 320);
+    lv_obj_set_size(pad, 480 - 2 * UiTheme::Pad, 480 - UiTheme::Pad - kPadY);
     lv_obj_align(pad, LV_ALIGN_BOTTOM_MID, 0, -UiTheme::Pad);
     lv_obj_set_style_bg_opa(pad, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(pad, 0, 0);
@@ -49,13 +65,14 @@ void PinScreen::OnShow()
     entry_[0] = '\0';
     length_ = 0;
     Refresh();
+    ShowOwner();
     lv_label_set_text(errorLabel_, "");
 }
 
 void PinScreen::Refresh()
 {
     // Masked readout — one bullet per entered digit, a hint when empty.
-    char masked[PinGate::MaxLen * 3 + 1] = {};   // U+2022 is 3 bytes in UTF-8
+    char masked[PinGate::Len * 3 + 1] = {};   // U+2022 is 3 bytes in UTF-8
     size_t w = 0;
     for (size_t i = 0; i < length_; i++)
     {
@@ -63,12 +80,28 @@ void PinScreen::Refresh()
         w += 3;
     }
     masked[w] = '\0';
-    lv_label_set_text(entryLabel_, length_ == 0 ? "- - - -" : masked);
+    lv_label_set_text(entryLabel_, length_ == 0 ? "- - - - - -" : masked);
+}
+
+// Never the code itself: the gateway it belongs to, which tells an installer
+// which code to type.
+void PinScreen::ShowOwner()
+{
+    char name[40];
+    char id[16];
+    char text[80];
+    if (gate_.Owner(name, sizeof(name), id, sizeof(id)))
+        snprintf(text, sizeof(text), "%s\n%s%s%s",
+                 gate_.UsesInstallCode() ? "Install code of" : "Paired with",
+                 name, (name[0] != '\0' && id[0] != '\0') ? "\n" : "", id);
+    else
+        snprintf(text, sizeof(text), "No gateway paired");
+    lv_label_set_text(ownerLabel_, text);
 }
 
 void PinScreen::Append(char digit)
 {
-    if (length_ >= PinGate::MaxLen) return;
+    if (length_ >= PinGate::Len) return;
     entry_[length_++] = digit;
     entry_[length_] = '\0';
     lv_label_set_text(errorLabel_, "");

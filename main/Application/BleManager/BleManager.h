@@ -122,6 +122,12 @@ public:
     /// False when nothing is paired.
     bool GetPaired(Peer& out) const;
 
+    /// The install code the paired gateway was proven to have, as six digits.
+    /// Kept once a pairing that used it succeeds, and dropped by Forget() or by
+    /// pairing a different gateway. False when nothing is paired, or when the
+    /// pairing predates codes being kept.
+    bool GetInstallCode(char* out, size_t cap) const;
+
     /// How the last pairing attempt ended, when it was something the installer
     /// can act on rather than a dropout to retry. Only one so far: the install
     /// code was wrong.
@@ -203,6 +209,7 @@ private:
     inline static UInt32Setting peerTypeSetting_{ "ble.peerType", "BLE Gateway Address Type", 0 };
     inline static StringSetting peerNameSetting_{ "ble.peerName", "BLE Gateway Name", "" };
     inline static UInt32Setting peerIdSetting_{ "ble.peerId", "BLE Gateway Id", 0 };
+    inline static StringSetting peerCodeSetting_{ "ble.peerCode", "BLE Gateway Install Code", "" };
 
     ServiceProvider& serviceProvider_;
     InitState initState_;
@@ -222,10 +229,12 @@ private:
     // ask twice a second without reading NVS.
     char       targetName_[MaxNameLen + 1] = {};
     uint32_t   targetDgid_ = 0;
+    char       installCode_[7] = {};     // six digits, or empty when none is proven
     PairFailure pairFailure_ = PairFailure::None;
     Peer        failedPeer_{};               // who pairFailure_ was with
     uint32_t   pendingPasskey_ = 0;      // only meaningful while havePasskey_
     bool       havePasskey_ = false;     // set between Connect() and pairing
+    bool       passkeyUsed_ = false;     // the gateway asked for it on this connection
     uint16_t   connHandle_ = BLE_HS_CONN_HANDLE_NONE;
     uint16_t   mtu_ = 23;                // until the exchange completes
     uint16_t   svcStart_ = 0;

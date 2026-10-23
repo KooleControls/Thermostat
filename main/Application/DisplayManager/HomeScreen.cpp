@@ -233,7 +233,7 @@ void HomeScreen::OnIntent(HomeIntent intent)
         break;
 
     case HomeIntent::OpenSettings:
-        navigator_.Go(ScreenId::Pin);   // shell skips the pad when no PIN is set
+        navigator_.Go(ScreenId::Pin);
         return;
     }
 
