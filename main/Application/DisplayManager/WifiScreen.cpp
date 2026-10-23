@@ -85,13 +85,10 @@ void WifiScreen::Build(lv_obj_t* root)
     lv_obj_set_style_text_align(passwordPrompt_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(passwordPrompt_, LV_ALIGN_TOP_MID, 0, 4);
 
-    passwordInput_ = lv_textarea_create(passwordView_);
-    lv_textarea_set_one_line(passwordInput_, true);
+    passwordInput_ = AddTextField(passwordView_, "Password");
     lv_textarea_set_password_mode(passwordInput_, true);
-    lv_textarea_set_placeholder_text(passwordInput_, "Password");
     lv_obj_set_size(passwordInput_, 480 - 2 * UiTheme::Pad, 52);
     lv_obj_align(passwordInput_, LV_ALIGN_TOP_MID, 0, 34);
-    lv_obj_set_style_text_font(passwordInput_, &lv_font_montserrat_20, 0);
 
     lv_obj_t* connect = lv_button_create(passwordView_);
     lv_obj_set_size(connect, 200, 52);
@@ -107,10 +104,9 @@ void WifiScreen::Build(lv_obj_t* root)
     lv_label_set_text(connectLabel, "Connect");
     lv_obj_center(connectLabel);
 
-    lv_obj_t* keyboard = lv_keyboard_create(passwordView_);
+    lv_obj_t* keyboard = AddKeyboard(passwordView_, passwordInput_);
     lv_obj_set_size(keyboard, LV_PCT(100), 240);
     lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_keyboard_set_textarea(keyboard, passwordInput_);
     // The keyboard's own tick is a second way to commit; its ✗ goes back.
     lv_obj_add_event_cb(keyboard, ConnectCb, LV_EVENT_READY, this);
     lv_obj_add_event_cb(keyboard, PasswordBackCb, LV_EVENT_CANCEL, this);

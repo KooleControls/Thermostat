@@ -93,14 +93,11 @@ void BleScreen::Build(lv_obj_t* root)
     lv_obj_set_style_text_align(codePrompt_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(codePrompt_, LV_ALIGN_TOP_MID, 0, 4);
 
-    codeInput_ = lv_textarea_create(codeView_);
-    lv_textarea_set_one_line(codeInput_, true);
+    codeInput_ = AddTextField(codeView_, "Install code");
     lv_textarea_set_max_length(codeInput_, 6);          // the code is 6 digits
     lv_textarea_set_accepted_chars(codeInput_, "0123456789");
-    lv_textarea_set_placeholder_text(codeInput_, "Install code");
     lv_obj_set_size(codeInput_, 480 - 2 * UiTheme::Pad, 52);
     lv_obj_align(codeInput_, LV_ALIGN_TOP_MID, 0, 34);
-    lv_obj_set_style_text_font(codeInput_, &lv_font_montserrat_20, 0);
 
     lv_obj_t* connect = lv_button_create(codeView_);
     lv_obj_set_size(connect, 200, 52);
@@ -116,11 +113,10 @@ void BleScreen::Build(lv_obj_t* root)
     lv_label_set_text(connectLabel, "Pair");
     lv_obj_center(connectLabel);
 
-    lv_obj_t* keypad = lv_keyboard_create(codeView_);
+    lv_obj_t* keypad = AddKeyboard(codeView_, codeInput_);
     lv_keyboard_set_mode(keypad, LV_KEYBOARD_MODE_NUMBER);
     lv_obj_set_size(keypad, LV_PCT(100), 240);
     lv_obj_align(keypad, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_keyboard_set_textarea(keypad, codeInput_);
     lv_obj_add_event_cb(keypad, ConnectCb, LV_EVENT_READY, this);
     lv_obj_add_event_cb(keypad, CodeBackCb, LV_EVENT_CANCEL, this);
 
