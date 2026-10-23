@@ -86,6 +86,12 @@ lv_obj_t* Screen::AddCard(lv_obj_t* parent, int32_t height)
     lv_obj_set_style_border_color(card, UiTheme::Line(), 0);
     lv_obj_set_style_shadow_width(card, 0, 0);
     lv_obj_set_style_pad_hor(card, UiTheme::Pad, 0);
+    // Disabled sinks halfway into the ground, fill, hairline and label alike
+    // (a recolour reaches the children). LVGL's theme washes it with a fixed
+    // light grey instead, which fades a card on the light palette but lifts it
+    // on the dark one, so a dead button outshone the live one beside it.
+    lv_obj_set_style_recolor(card, UiTheme::Bg(), LV_STATE_DISABLED);
+    lv_obj_set_style_recolor_opa(card, LV_OPA_50, LV_STATE_DISABLED);
     return card;
 }
 
