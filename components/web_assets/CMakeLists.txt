@@ -45,15 +45,27 @@ list(APPEND FRONTEND_SOURCES
     "${FRONTEND_DIR}/package.json"
     "${FRONTEND_DIR}/vite.config.ts")
 
-find_program(PNPM pnpm)
+# No pnpm on the PATH is common on Windows, where Node ships corepack but
+# leaves its pnpm shim switched off. Corepack runs pnpm all the same; its
+# download prompt is switched off for the same reason as pnpm's purge prompt.
+# The Windows forms are named first: Node's folder also holds extensionless
+# shell scripts for Git Bash under the same names, which Windows cannot run.
+find_program(PNPM NAMES pnpm.exe pnpm.cmd pnpm)
+find_program(COREPACK NAMES corepack.exe corepack.cmd corepack)
 if(PNPM)
+    set(PNPM_CMD "${PNPM}")
+elseif(COREPACK)
+    set(PNPM_CMD "${CMAKE_COMMAND}" -E env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 "${COREPACK}" pnpm)
+endif()
+
+if(PNPM_CMD)
     # --no-frozen-lockfile lets a package.json edit update the lockfile rather
     # than failing a firmware build; --config.confirm-modules-purge=false skips
     # the prompt pnpm shows when node_modules is out of sync, which would
     # otherwise hang a build with nobody watching.
     add_custom_command(OUTPUT "${FRONTEND_STAMP}"
-        COMMAND "${PNPM}" install --no-frozen-lockfile --config.confirm-modules-purge=false
-        COMMAND "${PNPM}" build
+        COMMAND ${PNPM_CMD} install --no-frozen-lockfile --config.confirm-modules-purge=false
+        COMMAND ${PNPM_CMD} build
         COMMAND "${CMAKE_COMMAND}" -E touch "${FRONTEND_STAMP}"
         WORKING_DIRECTORY "${FRONTEND_DIR}"
         DEPENDS ${FRONTEND_SOURCES}
@@ -72,8 +84,14 @@ endif()
 # The packer's output is what EMBED_FILES names, so this rule is what teaches
 # CMake how to produce it — the embed step depends on the file, this rule makes
 # it, and the stamp in between forces the frontend to build first.
+#
+# It also depends on www/ itself. Without node the stamp never changes, so a
+# build folder that first packed an empty www/ kept embedding the placeholder
+# page after a `pnpm build` by hand had filled it, which is exactly the advice
+# the placeholder gives.
+file(GLOB_RECURSE WWW_FILES CONFIGURE_DEPENDS "${WWW_DIR}/*")
 add_custom_command(OUTPUT "${WEB_ASSETS_BIN}"
     COMMAND "${python}" "${PACK_SCRIPT}" --src "${WWW_DIR}" --out "${WEB_ASSETS_BIN}"
-    DEPENDS "${FRONTEND_STAMP}" "${PACK_SCRIPT}"
+    DEPENDS "${FRONTEND_STAMP}" "${PACK_SCRIPT}" ${WWW_FILES}
     COMMENT "Packing web assets into web_assets.bin"
     VERBATIM)
