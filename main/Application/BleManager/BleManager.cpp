@@ -26,6 +26,16 @@ extern "C" void ble_store_config_init(void);
 // starts, never cleared.
 static BleManager* s_instance = nullptr;
 
+// Six digits, as a proven pairing stores it. The setting is editable over the
+// web settings UI too, so what comes back from NVS is checked, not trusted.
+static bool IsInstallCode(const char* text)
+{
+    if (strlen(text) != 6) return false;
+    for (const char* p = text; *p != '\0'; ++p)
+        if (*p < '0' || *p > '9') return false;
+    return true;
+}
+
 BleManager::BleManager(ServiceProvider& serviceProvider)
     : serviceProvider_(serviceProvider)
 {
@@ -44,7 +54,7 @@ void BleManager::Init()
     serviceProvider_.getCommandManager().Register(this, commands_);
     serviceProvider_.getSettingsManager().Register(
         { &enableSetting_, &peerSetting_, &peerTypeSetting_,
-          &peerNameSetting_, &peerIdSetting_ });
+          &peerNameSetting_, &peerIdSetting_, &peerCodeSetting_ });
 
     if (!enableSetting_.Get())
     {
@@ -66,8 +76,11 @@ void BleManager::Init()
             haveTarget_ = true;
             peerNameSetting_.Get(targetName_, sizeof(targetName_));
             targetDgid_ = peerIdSetting_.Get();
-            ESP_LOGI(TAG, "Paired gateway on record: %s '%s' id %lu", stored, targetName_,
-                     static_cast<unsigned long>(targetDgid_));
+            peerCodeSetting_.Get(installCode_, sizeof(installCode_));
+            if (!IsInstallCode(installCode_)) installCode_[0] = '\0';
+            ESP_LOGI(TAG, "Paired gateway on record: %s '%s' id %lu%s", stored, targetName_,
+                     static_cast<unsigned long>(targetDgid_),
+                     installCode_[0] != '\0' ? "" : ", install code unknown");
         }
         else
         {
@@ -453,6 +466,7 @@ bool BleManager::Connect(const Peer& peer, const char* code)
     const uint32_t dgid = peer.hasDgid ? peer.dgid : 0;
     char text[18];
     FormatAddr(addr, text, sizeof(text));
+    bool otherGateway;
 
     {
         LOCK(mutex_);
@@ -461,6 +475,11 @@ bool BleManager::Connect(const Peer& peer, const char* code)
             ESP_LOGW(TAG, "Connect requested but stack is not ready");
             return false;
         }
+        // Another gateway's install code says nothing about this one. It goes
+        // now, and this one's is kept once the pairing proves it.
+        otherGateway = !haveTarget_ || ble_addr_cmp(&target_, &addr) != 0;
+        if (otherGateway) installCode_[0] = '\0';
+        passkeyUsed_ = false;
         target_ = addr;
         haveTarget_ = true;
         snprintf(targetName_, sizeof(targetName_), "%s", peer.name);
@@ -482,6 +501,7 @@ bool BleManager::Connect(const Peer& peer, const char* code)
     peerTypeSetting_.Set(addr.type);
     peerNameSetting_.Set(peer.name);
     peerIdSetting_.Set(dgid);
+    if (otherGateway) peerCodeSetting_.Set("");
 
     // Scanning and connecting cannot run at the same time.
     if (Scanning())
@@ -599,8 +619,10 @@ void BleManager::Forget()
         haveTarget_ = false;
         targetName_[0] = '\0';
         targetDgid_ = 0;
+        installCode_[0] = '\0';
         havePasskey_ = false;
         pendingPasskey_ = 0;
+        passkeyUsed_ = false;
         pairFailure_ = PairFailure::None;
     }
 
@@ -608,6 +630,7 @@ void BleManager::Forget()
     peerTypeSetting_.Set(0);
     peerNameSetting_.Set("");
     peerIdSetting_.Set(0);
+    peerCodeSetting_.Set("");
 
     if (reconnectTimer_) esp_timer_stop(reconnectTimer_);
 
@@ -662,6 +685,14 @@ bool BleManager::GetPaired(Peer& out) const
     out.dgid = targetDgid_;
     out.hasDgid = targetDgid_ != 0;
     out.used = true;
+    return true;
+}
+
+bool BleManager::GetInstallCode(char* out, size_t cap) const
+{
+    LOCK(mutex_);
+    if (!haveTarget_ || installCode_[0] == '\0') return false;
+    snprintf(out, cap, "%s", installCode_);
     return true;
 }
 
@@ -774,6 +805,7 @@ int BleManager::OnGapEvent(struct ble_gap_event* event)
                 link_ = LinkState::Down;
                 mtu_ = 23;
                 inboundValHandle_ = outboundValHandle_ = inboundCccd_ = 0;
+                passkeyUsed_ = false;
             }
             ScheduleReconnect();
             return 0;
@@ -812,7 +844,23 @@ int BleManager::OnGapEvent(struct ble_gap_event* event)
                 return 0;
             }
 
-            { LOCK(mutex_); havePasskey_ = false; pendingPasskey_ = 0; }   // consumed
+            // A pairing that used the passkey has proven the install code, and
+            // the display's PIN is that code from now on (PinGate). A bonded
+            // reconnect proves nothing new and keeps the code on record.
+            char proven[7] = {};
+            {
+                LOCK(mutex_);
+                if (passkeyUsed_)
+                {
+                    snprintf(proven, sizeof(proven), "%06lu",
+                             static_cast<unsigned long>(pendingPasskey_));
+                    snprintf(installCode_, sizeof(installCode_), "%s", proven);
+                }
+                havePasskey_ = false;   // consumed
+                pendingPasskey_ = 0;
+                passkeyUsed_ = false;
+            }
+            if (proven[0] != '\0') peerCodeSetting_.Set(proven);
             ESP_LOGI(TAG, "Link encrypted and authenticated (bonded=%d)",
                      desc.sec_state.bonded);
             StartDiscovery();
@@ -846,6 +894,7 @@ int BleManager::OnGapEvent(struct ble_gap_event* event)
             io.passkey = key;
             int rc = ble_sm_inject_io(event->passkey.conn_handle, &io);
             ESP_LOGI(TAG, "Passkey submitted (rc %d)", rc);
+            if (rc == 0) { LOCK(mutex_); passkeyUsed_ = true; }
             return 0;
         }
 

@@ -155,9 +155,6 @@ void DisplayManager::Init()
         return;
     }
 
-    // Registered even when headless: the PIN is also editable over the web
-    // settings UI, and that must not depend on a panel being present.
-    pinGate_.Register(serviceProvider_.getSettingsManager());
     serviceProvider_.getSettingsManager().Register(
         { &dimPercent_, &fullPercent_, &dimAfterS_,
           &SettingsMenuScreen::lightTheme_ });
@@ -348,9 +345,6 @@ Screen* DisplayManager::Resolve(ScreenId id)
 void DisplayManager::Go(ScreenId id)
 {
     if (lvDisplay_ == nullptr) return;   // headless
-
-    if (id == ScreenId::Pin && !pinGate_.Required())
-        id = ScreenId::Settings;
 
     if (!lvgl_port_lock(0))
     {

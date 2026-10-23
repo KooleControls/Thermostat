@@ -8,7 +8,7 @@
 enum class ScreenId
 {
     Home,
-    Pin,        // resolved to Settings by the shell when no PIN is set
+    Pin,        // the gate in front of Settings
     Settings,
     Wifi,
     Ble,
